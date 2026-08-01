@@ -28,127 +28,147 @@ export default function GameHud({
   onToolChange,
   onCameraModeChange,
 }: GameHudProps) {
+  const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
+  const objectiveProgress = Math.min(100, (motors / 20) * 100);
+
   return (
     <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
-      <header className="topbar glass">
-        <div className="brand">
-          <div className="brand-mark">FX</div>
-          <div>
-            <div className="brand-name">FACTORY X</div>
-            <div className="brand-sub">SECTOR A-17</div>
+      <header className="status-rail">
+        <div className="sector-tag instrument-panel">
+          <span className="sector-mark">FX</span>
+          <span className="sector-code">A-17</span>
+        </div>
+
+        <div className="system-readouts instrument-panel">
+          <div className="system-readout">
+            <span>CR</span>
+            <strong>{credits.toLocaleString("ko-KR")}</strong>
+          </div>
+          <div className="readout-divider" />
+          <div className="system-readout power-readout">
+            <span>GRID</span>
+            <strong>68 / 120</strong>
+            <small>MW</small>
           </div>
         </div>
-        <div className="divider" />
-        <div className="metric-row">
-          <div className="metric">
-            <div className="metric-label">Credits</div>
-            <div className="metric-value amber">₡ {credits.toLocaleString("ko-KR")}</div>
+
+        <div className="objective-readout instrument-panel">
+          <span className="objective-index">목표 01</span>
+          <div className="objective-copy">
+            <strong>조립품 생산</strong>
+            <span>채굴 → 제련 → 조립</span>
           </div>
-          <div className="metric">
-            <div className="metric-label">Power grid</div>
-            <div className="metric-value cyan">68 / 120 MW</div>
-          </div>
-        </div>
-        <div className="objective">
-          <div className="objective-head">
-            <strong>첫 자동화 라인</strong>
-            <span>{motors} / 20 조립품</span>
-          </div>
-          <div className="progress" aria-label={`조립품 생산 진행률 ${motors}/20`}>
-            <div style={{ width: `${Math.min(100, (motors / 20) * 100)}%` }} />
+          <span className="objective-count"><b>{motors}</b> / 20</span>
+          <div className="objective-track" aria-label={`조립품 생산 진행률 ${motors}/20`}>
+            <div style={{ width: `${objectiveProgress}%` }} />
           </div>
         </div>
       </header>
 
-      <section className="left-panel glass">
-        <div className="eyebrow">ACTIVE MISSION</div>
-        <h1 className="mission-title">자동화의 첫 박자</h1>
-        <p className="mission-copy">출력 포트 방향으로 벨트를 연결해 광석을 주괴와 조립품으로 변환하세요.</p>
-        <div className="mission-step">
-          <span className="step-check">✓</span>
-          <span>채굴 → 제련 → 조립 라인 가동</span>
+      <aside className={`inspector instrument-panel ${selected ? "visible" : ""}`} aria-hidden={!selected}>
+        <div className="inspector-rail">
+          <span>EQP</span>
+          <i />
         </div>
-        <div className="mission-step">
-          <span className="step-check">2</span>
-          <span>주황 출력 포트에서 청록 입력 포트 방향으로 벨트를 연결하세요.</span>
-        </div>
-      </section>
-
-      <aside className={`inspector glass ${selected ? "visible" : ""}`} aria-hidden={!selected}>
-        <div className="eyebrow">EQUIPMENT</div>
-        <div className="inspector-head">
-          <div className="inspector-title">{selected ? TYPE_NAME[selected.type] : "설비"}</div>
-          <span className="status-pill">{selected?.status ?? "대기"}</span>
-        </div>
-        <div className="inspector-grid">
-          <div className="inspector-cell">
-            <span>처리량</span>
-            <strong>{selected ? TYPE_RATE[selected.type] : "—"}</strong>
+        <div className="inspector-body">
+          <div className="inspector-head">
+            <div>
+              <span className="panel-label">선택 설비</span>
+              <div className="inspector-title">{selected ? TYPE_NAME[selected.type] : "설비"}</div>
+            </div>
+            <div className="equipment-status">
+              <i />
+              <span>{selected?.status ?? "대기"}</span>
+            </div>
           </div>
-          <div className="inspector-cell">
+
+          <div className="process-meter">
+            <div className="process-meter-head">
               <span>공정 진행</span>
               <strong>{selected ? `${Math.round(selected.progress * 100)}%` : "—"}</strong>
+            </div>
+            <div className="process-track">
+              <div style={{ width: `${selected ? selected.progress * 100 : 0}%` }} />
+            </div>
           </div>
-          <div className="inspector-cell">
-              <span>입력·보관</span>
-              <strong>{selected?.inputCount ?? 0}</strong>
-          </div>
-          <div className="inspector-cell">
-              <span>출력 대기</span>
-              <strong>{selected?.outputCount ?? 0}</strong>
-          </div>
+
+          <dl className="equipment-data">
+            <div>
+              <dt>처리량</dt>
+              <dd>{selected ? TYPE_RATE[selected.type] : "—"}</dd>
+            </div>
+            <div>
+              <dt>입력 · 보관</dt>
+              <dd>{selected?.inputCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>출력 대기</dt>
+              <dd>{selected?.outputCount ?? 0}</dd>
+            </div>
+          </dl>
         </div>
       </aside>
 
       <div className={`toast ${toastVisible ? "visible" : ""}`} role="status">
+        <span>SYS</span>
         {toast}
       </div>
 
       {cameraMode === "overview" && activeTool === "belt" ? (
-        <section className={`belt-build-panel glass ${beltBuildInfo.dragging ? "is-routing" : ""}`}>
+        <section className={`belt-build-panel instrument-panel ${beltBuildInfo.dragging ? "is-routing" : ""}`}>
           <div className="belt-build-icon" aria-hidden="true">
             <span /><span /><span />
           </div>
           <div className="belt-build-copy">
             <div className="belt-build-heading">
+              <span className="panel-label">배치 도구</span>
               <strong>컨베이어 경로</strong>
-              {beltBuildInfo.dragging ? (
-                <span className={beltBuildInfo.valid ? "route-valid" : "route-invalid"}>
-                  {beltBuildInfo.valid ? "설치 가능" : "경로 막힘"}
-                </span>
-              ) : null}
             </div>
-            <p>
-              {beltBuildInfo.dragging
-                ? `${beltBuildInfo.length}칸 · ${beltBuildInfo.cost.toLocaleString("ko-KR")} 크레딧`
-                : "시작점을 누른 채 끝 지점까지 드래그"}
-            </p>
+            <div className="route-readout">
+              <span className={beltBuildInfo.dragging && !beltBuildInfo.valid ? "route-invalid" : "route-valid"}>
+                <i />
+                {beltBuildInfo.dragging
+                  ? beltBuildInfo.valid ? "설치 가능" : "경로 막힘"
+                  : "시작점 선택"}
+              </span>
+              <strong>
+                {beltBuildInfo.dragging
+                  ? `${beltBuildInfo.length}칸  /  ₡ ${beltBuildInfo.cost.toLocaleString("ko-KR")}`
+                  : "드래그하여 경로 지정"}
+              </strong>
+            </div>
             <div className="belt-build-controls">
               <span><kbd>SHIFT</kbd> 꺾임 우선</span>
-              <span><kbd>R</kbd> 한 칸 방향</span>
-              {beltBuildInfo.connectedStart ? <em>출력 포트 연결됨</em> : null}
+              <span><kbd>R</kbd> 방향 회전</span>
+              {beltBuildInfo.connectedStart ? <em>출력 포트 연결</em> : null}
             </div>
           </div>
         </section>
       ) : null}
 
-      <div className="hintbar glass">
+      <div className="control-strip">
         {cameraMode === "firstPerson" ? (
-          <><kbd>클릭</kbd> 시점 고정 <kbd>WASD</kbd> 이동 <kbd>SHIFT</kbd> 달리기 <kbd>V</kbd> 건설 시점</>
+          <><span><kbd>클릭</kbd> 시점 고정</span><span><kbd>WASD</kbd> 이동</span><span><kbd>SHIFT</kbd> 달리기</span></>
         ) : (
-          <><kbd>WASD</kbd> 이동 <kbd>휠</kbd> 줌 <kbd>Q E</kbd> 회전 <kbd>V</kbd> 1인칭</>
+          <><span><kbd>WASD</kbd> 이동</span><span><kbd>휠</kbd> 줌</span><span><kbd>Q E</kbd> 회전</span></>
         )}
       </div>
 
-      <div className="toolbar-wrap glass">
+      <div className="build-dock instrument-panel">
+        <div className="active-tool-readout">
+          <span>BUILD</span>
+          <strong>{activeToolInfo.name}</strong>
+          <em>{activeToolInfo.cost ? `₡ ${activeToolInfo.cost}` : "조작 도구"}</em>
+        </div>
         <nav className="toolbar" aria-label="건설 도구">
           {TOOL_INFO.map((tool) => (
             <button
               key={tool.id}
-              className={`tool-button ${activeTool === tool.id ? "active" : ""}`}
+              className={`tool-button tool-${tool.id} ${activeTool === tool.id ? "active" : ""}`}
               onClick={() => onToolChange(tool.id)}
               aria-pressed={activeTool === tool.id}
               aria-label={`${tool.name}${tool.cost ? `, 비용 ${tool.cost}` : ""}`}
+              title={tool.name}
             >
               <span className="tool-key">{tool.key}</span>
               {tool.id === "belt" ? (
@@ -157,17 +177,17 @@ export default function GameHud({
                 <span className="tool-glyph">{tool.glyph}</span>
               )}
               <span className="tool-name">{tool.name}</span>
-              {tool.cost ? <span className="tool-cost">₡ {tool.cost}</span> : null}
+              {tool.cost ? <span className="tool-cost">₡{tool.cost}</span> : null}
             </button>
           ))}
         </nav>
       </div>
 
-      {cameraMode === "firstPerson" ? <div className="crosshair" aria-hidden="true" /> : null}
-      {cameraMode === "firstPerson" && !pointerLocked ? <div className="pointer-lock-tip glass">화면을 클릭해 둘러보기</div> : null}
-      <button className="camera-mode-button glass" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
+      {cameraMode === "firstPerson" ? <div className="crosshair" aria-hidden="true"><i /></div> : null}
+      {cameraMode === "firstPerson" && !pointerLocked ? <div className="pointer-lock-tip">클릭하여 시점 제어</div> : null}
+      <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>
-        {cameraMode === "firstPerson" ? "건설 시점" : "1인칭 탐험"}
+        <strong>{cameraMode === "firstPerson" ? "건설 시점" : "현장 시점"}</strong>
         <kbd>V</kbd>
       </button>
     </div>
