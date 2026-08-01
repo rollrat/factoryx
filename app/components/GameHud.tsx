@@ -1,27 +1,33 @@
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
-import type { SelectedInfo, Tool } from "../game/types";
+import type { CameraMode, SelectedInfo, Tool } from "../game/types";
 
 type GameHudProps = {
   activeTool: Tool;
+  cameraMode: CameraMode;
+  pointerLocked: boolean;
   credits: number;
   motors: number;
   selected: SelectedInfo;
   toast: string;
   toastVisible: boolean;
   onToolChange: (tool: Tool) => void;
+  onCameraModeChange: () => void;
 };
 
 export default function GameHud({
   activeTool,
+  cameraMode,
+  pointerLocked,
   credits,
   motors,
   selected,
   toast,
   toastVisible,
   onToolChange,
+  onCameraModeChange,
 }: GameHudProps) {
   return (
-    <div className="hud">
+    <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
       <header className="topbar glass">
         <div className="brand">
           <div className="brand-mark">FX</div>
@@ -97,7 +103,11 @@ export default function GameHud({
       </div>
 
       <div className="hintbar glass">
-        <kbd>WASD</kbd> 이동 <kbd>휠</kbd> 줌 <kbd>Q E</kbd> 회전 <kbd>CTRL Z</kbd> 실행 취소
+        {cameraMode === "firstPerson" ? (
+          <><kbd>클릭</kbd> 시점 고정 <kbd>WASD</kbd> 이동 <kbd>SHIFT</kbd> 달리기 <kbd>V</kbd> 건설 시점</>
+        ) : (
+          <><kbd>WASD</kbd> 이동 <kbd>휠</kbd> 줌 <kbd>Q E</kbd> 회전 <kbd>V</kbd> 1인칭</>
+        )}
       </div>
 
       <div className="toolbar-wrap glass">
@@ -119,7 +129,13 @@ export default function GameHud({
         </nav>
       </div>
 
-      <div className="build-mode glass">{activeTool === "inspect" ? "INSPECT MODE" : "BUILD MODE"}</div>
+      {cameraMode === "firstPerson" ? <div className="crosshair" aria-hidden="true" /> : null}
+      {cameraMode === "firstPerson" && !pointerLocked ? <div className="pointer-lock-tip glass">화면을 클릭해 둘러보기</div> : null}
+      <button className="camera-mode-button glass" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
+        <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>
+        {cameraMode === "firstPerson" ? "건설 시점" : "1인칭 탐험"}
+        <kbd>V</kbd>
+      </button>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 import { FactorySimulation } from "./simulation";
 import type {
   BuildType,
+  CameraMode,
   Cell,
   GameCallbacks,
   HistoryEntry,
@@ -23,6 +24,7 @@ export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
+  private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
   private readonly materials = createFactoryMaterials();
   private readonly simulation = new FactorySimulation();
   private readonly groups = new Map<number, THREE.Group>();
@@ -70,8 +72,13 @@ export class FactoryRuntime {
   private desiredCameraAngle = this.cameraAngle;
   private cameraAngularVelocity = 0;
   private cameraZoom = 1;
+  private cameraMode: CameraMode = "overview";
   private readonly cameraTarget = new THREE.Vector3(0, 0, 0);
   private readonly desiredTarget = new THREE.Vector3(0, 0, 0);
+  private readonly playerPosition = new THREE.Vector3(0, 1.62, 5.5);
+  private readonly playerVelocity = new THREE.Vector3();
+  private firstPersonYaw = 0;
+  private firstPersonPitch = -0.08;
   private animationId = 0;
   private lastTime = performance.now();
   private elapsed = 0;
@@ -106,6 +113,8 @@ export class FactoryRuntime {
     this.updateCamera();
     this.callbacks.onCredits(this.credits);
     this.callbacks.onMotors(0);
+    this.callbacks.onCameraMode(this.cameraMode);
+    this.callbacks.onPointerLock(false);
     this.animate(performance.now());
   }
 
@@ -121,6 +130,25 @@ export class FactoryRuntime {
     this.updateGhost();
   }
 
+  toggleCameraMode() {
+    if (this.cameraMode === "overview") {
+      this.cameraMode = "firstPerson";
+      this.setTool("inspect");
+      this.selectStructure(null);
+      this.hoverTile.visible = false;
+      this.clearGhost();
+      this.renderer.domElement.style.cursor = "crosshair";
+      this.callbacks.onToast("1인칭 탐험 모드 · 화면을 클릭해 둘러보세요");
+    } else {
+      this.cameraMode = "overview";
+      if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+      this.hoverTile.visible = true;
+      this.renderer.domElement.style.cursor = "default";
+      this.callbacks.onToast("건설 시점으로 돌아왔습니다");
+    }
+    this.callbacks.onCameraMode(this.cameraMode);
+  }
+
   dispose() {
     cancelAnimationFrame(this.animationId);
     this.renderer.domElement.removeEventListener("pointermove", this.onPointerMove);
@@ -131,6 +159,9 @@ export class FactoryRuntime {
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("resize", this.resize);
+    document.removeEventListener("mousemove", this.onFirstPersonLook);
+    document.removeEventListener("pointerlockchange", this.onPointerLockChange);
+    if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.mount) this.mount.removeChild(this.renderer.domElement);
   }
@@ -251,6 +282,8 @@ export class FactoryRuntime {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("resize", this.resize);
+    document.addEventListener("mousemove", this.onFirstPersonLook);
+    document.addEventListener("pointerlockchange", this.onPointerLockChange);
   }
 
   private resize = () => {
@@ -263,6 +296,8 @@ export class FactoryRuntime {
     this.camera.top = viewHeight / 2;
     this.camera.bottom = -viewHeight / 2;
     this.camera.updateProjectionMatrix();
+    this.firstPersonCamera.aspect = aspect;
+    this.firstPersonCamera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
   };
 
@@ -276,6 +311,56 @@ export class FactoryRuntime {
     this.camera.lookAt(this.cameraTarget.x, 0, this.cameraTarget.z);
     this.camera.zoom = this.cameraZoom;
     this.camera.updateProjectionMatrix();
+  }
+
+  private get activeCamera(): THREE.Camera {
+    return this.cameraMode === "firstPerson" ? this.firstPersonCamera : this.camera;
+  }
+
+  private canPlayerStand(position: THREE.Vector3) {
+    const radius = 0.24;
+    const samples = [
+      [position.x - radius, position.z - radius],
+      [position.x + radius, position.z - radius],
+      [position.x - radius, position.z + radius],
+      [position.x + radius, position.z + radius],
+    ];
+    return samples.every(([x, z]) => {
+      if (Math.abs(x) > 12.45 || Math.abs(z) > 12.45) return false;
+      const structure = this.simulation.getStructureAt(Math.round(x), Math.round(z));
+      return !structure || structure.type === "belt";
+    });
+  }
+
+  private updateFirstPerson(delta: number) {
+    const forward = new THREE.Vector3(-Math.sin(this.firstPersonYaw), 0, -Math.cos(this.firstPersonYaw));
+    const right = new THREE.Vector3(Math.cos(this.firstPersonYaw), 0, -Math.sin(this.firstPersonYaw));
+    const movement = new THREE.Vector3();
+    if (this.pressed.has("w")) movement.add(forward);
+    if (this.pressed.has("s")) movement.sub(forward);
+    if (this.pressed.has("d")) movement.add(right);
+    if (this.pressed.has("a")) movement.sub(right);
+    if (movement.lengthSq() > 0) movement.normalize();
+    const speed = this.pressed.has("shift") ? 5.2 : 3.1;
+    movement.multiplyScalar(speed);
+    const damping = 1 - Math.exp(-delta * 12);
+    this.playerVelocity.x += (movement.x - this.playerVelocity.x) * damping;
+    this.playerVelocity.z += (movement.z - this.playerVelocity.z) * damping;
+
+    const nextX = this.playerPosition.clone();
+    nextX.x += this.playerVelocity.x * delta;
+    if (this.canPlayerStand(nextX)) this.playerPosition.x = nextX.x;
+    else this.playerVelocity.x = 0;
+    const nextZ = this.playerPosition.clone();
+    nextZ.z += this.playerVelocity.z * delta;
+    if (this.canPlayerStand(nextZ)) this.playerPosition.z = nextZ.z;
+    else this.playerVelocity.z = 0;
+
+    const moving = movement.lengthSq() > 0.01;
+    const headBob = moving ? Math.sin(this.elapsed * (this.pressed.has("shift") ? 13 : 9)) * 0.025 : 0;
+    this.firstPersonCamera.position.set(this.playerPosition.x, this.playerPosition.y + headBob, this.playerPosition.z);
+    this.firstPersonCamera.rotation.order = "YXZ";
+    this.firstPersonCamera.rotation.set(this.firstPersonPitch, this.firstPersonYaw, 0);
   }
 
   private pointerToCell(event: PointerEvent | WheelEvent) {
@@ -449,6 +534,7 @@ export class FactoryRuntime {
   }
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this.cameraMode === "firstPerson") return;
     if (this.panning) {
       const dx = event.clientX - this.panOrigin.x;
       const dy = event.clientY - this.panOrigin.y;
@@ -472,6 +558,12 @@ export class FactoryRuntime {
 
   private onPointerDown = (event: PointerEvent) => {
     this.renderer.domElement.focus();
+    if (this.cameraMode === "firstPerson") {
+      if (event.button === 0 && document.pointerLockElement !== this.renderer.domElement) {
+        void this.renderer.domElement.requestPointerLock();
+      }
+      return;
+    }
     this.pointerDown = { x: event.clientX, y: event.clientY };
     if (event.button === 1 || (event.button === 0 && event.altKey)) {
       this.panning = true;
@@ -492,6 +584,7 @@ export class FactoryRuntime {
   };
 
   private onPointerUp = (event: PointerEvent) => {
+    if (this.cameraMode === "firstPerson") return;
     if (this.panning) {
       this.panning = false;
       this.renderer.domElement.releasePointerCapture(event.pointerId);
@@ -535,11 +628,13 @@ export class FactoryRuntime {
 
   private onWheel = (event: WheelEvent) => {
     event.preventDefault();
+    if (this.cameraMode === "firstPerson") return;
     this.cameraZoom = THREE.MathUtils.clamp(this.cameraZoom * Math.exp(-event.deltaY * 0.001), 0.72, 2.2);
   };
 
   private onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
+    if (this.cameraMode === "firstPerson") return;
     this.setTool("inspect");
     this.callbacks.onToast("건설 작업을 취소했습니다");
   };
@@ -548,6 +643,11 @@ export class FactoryRuntime {
     const key = event.key.toLowerCase();
     if (event.repeat && !["w", "a", "s", "d"].includes(key)) return;
     this.pressed.add(key);
+    if (key === "v") {
+      this.toggleCameraMode();
+      return;
+    }
+    if (this.cameraMode === "firstPerson") return;
     const tools: Record<string, Tool> = {
       "1": "inspect",
       "2": "belt",
@@ -576,6 +676,19 @@ export class FactoryRuntime {
 
   private onKeyUp = (event: KeyboardEvent) => {
     this.pressed.delete(event.key.toLowerCase());
+  };
+
+  private onFirstPersonLook = (event: MouseEvent) => {
+    if (this.cameraMode !== "firstPerson" || document.pointerLockElement !== this.renderer.domElement) return;
+    this.firstPersonYaw -= event.movementX * 0.0022;
+    this.firstPersonPitch -= event.movementY * 0.002;
+    this.firstPersonPitch = THREE.MathUtils.clamp(this.firstPersonPitch, -1.35, 1.35);
+  };
+
+  private onPointerLockChange = () => {
+    const locked = document.pointerLockElement === this.renderer.domElement;
+    this.callbacks.onPointerLock(locked);
+    if (this.cameraMode === "firstPerson") this.renderer.domElement.style.cursor = locked ? "none" : "crosshair";
   };
 
   private syncItems(delta: number) {
@@ -670,21 +783,25 @@ export class FactoryRuntime {
     this.lastTime = time;
     this.elapsed += delta;
 
-    const angularDistance = this.desiredCameraAngle - this.cameraAngle;
-    this.cameraAngularVelocity += angularDistance * 90 * delta;
-    this.cameraAngularVelocity *= Math.exp(-18 * delta);
-    this.cameraAngle += this.cameraAngularVelocity * delta;
-    const moveSpeed = (7.5 * delta) / this.cameraZoom;
-    const right = new THREE.Vector3(Math.cos(this.cameraAngle), 0, -Math.sin(this.cameraAngle));
-    const forward = new THREE.Vector3(Math.sin(this.cameraAngle), 0, Math.cos(this.cameraAngle));
-    if (this.pressed.has("w")) this.desiredTarget.addScaledVector(forward, -moveSpeed);
-    if (this.pressed.has("s")) this.desiredTarget.addScaledVector(forward, moveSpeed);
-    if (this.pressed.has("a")) this.desiredTarget.addScaledVector(right, -moveSpeed);
-    if (this.pressed.has("d")) this.desiredTarget.addScaledVector(right, moveSpeed);
-    this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -8, 8);
-    this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -8, 8);
-    this.cameraTarget.lerp(this.desiredTarget, 1 - Math.exp(-delta * 11));
-    this.updateCamera();
+    if (this.cameraMode === "overview") {
+      const angularDistance = this.desiredCameraAngle - this.cameraAngle;
+      this.cameraAngularVelocity += angularDistance * 90 * delta;
+      this.cameraAngularVelocity *= Math.exp(-18 * delta);
+      this.cameraAngle += this.cameraAngularVelocity * delta;
+      const moveSpeed = (7.5 * delta) / this.cameraZoom;
+      const right = new THREE.Vector3(Math.cos(this.cameraAngle), 0, -Math.sin(this.cameraAngle));
+      const forward = new THREE.Vector3(Math.sin(this.cameraAngle), 0, Math.cos(this.cameraAngle));
+      if (this.pressed.has("w")) this.desiredTarget.addScaledVector(forward, -moveSpeed);
+      if (this.pressed.has("s")) this.desiredTarget.addScaledVector(forward, moveSpeed);
+      if (this.pressed.has("a")) this.desiredTarget.addScaledVector(right, -moveSpeed);
+      if (this.pressed.has("d")) this.desiredTarget.addScaledVector(right, moveSpeed);
+      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -8, 8);
+      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -8, 8);
+      this.cameraTarget.lerp(this.desiredTarget, 1 - Math.exp(-delta * 11));
+      this.updateCamera();
+    } else {
+      this.updateFirstPerson(delta);
+    }
 
     this.simulation.update(delta);
     this.syncItems(delta);
@@ -699,6 +816,6 @@ export class FactoryRuntime {
       this.lastMotorCount = motors;
       this.callbacks.onMotors(motors);
     }
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.activeCamera);
   };
 }

@@ -432,22 +432,86 @@ kbd {
   opacity: 1;
 }
 
-.build-mode {
+.camera-mode-button {
   position: absolute;
   right: 18px;
   bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 9px 11px;
   border-radius: 11px;
   color: var(--cyan-bright);
   font: 700 9px/1 var(--font-geist-mono), monospace;
   letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.camera-mode-button:hover {
+  border-color: rgba(93, 228, 209, 0.42);
+  background: rgba(14, 42, 47, 0.94);
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(214, 255, 248, 0.9);
+  box-shadow: 0 0 8px rgba(93, 228, 209, 0.65);
+}
+
+.crosshair::before {
+  left: 6px;
+  top: 0;
+  width: 2px;
+  height: 14px;
+}
+
+.crosshair::after {
+  left: 0;
+  top: 6px;
+  width: 14px;
+  height: 2px;
+}
+
+.pointer-lock-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 24px);
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  transition: opacity 180ms ease;
+}
+
+.hud.first-person .toolbar-wrap,
+.hud.first-person .left-panel,
+.hud.first-person .inspector {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hud.first-person .toolbar-wrap {
+  transform: translate(-50%, 16px);
 }
 
 @media (max-width: 920px) {
   .metric:nth-of-type(2),
   .divider,
   .hintbar,
-  .build-mode {
+  .camera-mode-button {
     display: none;
   }
 

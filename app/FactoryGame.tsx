@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import GameHud from "./components/GameHud";
 import { FactoryRuntime } from "./game/runtime";
-import type { SelectedInfo, Tool } from "./game/types";
+import type { CameraMode, SelectedInfo, Tool } from "./game/types";
 
 export default function FactoryGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<FactoryRuntime | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeTool, setActiveTool] = useState<Tool>("inspect");
+  const [cameraMode, setCameraMode] = useState<CameraMode>("overview");
+  const [pointerLocked, setPointerLocked] = useState(false);
   const [credits, setCredits] = useState(1200);
   const [motors, setMotors] = useState(0);
   const [selected, setSelected] = useState<SelectedInfo>(null);
@@ -32,6 +34,8 @@ export default function FactoryGame() {
       onSelected: setSelected,
       onToast: showToast,
       onToolChange: setActiveTool,
+      onCameraMode: setCameraMode,
+      onPointerLock: setPointerLocked,
     });
     runtimeRef.current = runtime;
     return () => {
@@ -42,18 +46,22 @@ export default function FactoryGame() {
   }, []);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
+  const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();
 
   return (
     <main className="game-shell">
       <div ref={mountRef} className="game-canvas" />
       <GameHud
         activeTool={activeTool}
+        cameraMode={cameraMode}
+        pointerLocked={pointerLocked}
         credits={credits}
         motors={motors}
         selected={selected}
         toast={toast}
         toastVisible={toastVisible}
         onToolChange={chooseTool}
+        onCameraModeChange={toggleCameraMode}
       />
     </main>
   );

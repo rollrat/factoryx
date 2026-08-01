@@ -7,6 +7,8 @@ export type Tool =
   | "storage"
   | "demolish";
 
+export type CameraMode = "overview" | "firstPerson";
+
 export type BuildType = Exclude<Tool, "inspect" | "demolish">;
 export type MachineType = Exclude<BuildType, "belt">;
 export type ItemType = "ore" | "ingot" | "component";
@@ -65,4 +67,6 @@ export type GameCallbacks = {
   onSelected: (selected: SelectedInfo) => void;
   onToast: (message: string) => void;
   onToolChange: (tool: Tool) => void;
+  onCameraMode: (mode: CameraMode) => void;
+  onPointerLock: (locked: boolean) => void;
 };
