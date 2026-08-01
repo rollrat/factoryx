@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { BuildType, ItemType } from "./types";
+import { createMinerModel } from "./models/miner";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -24,6 +25,8 @@ export const createFactoryMaterials = () => {
       metalness: 0.25,
       roughness: 0.3,
     }),
+    orange: standard(0xd96f32, 0.4, 0.42),
+    rubber: standard(0x0b1215, 0.08, 0.9),
     belt: standard(0x27393d, 0.08, 0.82),
     beltRib: standard(0x405255, 0.08, 0.72),
     copper: standard(0xb76e43, 0.58, 0.3),
@@ -126,40 +129,12 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
     return group;
   }
 
+  if (type === "miner") return createMinerModel(materials);
+
   addBox(group, [1.78, 0.24, 1.78], [0, 0.12, 0], materials.dark);
   addBox(group, [1.5, 0.12, 1.5], [0, 0.3, 0], materials.steel);
-  if (type !== "miner") addPort(group, -0.96, 0x5de4d1, "inputPort");
+  addPort(group, -0.96, 0x5de4d1, "inputPort");
   if (type !== "storage") addPort(group, 0.96, 0xffa94d, "outputPort");
-
-  if (type === "miner") {
-    addBox(group, [0.28, 0.98, 0.34], [-0.57, 0.82, 0], materials.pale);
-    addBox(group, [0.28, 0.98, 0.34], [0.57, 0.82, 0], materials.pale);
-    addBox(group, [1.38, 0.22, 0.42], [0, 1.32, 0], materials.dark);
-    addBox(group, [0.46, 0.24, 0.46], [0, 1.18, 0], materials.steel);
-    const drillAssembly = new THREE.Group();
-    drillAssembly.position.set(0, 0.2, 0);
-    drillAssembly.userData.animationRole = "minerDrill";
-    drillAssembly.userData.baseY = drillAssembly.position.y;
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.9, 8), materials.steel);
-    shaft.position.y = 0.55;
-    shaft.castShadow = true;
-    drillAssembly.add(shaft);
-    const bit = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.44, 8), materials.dark);
-    bit.position.y = 0.02;
-    bit.rotation.x = Math.PI;
-    bit.castShadow = true;
-    drillAssembly.add(bit);
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.055, 6, 12), materials.amber);
-    collar.position.y = 0.84;
-    collar.rotation.x = Math.PI / 2;
-    drillAssembly.add(collar);
-    group.add(drillAssembly);
-    const driveGear = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.085, 6, 12), materials.steel);
-    driveGear.position.set(0, 1.18, 0.26);
-    driveGear.userData.animationRole = "minerGear";
-    group.add(driveGear);
-    addBox(group, [0.48, 0.18, 0.08], [0, 0.84, 0.58], materials.cyan, false);
-  }
 
   if (type === "smelter") {
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.76, 1.16, 10), materials.steel);

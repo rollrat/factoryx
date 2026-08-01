@@ -6,6 +6,7 @@ import {
   createOrePatch,
   createStructureModel,
 } from "./models";
+import { animateMinerModel } from "./models/miner";
 import { FactorySimulation } from "./simulation";
 import type {
   BuildType,
@@ -792,6 +793,20 @@ export class FactoryRuntime {
       const state = this.simulation.machines.get(id);
       const machineTime = (state?.animationTime ?? this.elapsed) + id * 0.17;
       const activity = state?.activity ?? 1;
+      const outputQueued = (state?.output.length ?? 0) > 0;
+      const hasInputConnection = data.type !== "belt" && this.simulation.hasInputConnection(data);
+      const hasOutputConnection = data.type !== "belt" && this.simulation.hasOutputConnection(data);
+      if (data.type === "miner") {
+        animateMinerModel(group, {
+          time: machineTime,
+          delta,
+          progress: state?.progress ?? 0,
+          activity,
+          working: state?.working ?? false,
+          outputQueued,
+          outputConnected: hasOutputConnection,
+        });
+      }
       const beltItem = data.type === "belt" ? this.simulation.beltItems.get(id) : undefined;
       const beltJammed = Boolean(beltItem && beltItem.progress >= 0.979);
       const beltSpeed = beltJammed ? 0 : 1;
@@ -811,13 +826,6 @@ export class FactoryRuntime {
             material.emissiveIntensity = beltJammed ? 1.8 + Math.sin(this.elapsed * 5) * 0.5 : 1.5;
           }
         }
-        if (role === "minerDrill") {
-          const baseY = part.userData.baseY as number;
-          const stroke = Math.pow((Math.sin(machineTime * 4.1) + 1) * 0.5, 2) * activity;
-          part.position.y = baseY - stroke * 0.22;
-          part.rotation.y = machineTime * 7.5;
-        }
-        if (role === "minerGear") part.rotation.z = -machineTime * 4.8;
         if (role === "smelterGlow" && part instanceof THREE.Mesh) {
           const material = part.material;
           if (material instanceof THREE.MeshStandardMaterial) {
@@ -851,7 +859,7 @@ export class FactoryRuntime {
           part.position.y = baseY - press * 0.39;
         }
         if ((role === "inputPort" || role === "outputPort") && part instanceof THREE.Mesh && data.type !== "belt") {
-          const connected = role === "inputPort" ? this.simulation.hasInputConnection(data) : this.simulation.hasOutputConnection(data);
+          const connected = role === "inputPort" ? hasInputConnection : hasOutputConnection;
           const material = part.material;
           if (material instanceof THREE.MeshStandardMaterial) material.emissiveIntensity = connected ? 1.6 : 0.15;
         }
