@@ -11,7 +11,7 @@ import { MergerRouter, SplitterRouter, type RouterSnapshot } from "./junction.ts
 import { RecipeProcess, type RecipeProcessSnapshot } from "./process.ts";
 import type { PowerGridResult } from "./powerGrid.ts";
 import type { MachineRuntimeState } from "./contracts.ts";
-import type { DataDrivenWorld, WorldDemolitionResult, WorldPort } from "./world.ts";
+import { portsShareStratumOrShaftPair, type DataDrivenWorld, type WorldDemolitionResult, type WorldPort } from "./world.ts";
 
 export type ProductionConnection = Readonly<{
   fromInstanceId: string;
@@ -88,6 +88,14 @@ const accepts = (port: PortDefinition, itemId: ItemId) => (
 const allowsInput = (port: PortDefinition) => port.direction !== "output";
 const allowsOutput = (port: PortDefinition) => port.direction !== "input";
 const endpointKey = (instanceId: string, portId: string) => `${instanceId}:${portId}`;
+const pressureArcKey = (from: string, to: string) => `${from}>${to}`;
+
+type FluidHeadArc = Readonly<{
+  from: string;
+  to: string;
+  rise: number;
+  pumpInstanceId?: string;
+}>;
 
 export class WorldProductionSimulation {
   readonly world: DataDrivenWorld;
@@ -165,7 +173,8 @@ export class WorldProductionSimulation {
   selectRecipe(instanceId: string, recipeId: RecipeId): boolean {
     const node = this.nodes.get(instanceId);
     const recipe = this.world.registry.recipes.get(recipeId);
-    if (!node || !recipe || recipe.buildingId !== node.definition.id || !node.definition.recipeIds.includes(recipeId)) return false;
+    if (!node || !recipe || recipe.buildingId !== node.definition.id || !node.definition.recipeIds.includes(recipeId)
+      || !this.world.isUnlockActive(recipe.unlockId)) return false;
     if ((node.definition.id === "vein_miner" || node.definition.id === "fluid_extractor")
       && this.world.resourceAnchorAt(this.world.instance(instanceId)!.position, this.world.instance(instanceId)!.stratumId ?? "surface")?.recipeId !== recipeId) return false;
     if (node.process?.snapshot().workInProgress) return false;
@@ -208,7 +217,10 @@ export class WorldProductionSimulation {
       instanceId,
       definitionId: node.definition.id,
       selectedRecipeId: node.selectedRecipeId,
-      availableRecipeIds: node.definition.recipeIds.filter((id) => this.world.registry.recipes.has(id)),
+      availableRecipeIds: node.definition.recipeIds.filter((id) => {
+        const recipe = this.world.registry.recipes.get(id);
+        return Boolean(recipe && this.world.isUnlockActive(recipe.unlockId));
+      }),
       runtimeState,
       progress: process?.progress ?? 0,
       powerSatisfaction: this.powerSatisfaction.get(instanceId) ?? 1,
@@ -357,12 +369,14 @@ export class WorldProductionSimulation {
   }
 
   private step(deltaSeconds: number) {
+    const connections = this.connections();
+    const fluidPressure = this.fluidPressureArcs(connections);
     if (!this.paused) {
-      this.transferConnections();
-      this.transferInsideLogisticsNodes(deltaSeconds);
+      this.transferConnections(connections, fluidPressure);
+      this.transferInsideLogisticsNodes(deltaSeconds, connections, fluidPressure);
     }
     const connectedByNode = new Map<string, Set<string>>();
-    this.connections().forEach((connection) => {
+    connections.forEach((connection) => {
       const source = connectedByNode.get(connection.fromInstanceId) ?? new Set<string>();
       source.add(connection.fromPortId);
       connectedByNode.set(connection.fromInstanceId, source);
@@ -372,8 +386,15 @@ export class WorldProductionSimulation {
     });
     this.nodes.forEach((node) => {
       if (!node.process) return;
+      const instance = this.world.instance(node.instanceId);
+      const hazardServiceMissing = node.definition.id === "fluid_extractor" && instance
+        ? !this.world.isHazardStabilizedAt({
+          x: instance.position.x + node.definition.footprint.x / 2,
+          z: instance.position.z + node.definition.footprint.z / 2,
+        }, instance.stratumId ?? "surface")
+        : false;
       node.process.step(node.inputs, node.outputs, {
-        paused: this.paused,
+        paused: this.paused || hazardServiceMissing,
         connectedPortIds: connectedByNode.get(node.instanceId) ?? new Set(),
         speed: this.powerSatisfaction.get(node.instanceId) ?? 1,
         deltaSeconds,
@@ -382,10 +403,17 @@ export class WorldProductionSimulation {
     });
   }
 
-  private transferConnections() {
-    this.connections().forEach((connection) => {
+  private transferConnections(
+    connections: readonly ProductionConnection[],
+    fluidPressure: ReadonlySet<string>,
+  ) {
+    connections.forEach((connection) => {
       const sourceNode = this.nodes.get(connection.fromInstanceId);
       const targetNode = this.nodes.get(connection.toInstanceId);
+      let sourceInstanceId = connection.fromInstanceId;
+      let sourcePortId = connection.fromPortId;
+      let targetInstanceId = connection.toInstanceId;
+      let targetPortId = connection.toPortId;
       let source = sourceNode?.outputs.get(connection.fromPortId);
       let target = targetNode?.inputs.get(connection.toPortId);
       let targetPort = targetNode?.definition.ports.find(({ id }) => id === connection.toPortId);
@@ -402,11 +430,19 @@ export class WorldProductionSimulation {
           targetPort = sourcePort;
           lockInstanceId = connection.fromInstanceId;
           lockPortId = connection.fromPortId;
+          sourceInstanceId = connection.toInstanceId;
+          sourcePortId = connection.toPortId;
+          targetInstanceId = connection.fromInstanceId;
+          targetPortId = connection.fromPortId;
         }
       }
       if (!sourceNode || !targetNode || !source || !target || !targetPort || !source.itemId || source.availableAmount <= 0) return;
       if (!accepts(targetPort, source.itemId)) return;
       if (connection.medium === "fluid") {
+        if (!fluidPressure.has(pressureArcKey(
+          endpointKey(sourceInstanceId, sourcePortId),
+          endpointKey(targetInstanceId, targetPortId),
+        ))) return;
         const lock = this.fluidNetworkLock(lockInstanceId, lockPortId);
         if (lock.conflict || (lock.itemId !== null && lock.itemId !== source.itemId)) return;
       }
@@ -416,6 +452,107 @@ export class WorldProductionSimulation {
       if (!source.withdraw(itemId, amount)) return;
       if (!target.deposit(itemId, amount)) source.deposit(itemId, amount);
     });
+  }
+
+  /**
+   * Solves available pump head over the directed fluid-port graph. Elevation
+   * gains consume head, level/downhill arcs are free, and a pump may add its
+   * head at most once on any path. Tracking the used-pump bitset prevents a
+   * pipe loop from manufacturing pressure by circulating through one pump.
+   */
+  private fluidPressureArcs(connections: readonly ProductionConnection[]): ReadonlySet<string> {
+    const portByEndpoint = new Map<string, WorldPort>();
+    this.world.allInstances().forEach((instance) => {
+      this.world.portsFor(instance.id).filter(({ definition }) => definition.medium === "fluid").forEach((port) => {
+        portByEndpoint.set(endpointKey(instance.id, port.definition.id), port);
+      });
+    });
+    const arcs: FluidHeadArc[] = [];
+    const addArc = (from: string, to: string, pumpInstanceId?: string) => {
+      const source = portByEndpoint.get(from);
+      const target = portByEndpoint.get(to);
+      if (!source || !target) return;
+      arcs.push({
+        from,
+        to,
+        rise: Math.max(0, target.localPosition.y - source.localPosition.y),
+        ...(pumpInstanceId ? { pumpInstanceId } : {}),
+      });
+    };
+    connections.filter(({ medium }) => medium === "fluid").forEach((connection) => {
+      const from = endpointKey(connection.fromInstanceId, connection.fromPortId);
+      const to = endpointKey(connection.toInstanceId, connection.toPortId);
+      addArc(from, to);
+      const source = portByEndpoint.get(from);
+      const target = portByEndpoint.get(to);
+      if (source?.definition.direction === "bidirectional" && target?.definition.direction === "bidirectional") {
+        addArc(to, from);
+      }
+    });
+    this.nodes.forEach((node) => {
+      const storageRouting = node.definition.storagePolicy?.defaultRoutingPolicy;
+      const transfersInternally = node.definition.transportPolicy !== undefined
+        || storageRouting === "pass_through"
+        || storageRouting === "fill_then_output"
+        || Boolean(node.splitterRouter || node.mergerRouter);
+      if (!transfersInternally) return;
+      const ports = node.definition.ports.filter(({ medium }) => medium === "fluid");
+      ports.filter(allowsInput).forEach((from) => {
+        ports.filter((to) => to.id !== from.id && allowsOutput(to)).forEach((to) => addArc(
+          endpointKey(node.instanceId, from.id),
+          endpointKey(node.instanceId, to.id),
+          node.definition.fluidPumpPolicy ? node.instanceId : undefined,
+        ));
+      });
+    });
+
+    const activePumps = [...this.nodes.values()]
+      .filter((node) => node.definition.fluidPumpPolicy && (this.powerSatisfaction.get(node.instanceId) ?? 1) > 0)
+      .sort((a, b) => a.instanceId.localeCompare(b.instanceId));
+    const pumpIndex = new Map(activePumps.map((node, index) => [node.instanceId, index]));
+    const outgoing = new Map<string, FluidHeadArc[]>();
+    arcs.forEach((arc) => outgoing.set(arc.from, [...(outgoing.get(arc.from) ?? []), arc]));
+    const states = new Map<string, Map<bigint, number>>();
+    const queue: { endpoint: string; usedPumps: bigint; remainingHead: number }[] = [];
+    portByEndpoint.forEach((_port, endpoint) => {
+      states.set(endpoint, new Map([[0n, 0]]));
+      queue.push({ endpoint, usedPumps: 0n, remainingHead: 0 });
+    });
+    const traversable = new Set<string>();
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const state = queue[cursor];
+      for (const arc of outgoing.get(state.endpoint) ?? []) {
+        let usedPumps = state.usedPumps;
+        let addedHead = 0;
+        const index = arc.pumpInstanceId ? pumpIndex.get(arc.pumpInstanceId) : undefined;
+        if (index !== undefined) {
+          const bit = 1n << BigInt(index);
+          if ((usedPumps & bit) === 0n) {
+            usedPumps |= bit;
+            const pump = this.nodes.get(arc.pumpInstanceId!);
+            addedHead = (pump?.definition.fluidPumpPolicy?.headMeters ?? 0)
+              * (this.powerSatisfaction.get(arc.pumpInstanceId!) ?? 1);
+          }
+        }
+        const remainingHead = state.remainingHead + addedHead - arc.rise;
+        if (remainingHead < -1e-9) continue;
+        traversable.add(pressureArcKey(arc.from, arc.to));
+        const normalizedHead = Math.max(0, remainingHead);
+        const targetStates = states.get(arc.to)!;
+        const dominated = [...targetStates].some(([existingMask, existingHead]) => (
+          (existingMask & usedPumps) === existingMask && existingHead >= normalizedHead - 1e-9
+        ));
+        if (dominated) continue;
+        [...targetStates].forEach(([existingMask, existingHead]) => {
+          if ((usedPumps & existingMask) === usedPumps && normalizedHead >= existingHead - 1e-9) {
+            targetStates.delete(existingMask);
+          }
+        });
+        targetStates.set(usedPumps, normalizedHead);
+        queue.push({ endpoint: arc.to, usedPumps, remainingHead: normalizedHead });
+      }
+    }
+    return traversable;
   }
 
   /**
@@ -465,8 +602,11 @@ export class WorldProductionSimulation {
     return { itemId: itemIds.size === 1 ? [...itemIds][0] : null, conflict: itemIds.size > 1 };
   }
 
-  private transferInsideLogisticsNodes(deltaSeconds: number) {
-    const connections = this.connections();
+  private transferInsideLogisticsNodes(
+    deltaSeconds: number,
+    connections: readonly ProductionConnection[],
+    fluidPressure: ReadonlySet<string>,
+  ) {
     this.nodes.forEach((node) => {
       const transportRate = node.definition.transportPolicy?.throughputPerMinute;
       const storageRouting = node.definition.storagePolicy?.defaultRoutingPolicy;
@@ -476,7 +616,11 @@ export class WorldProductionSimulation {
       if (transportRate === undefined && !isPassThroughStorage && !isFillThenOutput && !isJunction) return;
 
       const throughputPerMinute = transportRate ?? 60;
-      const generatedCredit = throughputPerMinute * deltaSeconds / 60;
+      const pumpPower = node.definition.fluidPumpPolicy
+        ? (this.powerSatisfaction.get(node.instanceId) ?? 1)
+        : 1;
+      if (node.definition.fluidPumpPolicy && pumpPower <= 0) return;
+      const generatedCredit = throughputPerMinute * deltaSeconds / 60 * pumpPower;
       node.internalTransferCredit = Math.min(
         node.internalTransferCredit + generatedCredit,
         Math.max(1, generatedCredit),
@@ -515,7 +659,11 @@ export class WorldProductionSimulation {
         .filter(([portId]) => Boolean(inputInventory.itemId && this.canDrainToDownstream(portId, inputInventory.itemId, outgoing)))
         .sort(([a], [b]) => a.localeCompare(b))[0];
       if (!outputEntry || !inputInventory.itemId) return;
-      const [, outputInventory] = outputEntry;
+      const [outputPortId, outputInventory] = outputEntry;
+      if (inputPort.medium === "fluid" && !fluidPressure.has(pressureArcKey(
+        endpointKey(node.instanceId, inputPortId),
+        endpointKey(node.instanceId, outputPortId),
+      ))) return;
       const itemId = inputInventory.itemId;
       const amount = Math.min(allowedAmount, inputInventory.availableAmount, outputInventory.availableCapacity);
       if (amount < 1 || !outputInventory.canDeposit(itemId, amount)) return;
@@ -631,7 +779,7 @@ export class WorldProductionSimulation {
   private compatiblePorts(source: WorldPort, target: WorldPort) {
     return source.connectionCell.x === target.connectionCell.x
       && source.connectionCell.z === target.connectionCell.z
-      && (source.stratumId === target.stratumId || (source.connectsStrata && target.connectsStrata))
+      && portsShareStratumOrShaftPair(source, target)
       && source.definition.medium === target.definition.medium
       && (source.stratumId !== target.stratumId
         || Math.abs(source.localPosition.y - target.localPosition.y) <= 0.85)

@@ -10,6 +10,8 @@ export { START_ITEMS } from "./items.ts";
 export { START_PROJECT_STAGES } from "./projectStages.ts";
 export { START_RECIPES } from "./recipes.ts";
 export { CAMPAIGN_START_INVENTORY, CAMPAIGN_UNLOCK_STAGE, SANDBOX_PROJECT_TARGET } from "./campaign.ts";
+export { SHAFT_PAIRS, shaftPairIdAt } from "./shaftPairs.ts";
+export type { ShaftPairDefinition, ShaftPairEndpoint } from "./shaftPairs.ts";
 
 export const START_DEFINITIONS = {
   items: START_ITEMS,

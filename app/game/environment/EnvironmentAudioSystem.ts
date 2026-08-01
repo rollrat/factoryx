@@ -11,10 +11,28 @@ export class EnvironmentAudioSystem {
   private weather: WeatherKind = "clear";
   private strength = 0;
   private stratumId = "surface";
+  private muted = false;
+  private volume = 0.075;
 
   async resume() {
     this.ensureGraph();
     if (this.context?.state === "suspended") await this.context.resume();
+  }
+
+  async suspend() {
+    if (this.context?.state === "running") await this.context.suspend();
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    this.applyMaster(0.12);
+  }
+
+  isMuted() { return this.muted; }
+
+  setVolume(volume: number) {
+    this.volume = Math.max(0, Math.min(0.2, volume));
+    this.applyMaster(0.12);
   }
 
   setWeather(kind: WeatherKind, strength: number) {
@@ -42,7 +60,7 @@ export class EnvironmentAudioSystem {
     if (!AudioContextClass) return;
     const context = new AudioContextClass();
     const master = context.createGain();
-    master.gain.value = 0.075;
+    master.gain.value = this.muted ? 0 : this.volume;
     master.connect(context.destination);
 
     const windGain = context.createGain();
@@ -80,6 +98,13 @@ export class EnvironmentAudioSystem {
     this.windGain = windGain;
     this.caveGain = caveGain;
     this.apply(0.05);
+  }
+
+  private applyMaster(seconds: number) {
+    if (!this.context || !this.master) return;
+    const now = this.context.currentTime;
+    this.master.gain.cancelScheduledValues(now);
+    this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, now, Math.max(0.02, seconds * 0.3));
   }
 
   private apply(seconds: number) {

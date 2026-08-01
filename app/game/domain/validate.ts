@@ -22,6 +22,7 @@ export type ValidationIssue = Readonly<{
 
 const UNLOCK_ORDER: readonly UnlockId[] = [
   "start",
+  "survey_casting",
   "phase_1_complete",
   "phase_2_complete",
   "phase_3_complete",
@@ -125,6 +126,12 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
       || building.fluidStoragePolicy.throughputM3PerMinute <= 0
     )) {
       issues.push({ code: "invalid_fluid_storage", path: `${basePath}.fluidStoragePolicy`, message: "Fluid capacity and throughput must be positive" });
+    }
+    if (building.fluidPumpPolicy && (!Number.isFinite(building.fluidPumpPolicy.headMeters)
+      || building.fluidPumpPolicy.headMeters <= 0
+      || !building.ports.some((port) => port.medium === "fluid" && port.direction !== "output")
+      || !building.ports.some((port) => port.medium === "fluid" && port.direction !== "input"))) {
+      issues.push({ code: "invalid_fluid_pump", path: `${basePath}.fluidPumpPolicy`, message: "Fluid pumps require positive head and compatible input/output ports" });
     }
     if (building.generatorPolicy) {
       const generator = building.generatorPolicy;

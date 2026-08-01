@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import type { EnvironmentQuality } from "../types.ts";
+import { a17SolarElevationAt } from "../EnvironmentCycle.ts";
+import type { WeatherKind } from "./WeatherSystem.ts";
 
 const disposeObject = (object: THREE.Object3D) => {
   object.traverse((child) => {
@@ -16,9 +18,13 @@ export class SkySystem {
   private readonly dome: THREE.Mesh;
   private readonly moons = new THREE.Group();
   private readonly dustBand: THREE.Mesh;
+  private readonly cloudLayers = new THREE.Group();
   private readonly hemisphere: THREE.HemisphereLight;
   private readonly sunOffset = new THREE.Vector3(-38, 54, 32);
   private timeOfDay = 0.68;
+  private sunAzimuth = 0;
+  private weatherKind: WeatherKind = "clear";
+  private weatherStrength = 0;
   private readonly scene: THREE.Scene;
 
   constructor(scene: THREE.Scene, quality: EnvironmentQuality = "high") {
@@ -67,6 +73,32 @@ export class SkySystem {
     this.dustBand.position.set(12, 42, -10);
     this.root.add(this.dustBand);
 
+    const cloudGeometry = new THREE.SphereGeometry(174, 32, 16);
+    [
+      { scale: 1, opacity: 0.055, speed: 0.0018 },
+      { scale: 0.985, opacity: 0.035, speed: -0.0011 },
+    ].forEach(({ scale, opacity, speed }, index) => {
+      const layer = new THREE.Mesh(
+        cloudGeometry.clone(),
+        new THREE.ShaderMaterial({
+          side: THREE.BackSide,
+          transparent: true,
+          depthWrite: false,
+          uniforms: { opacity: { value: opacity }, phase: { value: index * 3.7 } },
+          vertexShader: "varying vec3 vDirection; void main(){ vDirection=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
+          fragmentShader: `uniform float opacity; uniform float phase; varying vec3 vDirection;
+            void main(){ float band=smoothstep(.08,.42,vDirection.y)*(1.0-smoothstep(.62,.86,vDirection.y));
+            float wave=sin(vDirection.x*23.0+vDirection.z*11.0+phase)+sin(vDirection.z*31.0-vDirection.x*7.0-phase*.7);
+            float cloud=smoothstep(.45,1.35,wave)*band; gl_FragColor=vec4(vec3(.74,.82,.81),cloud*opacity); }`,
+        }),
+      );
+      layer.scale.setScalar(scale);
+      layer.userData.speed = speed;
+      this.cloudLayers.add(layer);
+    });
+    cloudGeometry.dispose();
+    this.root.add(this.cloudLayers);
+
     this.hemisphere = new THREE.HemisphereLight(0xb9e7e3, 0x19272a, 1.85);
     this.root.add(this.hemisphere);
     this.sun.position.set(-38, 54, 32);
@@ -93,11 +125,36 @@ export class SkySystem {
 
   getTimeOfDay() { return this.timeOfDay; }
 
-  update(camera: THREE.Camera) {
+  setSunAzimuth(normalized: number) {
+    this.sunAzimuth = THREE.MathUtils.clamp(normalized, -1, 1);
+    this.applyTimeOfDay(this.timeOfDay);
+  }
+
+  setShadowDistance(distance: number) {
+    const value = THREE.MathUtils.clamp(distance, 12, 96);
+    this.sun.shadow.camera.left = -value;
+    this.sun.shadow.camera.right = value;
+    this.sun.shadow.camera.top = value;
+    this.sun.shadow.camera.bottom = -value;
+    this.sun.shadow.camera.updateProjectionMatrix();
+  }
+
+  setWeatherInfluence(kind: WeatherKind, strength: number) {
+    this.weatherKind = kind;
+    this.weatherStrength = THREE.MathUtils.clamp(strength, 0, 1);
+    this.applyTimeOfDay(this.timeOfDay);
+  }
+
+  update(camera: THREE.Camera, delta = 0) {
     this.root.position.copy(camera.position);
     this.sun.target.position.copy(camera.position);
     this.sun.position.copy(camera.position).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
+    this.cloudLayers.children.forEach((layer) => {
+      layer.rotation.y += delta * (layer.userData.speed as number) * 60;
+      const material = (layer as THREE.Mesh).material as THREE.ShaderMaterial;
+      material.uniforms.phase.value += delta * (layer.userData.speed as number) * 95;
+    });
   }
 
   dispose() {
@@ -108,9 +165,11 @@ export class SkySystem {
 
   private applyTimeOfDay(value: number) {
     const orbit = (value - 0.25) * Math.PI * 2;
-    const altitude = Math.sin(orbit);
+    const altitude = a17SolarElevationAt(value);
     const daylight = THREE.MathUtils.smoothstep(altitude * 0.5 + 0.5, 0.08, 0.72);
-    this.sunOffset.set(Math.cos(orbit) * 68, Math.max(-9, altitude * 72), Math.sin(orbit * 0.82) * 54);
+    const horizontal = new THREE.Vector2(Math.cos(orbit) * 68, Math.sin(orbit * 0.82) * 54)
+      .rotateAround(new THREE.Vector2(), this.sunAzimuth * Math.PI);
+    this.sunOffset.set(horizontal.x, Math.max(-9, altitude * 72), horizontal.y);
     this.sun.intensity = 0.25 + daylight * 3.85;
     const material = this.dome.material as THREE.ShaderMaterial;
     material.uniforms.sunAmount.value = daylight;
@@ -121,6 +180,16 @@ export class SkySystem {
     this.sun.color.setHex(daylight > 0.18 ? 0xffe7bd : 0x9bb8d8).lerp(new THREE.Color(0xffa06b), twilight * 0.55);
     this.hemisphere.intensity = 0.42 + daylight * 1.43;
     this.hemisphere.color.setHex(daylight > 0.18 ? 0xb9e7e3 : 0x7186ad);
+    const weatherDimming = this.weatherKind === "electrical_storm" ? 0.56
+      : this.weatherKind === "mist" ? 0.34
+        : this.weatherKind === "mineral_wind" ? 0.18 : 0;
+    this.sun.intensity *= 1 - weatherDimming * this.weatherStrength;
+    this.hemisphere.intensity *= 1 - weatherDimming * this.weatherStrength * 0.42;
+    if (this.weatherKind === "mineral_wind") this.sun.color.lerp(new THREE.Color(0xe3a671), this.weatherStrength * 0.24);
+    if (this.weatherKind === "electrical_storm") {
+      this.sun.color.lerp(new THREE.Color(0x9ebbd3), this.weatherStrength * 0.42);
+      this.hemisphere.color.lerp(new THREE.Color(0x738aa5), this.weatherStrength * 0.4);
+    }
     this.moons.visible = daylight < 0.72;
     this.dustBand.visible = daylight > 0.16;
   }

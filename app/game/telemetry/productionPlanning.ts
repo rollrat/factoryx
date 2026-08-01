@@ -28,6 +28,16 @@ const add = (map: Map<ItemId, number>, itemId: ItemId, amount: number) => {
   map.set(itemId, (map.get(itemId) ?? 0) + amount);
 };
 
+const canonicalUnlockRank = new Map([
+  ["start", 0],
+  ["phase_1_complete", 1],
+  ["phase_2_complete", 2],
+  ["phase_3_complete", 3],
+  ["chemistry_stable", 4],
+  ["thermal_verified", 5],
+  ["survey_casting", 6],
+] as const);
+
 /** Deterministic canonical-recipe reverse expansion for project planning. */
 export function calculateProjectProductionPlan(
   definitions: DefinitionSource,
@@ -39,7 +49,14 @@ export function calculateProjectProductionPlan(
   definitions.recipes.forEach((recipe) => recipe.outputs.forEach((output) => {
     recipesByOutput.set(output.itemId, [...(recipesByOutput.get(output.itemId) ?? []), recipe]);
   }));
-  recipesByOutput.forEach((recipes) => recipes.sort((a, b) => a.id.localeCompare(b.id)));
+  // Project baselines use the canonical campaign recipe. Exploration recipes
+  // are selectable side-grades and should not silently rewrite an existing
+  // project's balance just because their id sorts first.
+  recipesByOutput.forEach((recipes) => recipes.sort((a, b) => (
+    (canonicalUnlockRank.get(a.unlockId) ?? Number.MAX_SAFE_INTEGER)
+      - (canonicalUnlockRank.get(b.unlockId) ?? Number.MAX_SAFE_INTEGER)
+    || a.id.localeCompare(b.id)
+  )));
 
   const raw = new Map<ItemId, number>();
   const surplus = new Map<ItemId, number>();

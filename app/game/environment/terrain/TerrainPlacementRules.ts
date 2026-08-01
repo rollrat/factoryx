@@ -1,4 +1,5 @@
 import type { BuildingDefinition, GridCell } from "../../domain/types.ts";
+import type { WorldTerrainPlacementValidator } from "../../sim/world.ts";
 import type { TerrainBuildability, TerrainSample } from "../types.ts";
 import { TerrainSampler } from "./TerrainSampler.ts";
 
@@ -33,4 +34,46 @@ export const evaluateTerrainPlacement = (
     return { allowed: false, requiresFoundation: true, reason: "terrain_clearance", worst };
   }
   return { allowed: true, requiresFoundation: worst.buildability === "foundation_required", worst };
+};
+
+/**
+ * Bridges authored terrain samples into the data-driven construction contract.
+ * Keeping this policy beside the sampler prevents save restoration, previews,
+ * and live placement from drifting into separate interpretations of A-17.
+ */
+export const createTerrainPlacementValidator = (sampler: TerrainSampler): WorldTerrainPlacementValidator => (
+  definition,
+  position,
+  rotation,
+  context,
+) => {
+  // Authored world anchors are structural parts of the survey pad. Legacy
+  // saves predate elevations and must always be restorable at their anchors.
+  if (definition.placementMode === "preplaced_unique") return { ok: true };
+  if (context.stratumId !== "surface") {
+    const width = rotation % 2 === 0 ? definition.footprint.x : definition.footprint.z;
+    const depth = rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
+    const center = { x: position.x + width / 2, z: position.z + depth / 2 };
+    const caveSpace = sampler.caveSpaceAt(center.x, center.z, context.stratumId);
+    const requiredClearance = 2.2 + Math.max(width, depth) * 0.9;
+    if (caveSpace.clearance < requiredClearance || (caveSpace.shortcut && width * depth > 4)) {
+      return { ok: false, reason: "terrain_clearance", cell: position };
+    }
+  }
+  const verdict = evaluateTerrainPlacement(sampler, definition, position, rotation, context.stratumId);
+  const expectedElevation = context.supportElevation ?? (context.stratumId === "surface"
+    ? sampler.constructionHeightAt(position.x, position.z)
+    : sampler.caveHeightAt(position.x, position.z, context.stratumId));
+  if (context.elevation !== undefined && Math.abs(context.elevation - expectedElevation) > 0.2) {
+    return { ok: false, reason: "terrain_clearance", cell: position };
+  }
+  if (definition.terrainPolicy?.role === "hazard_stabilizer") return { ok: true };
+  if (verdict.reason === "terrain_hazard" && context.hazardStabilized) return { ok: true };
+  if (context.foundationCoverage && verdict.reason !== "terrain_hazard") return { ok: true };
+  if (definition.terrainPolicy?.allowedOnRestrictedSurface && verdict.reason !== "terrain_hazard") return { ok: true };
+  if (!verdict.allowed) return { ok: false, reason: verdict.reason ?? "terrain_clearance", cell: position };
+  if (verdict.requiresFoundation && !context.foundationCoverage && definition.footprint.x * definition.footprint.z > 4) {
+    return { ok: false, reason: "foundation_required", cell: position };
+  }
+  return { ok: true };
 };

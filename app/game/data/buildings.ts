@@ -102,6 +102,9 @@ const POWER_LOADS: Readonly<Record<string, Readonly<{ activeMW: number; idleMW: 
   heavy_manufacturer: { activeMW: 24, idleMW: 0.5 },
   industrial_storage: { activeMW: 2, idleMW: 0.1 },
   pipe_pump: { activeMW: 2, idleMW: 0.05 },
+  // Stabilization is an active containment load rather than a dormant machine.
+  // It therefore draws the same power while standing by near a hazard.
+  hazard_stabilizer: { activeMW: 8, idleMW: 8 },
 };
 
 const OPERATIONAL_SPECS: Readonly<Record<string, Partial<BuildingDefinition>>> = {
@@ -112,7 +115,11 @@ const OPERATIONAL_SPECS: Readonly<Record<string, Partial<BuildingDefinition>>> =
   fractionation_refinery: { fluidStoragePolicy: { capacityM3: 200, throughputM3PerMinute: 60, locksFluidType: true } },
   pipe_mk1: { transportPolicy: { throughputPerMinute: 60 }, fluidStoragePolicy: { capacityM3: 4, throughputM3PerMinute: 60, locksFluidType: true } },
   pipe_t_junction: { transportPolicy: { throughputPerMinute: 60 }, fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true } },
-  pipe_pump: { transportPolicy: { throughputPerMinute: 60 }, fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true } },
+  pipe_pump: {
+    transportPolicy: { throughputPerMinute: 60 },
+    fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true },
+    fluidPumpPolicy: { headMeters: 4 },
+  },
   fluid_tank: { fluidStoragePolicy: { capacityM3: 1_000, throughputM3PerMinute: 60, locksFluidType: true } },
   emergency_flare: { fluidStoragePolicy: { capacityM3: 100, throughputM3PerMinute: 60, locksFluidType: true } },
   solid_fuel_generator: {
@@ -203,8 +210,8 @@ export const START_BUILDINGS = [
   ),
   building(
     "arc_smelter", "아크 제련기", "start", { x: 2, z: 2 },
-    [...straightSolidPorts(["iron_ore", "copper_ore", "tungsten_ore"], ["iron_ingot", "copper_ingot", "tungsten_ingot"]), consumerPower(2)],
-    ["smelt_iron_ingot", "smelt_copper_ingot", "smelt_tungsten_ingot"],
+    [...straightSolidPorts(["iron_ore", "copper_ore", "tungsten_ore"], ["iron_ingot", "copper_ingot", "iron_plate", "tungsten_ingot"]), consumerPower(2)],
+    ["smelt_iron_ingot", "smelt_copper_ingot", "alt_direct_cast_iron_plate", "smelt_tungsten_ingot"],
     cost(["iron_plate", 16], ["construction_block", 8], ["fastener_pack", 6]),
   ),
   building(

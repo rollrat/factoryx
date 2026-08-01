@@ -93,6 +93,9 @@ export type EnvironmentRuntimeInfo = Readonly<{
   weather: "clear" | "mineral_wind" | "mist" | "electrical_storm";
   weatherStrength: number;
   quality: EnvironmentQuality;
+  explorationDiscovered: number;
+  explorationTotal: number;
+  audioMuted: boolean;
 }>;
 
 export type EnvironmentDisposable = Readonly<{

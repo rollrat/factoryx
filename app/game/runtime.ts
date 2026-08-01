@@ -65,7 +65,7 @@ import {
   EnvironmentAudioSystem,
   browserEnvironmentQuality,
   TerrainSampler,
-  evaluateTerrainPlacement,
+  createTerrainPlacementValidator,
   resolveTerrainMovement,
   infrastructureHeightAt,
   type TerrainInfrastructureSurface,
@@ -281,7 +281,7 @@ export class FactoryRuntime {
     let worldStudioDocument = null;
     try {
       const raw = window.localStorage.getItem(WORLD_STUDIO_STORAGE_KEY);
-      worldStudioDocument = raw ? parseWorldStudioDocument(JSON.parse(raw), A17_ENVIRONMENT.id) : null;
+      worldStudioDocument = raw ? parseWorldStudioDocument(JSON.parse(raw), A17_ENVIRONMENT) : null;
     } catch { /* Invalid authoring drafts never prevent the game from starting. */ }
     this.terrainSampler = new TerrainSampler(A17_ENVIRONMENT, worldStudioDocument?.strokes ?? []);
     const loaded = this.saveStorage.load();
@@ -296,24 +296,7 @@ export class FactoryRuntime {
       registry: START_REGISTRY,
       bounds: gameplayBounds,
       constructionInventory: CAMPAIGN_START_INVENTORY,
-      terrainPlacement: (definition, position, rotation, context) => {
-        const verdict = evaluateTerrainPlacement(this.terrainSampler, definition, position, rotation, context.stratumId);
-        const expectedElevation = context.supportElevation ?? (context.stratumId === "surface"
-          ? this.terrainSampler.constructionHeightAt(position.x, position.z)
-          : this.terrainSampler.caveHeightAt(position.x, position.z, context.stratumId));
-        if (context.elevation !== undefined && Math.abs(context.elevation - expectedElevation) > 0.2) {
-          return { ok: false, reason: "terrain_clearance", cell: position };
-        }
-        if (definition.terrainPolicy?.role === "hazard_stabilizer") return { ok: true };
-        if (verdict.reason === "terrain_hazard" && context.hazardStabilized) return { ok: true };
-        if (context.foundationCoverage && verdict.reason !== "terrain_hazard") return { ok: true };
-        if (definition.terrainPolicy?.allowedOnRestrictedSurface && verdict.reason !== "terrain_hazard") return { ok: true };
-        if (!verdict.allowed) return { ok: false, reason: verdict.reason ?? "terrain_clearance", cell: position };
-        if (verdict.requiresFoundation && !context.foundationCoverage && definition.footprint.x * definition.footprint.z > 4) {
-          return { ok: false, reason: "foundation_required", cell: position };
-        }
-        return { ok: true };
-      },
+      terrainPlacement: createTerrainPlacementValidator(this.terrainSampler),
       ...(migratedCampaign
         ? { snapshot: migratedCampaign }
         : migratedWorld ? { worldSnapshot: migratedWorld } : {}),
@@ -353,6 +336,10 @@ export class FactoryRuntime {
       ...(restored?.physicalPower ? { snapshot: restored.physicalPower } : {}),
     });
     this.powerTopology = this.physicalPower.topology();
+    this.world.setHazardServiceResolver(({ stabilizerInstanceIds }) => stabilizerInstanceIds.some((instanceId) => (
+      this.physicalPower.powerResults().flatMap(({ consumers }) => consumers)
+        .some(({ id, satisfaction }) => id === instanceId && satisfaction >= 0.999)
+    )));
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -387,6 +374,16 @@ export class FactoryRuntime {
     this.hoverTile.position.y = 0.035;
 
     this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, this.environmentQuality, this.terrainSampler);
+    this.environment.props.applyClearedPropIds(restored?.environment?.removedPropIds ?? []);
+    restored?.environment?.stabilizedHazardIds.forEach((id) => this.environment.props.setHazardState(id, true));
+    if (worldStudioDocument) {
+      this.environment.seedCycle(worldStudioDocument.timeOfDay, worldStudioDocument.weather, worldStudioDocument.weatherStrength);
+      this.environment.setSunAzimuth(worldStudioDocument.sunAzimuth);
+      this.environment.setFogDensity(worldStudioDocument.fogDensity);
+      this.environment.setScatterDensity(worldStudioDocument.scatterDensity);
+      this.environment.setLandmarkOffsets(worldStudioDocument.landmarkOffsets);
+      this.environment.setLandmarksVisible(worldStudioDocument.landmarksVisible);
+    }
     this.exploration.snapshot().discoveredSiteIds.forEach((id) => this.environment.exploration.setDiscovered(id));
     this.environmentObstacles = new EnvironmentObstacleIndex(this.environment.props.obstacles());
     if (restored?.environment?.cycle) this.environment.restoreCycle(restored.environment.cycle);
@@ -436,6 +433,16 @@ export class FactoryRuntime {
     this.buildGrid.visible = tool !== "inspect";
     this.updateGhost();
   }
+
+  toggleEnvironmentAudio() {
+    const muted = !this.environmentAudio.isMuted();
+    this.environmentAudio.setMuted(muted);
+    if (!muted) void this.environmentAudio.resume();
+    this.callbacks.onToast(muted ? "환경음을 음소거했습니다" : "환경음을 켰습니다");
+    this.publishEnvironment();
+  }
+
+  getExplorationSnapshot() { return this.exploration.snapshot(); }
 
   selectBuilding(buildingId: BuildingId) {
     const definition = START_REGISTRY.buildings.get(buildingId);
@@ -927,7 +934,10 @@ export class FactoryRuntime {
       playerPosition: this.playerPosition.toArray(),
       firstPersonYaw: this.firstPersonYaw,
       firstPersonPitch: this.firstPersonPitch,
-      environment: createEnvironmentSnapshot(A17_ENVIRONMENT, {}, this.environment.cycleSnapshot()),
+      environment: createEnvironmentSnapshot(A17_ENVIRONMENT, {
+        removedPropIds: this.environment.props.clearedPropIds(),
+        stabilizedHazardIds: this.stabilizedEnvironmentHazardIds(),
+      }, this.environment.cycleSnapshot()),
       activeStratumId: this.activeStratumId,
       exploration: this.exploration.snapshot(),
     };
@@ -942,7 +952,18 @@ export class FactoryRuntime {
       const depth = instance.rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
       return [{ minX: instance.position.x - 0.5, maxX: instance.position.x + width + 0.5, minZ: instance.position.z - 0.5, maxZ: instance.position.z + depth + 0.5 }];
     });
+    const industrialFootprints = this.world.allInstances().flatMap((instance) => {
+      const definition = START_REGISTRY.buildings.get(instance.definitionId);
+      const role = definition?.terrainPolicy?.role;
+      if (!definition || (instance.stratumId ?? "surface") !== "surface"
+        || definition.footprint.x * definition.footprint.z < 4
+        || role === "ramp" || role === "bridge") return [];
+      const width = instance.rotation % 2 === 0 ? definition.footprint.x : definition.footprint.z;
+      const depth = instance.rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
+      return [{ minX: instance.position.x - 0.5, maxX: instance.position.x + width + 0.5, minZ: instance.position.z - 0.5, maxZ: instance.position.z + depth + 0.5 }];
+    });
     this.environment.props.applyFoundationClearing(foundationAreas);
+    this.environment.setIndustrialFootprints(industrialFootprints);
     this.environmentObstacles = new EnvironmentObstacleIndex(this.environment.props.obstaclesOutside(foundationAreas));
     this.world.resourceAnchors().forEach((anchor) => {
       const group = this.resourceGroups.get(anchor.id);
@@ -1055,7 +1076,12 @@ export class FactoryRuntime {
   }
 
   private onVisibilityChange = () => {
-    if (document.visibilityState === "hidden") this.save(true);
+    if (document.visibilityState === "hidden") {
+      this.save(true);
+      void this.environmentAudio.suspend();
+    } else if (!this.environmentAudio.isMuted()) {
+      void this.environmentAudio.resume();
+    }
     this.lastTime = performance.now();
   };
 
@@ -1154,6 +1180,7 @@ export class FactoryRuntime {
       obstacleResolved.position,
       this.activeStratumId,
       this.terrainInfrastructure(),
+      (position, stratumId) => this.world.isHazardStabilizedAt(position, stratumId),
     );
     this.playerPosition.x = terrainResolved.position.x;
     this.playerPosition.z = terrainResolved.position.z;
@@ -2213,6 +2240,7 @@ export class FactoryRuntime {
         structure.worldInstanceId ? poweredByWorldId.get(structure.worldInstanceId) ?? true : true,
       ]),
     ));
+    this.syncEnvironmentHazards();
   }
 
   private syncPhaseOneCampaign() {
@@ -2360,11 +2388,32 @@ export class FactoryRuntime {
     this.exploration.discoverNear(reference.x, reference.z, this.activeStratumId).forEach((site) => {
       this.environment.exploration.setDiscovered(site.id);
       this.campaignWorld.applyConstructionCreditDeltas([{ id: site.reward.creditId, amount: site.reward.amount }]);
+      if (site.reward.unlockId) this.world.unlock(site.reward.unlockId);
       this.publishConstructionState();
       this.callbacks.onToast(`탐사 완료 · ${site.name} · ${site.reward.label}`);
     });
-    const info = this.environment.runtimeInfo(reference.x, reference.z, this.activeStratumId);
+    const info = {
+      ...this.environment.runtimeInfo(reference.x, reference.z, this.activeStratumId),
+      explorationDiscovered: this.exploration.snapshot().discoveredSiteIds.length,
+      explorationTotal: this.exploration.total(),
+      audioMuted: this.environmentAudio.isMuted(),
+    };
+    this.syncEnvironmentHazards();
     this.environmentAudio.setWeather(info.weather, info.weatherStrength);
     this.callbacks.onEnvironment(info);
+  }
+
+  private stabilizedEnvironmentHazardIds() {
+    return A17_ENVIRONMENT.landmarks
+      .filter(({ kind, position }) => kind === "vent"
+        && this.world.isHazardStabilizedAt({ x: position.x, z: position.z }, "surface"))
+      .map(({ id }) => id)
+      .sort();
+  }
+
+  private syncEnvironmentHazards() {
+    const stabilized = new Set(this.stabilizedEnvironmentHazardIds());
+    A17_ENVIRONMENT.landmarks.filter(({ kind }) => kind === "vent")
+      .forEach(({ id }) => this.environment.props.setHazardState(id, stabilized.has(id)));
   }
 }

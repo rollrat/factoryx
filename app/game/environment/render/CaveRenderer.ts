@@ -31,6 +31,9 @@ export class CaveRenderer {
     const calcite = new THREE.MeshStandardMaterial({ color: 0xb9ccc2, roughness: 0.72, emissive: 0x233b38, emissiveIntensity: 0.32 });
     const floor = new THREE.MeshStandardMaterial({ color: 0x29383a, roughness: 0.93 });
     const glow = new THREE.MeshStandardMaterial({ color: 0x79c7b5, emissive: 0x3a9b86, emissiveIntensity: 1.4, roughness: 0.55 });
+    const exitGlow = new THREE.MeshStandardMaterial({ color: 0x8ee8d7, emissive: 0x3a9b86, emissiveIntensity: 2.1, roughness: 0.46 });
+    const depthGlow = new THREE.MeshStandardMaterial({ color: 0xe3a252, emissive: 0x8b421f, emissiveIntensity: 1.75, roughness: 0.5 });
+    const biofilm = new THREE.MeshStandardMaterial({ color: 0x426b62, emissive: 0x183d37, emissiveIntensity: 0.75, roughness: 0.82 });
 
     CAVE_ZONES.forEach((zone) => {
       const zoneGroup = new THREE.Group();
@@ -48,6 +51,25 @@ export class CaveRenderer {
         corridorFloor.userData.caveFloor = true;
         corridorFloor.userData.stratumId = zone.stratumId;
         this.interactionRoot.add(corridorFloor);
+
+        // A sparse, color-coded calcite trail makes both the exit and the deep
+        // objective legible without a floating quest arrow. Cyan faces the
+        // surface; amber continues toward the deep chamber.
+        const segment = points[index].clone().sub(points[index - 1]);
+        const markerCount = Math.max(1, Math.floor(segment.length() / 8));
+        for (let markerIndex = 1; markerIndex <= markerCount; markerIndex += 1) {
+          const progress = markerIndex / (markerCount + 1);
+          const marker = new THREE.Mesh(
+            new THREE.ConeGeometry(0.22, 0.62, 3),
+            index === 1 ? exitGlow : depthGlow,
+          );
+          marker.name = index === 1 ? "cave-guide:exit" : "cave-guide:depth";
+          marker.position.copy(points[index - 1]).lerp(points[index], progress);
+          marker.position.y += 0.24;
+          marker.rotation.x = Math.PI / 2;
+          marker.rotation.z = Math.atan2(segment.x, segment.z) + (index === 1 ? Math.PI : 0);
+          zoneGroup.add(marker);
+        }
       }
       zone.corridors.forEach((corridor) => {
         const from = zone.rooms.find(({ id }) => id === corridor.fromRoomId)?.center;
@@ -80,12 +102,25 @@ export class CaveRenderer {
           crystal.rotation.z = (shard % 2 ? 1 : -1) * 0.28;
           zoneGroup.add(crystal);
         }
+        for (let patch = 0; patch < 8; patch += 1) {
+          const angle = patch / 8 * Math.PI * 2 + roomIndex * 0.47;
+          const film = new THREE.Mesh(new THREE.CircleGeometry(0.35 + (patch % 3) * 0.16, 7), biofilm);
+          film.name = "cave-biofilm";
+          film.rotation.x = -Math.PI / 2;
+          film.position.set(
+            room.center.x + Math.cos(angle) * room.radius * 0.48,
+            room.center.y + 0.075,
+            room.center.z + Math.sin(angle) * room.radius * 0.48,
+          );
+          zoneGroup.add(film);
+        }
         const light = new THREE.PointLight(0x72dbc5, roomIndex === 1 ? 7 : 4, room.radius * 2.2, 2);
         light.position.set(room.center.x, room.center.y + 2.4, room.center.z);
         zoneGroup.add(light);
       });
-      zone.portals.forEach((portal) => {
-        const rim = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.65, 8, 28), rock);
+      zone.portals.forEach((portal, portalIndex) => {
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.65, 8, 28), portalIndex === 0 ? exitGlow : depthGlow);
+        rim.name = portalIndex === 0 ? "cave-portal:surface" : "cave-portal:deep";
         rim.position.set(portal.x, portal.y, portal.z);
         rim.rotation.x = Math.PI / 2;
         zoneGroup.add(rim);

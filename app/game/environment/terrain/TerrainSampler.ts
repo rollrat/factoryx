@@ -15,13 +15,49 @@ const hashNoise = (x: number, z: number, seed: number) => {
   return (value - Math.floor(value)) * 2 - 1;
 };
 
+const mixHex = (from: number, to: number, amount: number) => {
+  const t = clamp01(amount);
+  const channel = (shift: number) => Math.round(((from >> shift) & 0xff) + (((to >> shift) & 0xff) - ((from >> shift) & 0xff)) * t);
+  return (channel(16) << 16) | (channel(8) << 8) | channel(0);
+};
+
+export const SURFACE_ACCESS_ROUTES = [
+  [{ x: 12, z: -10 }, { x: 38, z: -25 }, { x: 69, z: -53 }],
+  [{ x: -12, z: 8 }, { x: -38, z: 12 }, { x: -65, z: 21 }],
+  [{ x: 12, z: 10 }, { x: 34, z: 27 }, { x: 56, z: 46 }, { x: 69, z: 56 }],
+  [{ x: -10, z: -12 }, { x: -31, z: -34 }, { x: -61, z: -74 }],
+  [{ x: 8, z: 12 }, { x: 12, z: 42 }, { x: 12, z: 99 }],
+] as const;
+
+const closestOnSegment = (x: number, z: number, from: Readonly<{ x: number; z: number }>, to: Readonly<{ x: number; z: number }>) => {
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const lengthSq = dx * dx + dz * dz;
+  const progress = lengthSq === 0 ? 0 : clamp01(((x - from.x) * dx + (z - from.z) * dz) / lengthSq);
+  const projectedX = from.x + dx * progress;
+  const projectedZ = from.z + dz * progress;
+  return { distance: Math.hypot(x - projectedX, z - projectedZ), progress };
+};
+
 export class TerrainSampler {
   readonly definition: EnvironmentDefinition;
-  private readonly strokes: readonly TerrainAuthoringStroke[];
+  private strokes: TerrainAuthoringStroke[];
+  private revision = 0;
 
   constructor(definition: EnvironmentDefinition, strokes: readonly TerrainAuthoringStroke[] = []) {
     this.definition = definition;
     this.strokes = strokes.map((stroke) => ({ ...stroke }));
+  }
+
+  setAuthoringStrokes(strokes: readonly TerrainAuthoringStroke[]) {
+    this.strokes = strokes.map((stroke) => ({ ...stroke }));
+    this.revision += 1;
+  }
+
+  authoringRevision() { return this.revision; }
+  scatterClusters() {
+    return this.strokes.filter((stroke) => stroke.brush === "rock_scatter" || stroke.brush === "vegetation_scatter")
+      .map((stroke) => ({ ...stroke }));
   }
 
   private baseBiomeAt(x: number, z: number) {
@@ -39,10 +75,23 @@ export class TerrainSampler {
     return best;
   }
 
-  biomeAt(x: number, z: number) {
+  biomeBlendAt(x: number, z: number) {
     const painted = [...this.strokes].reverse().find((stroke) => stroke.brush === "biome"
       && stroke.biomeId && Math.hypot(x - stroke.x, z - stroke.z) <= stroke.radius);
-    return (painted?.biomeId ? BIOME_BY_ID.get(painted.biomeId) : null) ?? this.baseBiomeAt(x, z);
+    if (painted?.biomeId && BIOME_BY_ID.has(painted.biomeId)) {
+      const biome = BIOME_BY_ID.get(painted.biomeId)!;
+      return { primary: biome, secondary: biome, secondaryWeight: 0 } as const;
+    }
+    const ranked = BIOMES.map((biome) => ({ biome, score: Math.hypot(x - biome.center.x, z - biome.center.z) / biome.radius }))
+      .sort((a, b) => a.score - b.score);
+    const primary = ranked[0];
+    const secondary = ranked[1] ?? primary;
+    const boundary = 1 - clamp01((secondary.score - primary.score) / 0.72);
+    return { primary: primary.biome, secondary: secondary.biome, secondaryWeight: smoothstep(boundary) * 0.5 } as const;
+  }
+
+  biomeAt(x: number, z: number) {
+    return this.biomeBlendAt(x, z).primary;
   }
 
   private rawHeightAt(x: number, z: number) {
@@ -61,7 +110,7 @@ export class TerrainSampler {
     return (-0.5 + (folded + strata + detail + regional) * padBlend);
   }
 
-  heightAt(x: number, z: number) {
+  private foundationHeightAt(x: number, z: number) {
     const raw = this.rawHeightAt(x, z);
     const anchor = RESOURCE_ANCHORS
       .filter(({ stratumId }) => stratumId === "surface")
@@ -73,7 +122,31 @@ export class TerrainSampler {
       const blend = 1 - smoothstep((anchor.distance - 2.4) / 2.6);
       height = raw + (plateau - raw) * blend;
     }
-    for (const stroke of this.strokes) {
+    const route = this.accessRouteAt(x, z);
+    if (route) {
+      const fromHeight = this.rawHeightAt(route.from.x, route.from.z);
+      const toHeight = this.rawHeightAt(route.to.x, route.to.z);
+      const routeHeight = fromHeight + (toHeight - fromHeight) * route.progress;
+      const blend = 1 - smoothstep(Math.max(0, route.distance - 1.7) / 1.3);
+      height += (routeHeight - height) * blend;
+    }
+    return height;
+  }
+
+  accessRouteAt(x: number, z: number) {
+    let closest: Readonly<{ distance: number; progress: number; from: Readonly<{ x: number; z: number }>; to: Readonly<{ x: number; z: number }> }> | null = null;
+    SURFACE_ACCESS_ROUTES.forEach((points) => points.slice(1).forEach((to, index) => {
+      const from = points[index];
+      const projection = closestOnSegment(x, z, from, to);
+      if (projection.distance <= 3 && (!closest || projection.distance < closest.distance)) closest = { ...projection, from, to };
+    }));
+    return closest;
+  }
+
+  private authoredHeightAt(x: number, z: number, strokeCount: number, includeSmooth = true): number {
+    let height = this.foundationHeightAt(x, z);
+    for (let index = 0; index < strokeCount; index += 1) {
+      const stroke = this.strokes[index];
       if (!["raise", "lower", "flatten", "smooth"].includes(stroke.brush)) continue;
       const distance = Math.hypot(x - stroke.x, z - stroke.z);
       if (distance > stroke.radius) continue;
@@ -81,9 +154,21 @@ export class TerrainSampler {
       if (stroke.brush === "raise") height += stroke.strength * falloff;
       if (stroke.brush === "lower") height -= stroke.strength * falloff;
       if (stroke.brush === "flatten") height += ((stroke.targetHeight ?? this.rawHeightAt(stroke.x, stroke.z)) - height) * Math.min(1, stroke.strength * falloff);
-      if (stroke.brush === "smooth") height += (this.rawHeightAt(x, z) - height) * Math.min(1, stroke.strength * falloff * 0.45);
+      if (stroke.brush === "smooth" && includeSmooth) {
+        const step = Math.max(0.75, Math.min(3, stroke.radius * 0.2));
+        const neighborhood = [
+          [-step, -step], [0, -step], [step, -step],
+          [-step, 0], [step, 0],
+          [-step, step], [0, step], [step, step],
+        ].reduce((sum, [dx, dz]) => sum + this.authoredHeightAt(x + dx, z + dz, index, false), 0) / 8;
+        height += (neighborhood - height) * Math.min(1, stroke.strength * falloff * 0.55);
+      }
     }
     return height;
+  }
+
+  heightAt(x: number, z: number) {
+    return this.authoredHeightAt(x, z, this.strokes.length);
   }
 
   constructionHeightAt(x: number, z: number) {
@@ -98,11 +183,15 @@ export class TerrainSampler {
       ...zone.rooms.map(({ center }) => center),
       { x: zone.portals[1].x, y: zone.portals[1].y - 2, z: zone.portals[1].z },
     ];
+    const segments = points.slice(1).map((to, index) => ({ from: points[index], to }));
+    zone.corridors.forEach((corridor) => {
+      const from = zone.rooms.find(({ id }) => id === corridor.fromRoomId)?.center;
+      const to = zone.rooms.find(({ id }) => id === corridor.toRoomId)?.center;
+      if (from && to) segments.push({ from, to });
+    });
     let bestDistance = Number.POSITIVE_INFINITY;
     let bestHeight = zone.rooms[0].center.y;
-    for (let index = 1; index < points.length; index += 1) {
-      const from = points[index - 1];
-      const to = points[index];
+    for (const { from, to } of segments) {
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const lengthSq = dx * dx + dz * dz;
@@ -142,6 +231,29 @@ export class TerrainSampler {
     });
   }
 
+  caveSpaceAt(x: number, z: number, stratumId: string) {
+    const zone = CAVE_ZONES.find((candidate) => candidate.stratumId === stratumId);
+    if (!zone) return { clearance: 0, shortcut: false } as const;
+    // The authored shortcut remains a narrow reserved logistics path even
+    // while it crosses the edge of a larger chamber.
+    for (const corridor of zone.corridors) {
+      const from = zone.rooms.find(({ id }) => id === corridor.fromRoomId)?.center;
+      const to = zone.rooms.find(({ id }) => id === corridor.toRoomId)?.center;
+      if (from && to && closestOnSegment(x, z, from, to).distance <= corridor.width) {
+        return { clearance: Math.max(3.5, corridor.width * 1.8), shortcut: true } as const;
+      }
+    }
+    const room = zone.rooms.find((candidate) => Math.hypot(x - candidate.center.x, z - candidate.center.z) <= candidate.radius * 0.82);
+    if (room) return { clearance: room.clearance, shortcut: false } as const;
+    const points = [
+      { x: zone.portals[0].x, z: zone.portals[0].z },
+      ...zone.rooms.map(({ center }) => ({ x: center.x, z: center.z })),
+      { x: zone.portals[1].x, z: zone.portals[1].z },
+    ];
+    const inMainGallery = points.slice(1).some((to, index) => closestOnSegment(x, z, points[index], to).distance <= 3);
+    return { clearance: inMainGallery ? 6.2 : 0, shortcut: false } as const;
+  }
+
   sample(x: number, z: number, stratumId: string = "surface"): TerrainSample {
     if (stratumId !== "surface") {
       const height = this.caveHeightAt(x, z, stratumId);
@@ -173,6 +285,7 @@ export class TerrainSampler {
     if (paintedSurface) surface = paintedSurface;
     else if (resourcePad?.itemId === "crude_oil") surface = "hazard";
     else if (resourcePad) surface = "stable";
+    else if (this.accessRouteAt(x, z)) surface = "stable";
     else if (slopeDegrees >= 24) surface = "steep";
     else if (biome.id === "blackwater_marsh" && height < -1.4) surface = noise > 0.38 ? "hazard" : "submerged";
     else if ((biome.id === "blackwater_marsh" || biome.id === "windglass_basin") && noise > 0.38) surface = "soft";
@@ -186,7 +299,10 @@ export class TerrainSampler {
   }
 
   colorAt(x: number, z: number) {
-    const biome = this.biomeAt(x, z);
-    return BIOME_BY_ID.get(biome.id)?.palette.ground ?? 0x263a3f;
+    const blend = this.biomeBlendAt(x, z);
+    const detail = clamp01(0.22 + (hashNoise(Math.floor(x / 5), Math.floor(z / 5), this.definition.seed + 414) * 0.5 + 0.5) * 0.34);
+    const primary = mixHex(blend.primary.palette.ground, blend.primary.palette.groundSecondary, detail);
+    const secondary = mixHex(blend.secondary.palette.ground, blend.secondary.palette.groundSecondary, detail);
+    return mixHex(primary, secondary, blend.secondaryWeight);
   }
 }

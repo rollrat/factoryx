@@ -9,7 +9,7 @@ import type {
   WorldProductionNodeSnapshot,
   WorldProductionSimulation,
 } from "../sim/worldProduction.ts";
-import type { WorldPort } from "../sim/world.ts";
+import { portsShareStratumOrShaftPair, type WorldPort } from "../sim/world.ts";
 import type { RuntimeTopology, RuntimeTopologyEdge, RuntimeTopologyNode } from "./topology.ts";
 import type { ProductionMetric } from "./productionMetrics.ts";
 
@@ -153,6 +153,7 @@ const allowsPowerInput = (port: PortDefinition) => port.medium === "power" && po
 const opposing = (source: WorldPort, target: WorldPort) => (
   source.connectionCell.x === target.connectionCell.x
   && source.connectionCell.z === target.connectionCell.z
+  && portsShareStratumOrShaftPair(source, target)
   && source.definition.connectorProfile === target.definition.connectorProfile
   && source.localFacing.x === -target.localFacing.x
   && source.localFacing.z === -target.localFacing.z

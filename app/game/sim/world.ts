@@ -15,6 +15,7 @@ import {
   getResourceAnchorAt,
   type ResourceAnchorDefinition,
 } from "../data/resourceAnchors.ts";
+import { shaftPairIdAt } from "../data/shaftPairs.ts";
 
 export type WorldBounds = Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
 
@@ -89,7 +90,22 @@ export type WorldPort = Readonly<{
   localFacing: GridCell;
   stratumId: string;
   connectsStrata: boolean;
+  shaftPairId: string | null;
 }>;
+
+export type WorldHazardServiceResolver = (context: Readonly<{
+  position: GridCell;
+  stratumId: string;
+  stabilizerInstanceIds: readonly string[];
+}>) => boolean;
+
+export const portsShareStratumOrShaftPair = (source: WorldPort, target: WorldPort) => (
+  source.stratumId === target.stratumId
+  || (source.connectsStrata
+    && target.connectsStrata
+    && source.shaftPairId !== null
+    && source.shaftPairId === target.shaftPairId)
+);
 
 type RuntimeContents = Readonly<{
   inputBuffersByPortId: Readonly<Record<string, readonly ItemStack[]>>;
@@ -181,6 +197,7 @@ export class DataDrivenWorld {
   private readonly inventory = new Map<ItemId, number>();
   private readonly unlockedIds = new Set<UnlockId>();
   private readonly terrainPlacement?: WorldTerrainPlacementValidator;
+  private hazardServiceResolver: WorldHazardServiceResolver | null = null;
   private nextInstanceId = 1;
 
   constructor(options: Readonly<{
@@ -229,6 +246,20 @@ export class DataDrivenWorld {
 
   isUnlockActive(unlockId: UnlockId): boolean {
     return this.unlockedIds.has(unlockId);
+  }
+
+  setHazardServiceResolver(resolver: WorldHazardServiceResolver | null): void {
+    this.hazardServiceResolver = resolver;
+  }
+
+  isHazardStabilizedAt(position: GridCell, stratumId = "surface"): boolean {
+    const stabilizerInstanceIds = [...this.instances.values()].filter((instance) => {
+      const existing = this.registry.buildings.get(instance.definitionId);
+      if (existing?.terrainPolicy?.role !== "hazard_stabilizer" || (instance.stratumId ?? "surface") !== stratumId) return false;
+      const size = rotatedSize(existing, instance.rotation);
+      return Math.hypot(instance.position.x + size.x / 2 - position.x, instance.position.z + size.z / 2 - position.z) <= 7;
+    }).map(({ id }) => id);
+    return stabilizerInstanceIds.length > 0 && (this.hazardServiceResolver?.({ position, stratumId, stabilizerInstanceIds }) ?? true);
   }
 
   resourceAnchors(): readonly Readonly<ResourceAnchorDefinition & { active: boolean }>[] {
@@ -364,6 +395,9 @@ export class DataDrivenWorld {
     const definition = this.registry.buildings.get(instance.definitionId)!;
     const size = rotatedSize(definition, instance.rotation);
     const center = { x: instance.position.x + size.x / 2, z: instance.position.z + size.z / 2 };
+    const shaftPairId = definition.terrainPolicy?.role === "shaft_socket"
+      ? shaftPairIdAt(instance.position, instance.rotation, instance.stratumId ?? "surface")
+      : null;
     return definition.ports.map((port) => {
       const connection = rotateCell(port.connectionCell, definition.footprint.x, definition.footprint.z, instance.rotation);
       const localPosition = rotateVector(port.localPosition, instance.rotation);
@@ -373,7 +407,8 @@ export class DataDrivenWorld {
         localPosition: { x: center.x + localPosition.x, y: localPosition.y + (instance.elevation ?? 0), z: center.z + localPosition.z },
         localFacing: rotateVector(port.localFacing, instance.rotation),
         stratumId: instance.stratumId ?? "surface",
-        connectsStrata: definition.terrainPolicy?.connectsStrata === true,
+        connectsStrata: definition.terrainPolicy?.connectsStrata === true && shaftPairId !== null,
+        shaftPairId,
       };
     });
   }
@@ -509,29 +544,44 @@ export class DataDrivenWorld {
         if (this.foundations.has(key)) return { ok: false, reason: "occupied", cell };
       } else if (this.occupancy.has(key)) return { ok: false, reason: "occupied", cell };
     }
-    const foundationCoverage = cells.every((cell) => this.foundations.has(cellKey(cell, stratumId)));
-    const supportId = cells.map((cell) => this.foundations.get(cellKey(cell, stratumId))).find((id): id is string => Boolean(id));
-    const support = supportId ? this.instances.get(supportId) : null;
-    const supportDefinition = support ? this.registry.buildings.get(support.definitionId) : null;
-    let supportElevation = support?.elevation;
-    if (support && supportDefinition?.terrainPolicy?.role === "bridge") {
-      supportElevation = (support.elevation ?? 0) + (supportDefinition.terrainPolicy.elevationStep ?? 0);
+    const supportHeights = cells.map((cell) => {
+      const supportId = this.foundations.get(cellKey(cell, stratumId));
+      const support = supportId ? this.instances.get(supportId) : null;
+      const supportDefinition = support ? this.registry.buildings.get(support.definitionId) : null;
+      if (!support || !supportDefinition) return null;
+      const base = support.elevation ?? 0;
+      if (supportDefinition.terrainPolicy?.role === "bridge") {
+        return base + (supportDefinition.terrainPolicy.elevationStep ?? 0);
+      }
+      if (supportDefinition.terrainPolicy?.role === "ramp") {
+        const size = rotatedSize(supportDefinition, support.rotation);
+        const xProgress = (cell.x - support.position.x + 0.5) / Math.max(1, size.x);
+        const zProgress = (cell.z - support.position.z + 0.5) / Math.max(1, size.z);
+        const progress = support.rotation === 0 ? zProgress : support.rotation === 1 ? xProgress
+          : support.rotation === 2 ? 1 - zProgress : 1 - xProgress;
+        return base + (supportDefinition.terrainPolicy.elevationStep ?? 0) * Math.max(0, Math.min(1, progress));
+      }
+      return base;
+    });
+    const foundationCoverage = supportHeights.every((height): height is number => height !== null);
+    const coveredHeights = supportHeights.filter((height): height is number => height !== null);
+    const supportElevation = foundationCoverage && coveredHeights.length > 0
+      ? coveredHeights.reduce((sum, height) => sum + height, 0) / coveredHeights.length
+      : undefined;
+    if (!isSupportLayer(definition) && foundationCoverage && coveredHeights.length > 1) {
+      const minimum = Math.min(...coveredHeights);
+      const maximum = Math.max(...coveredHeights);
+      if (maximum - minimum > 0.25) {
+        const incompatibleIndex = coveredHeights.findIndex((height) => Math.abs(height - coveredHeights[0]) > 0.25);
+        return { ok: false, reason: "terrain_clearance", cell: cells[Math.max(0, incompatibleIndex)] };
+      }
     }
-    if (support && supportDefinition?.terrainPolicy?.role === "ramp") {
-      const size = rotatedSize(supportDefinition, support.rotation);
-      const xProgress = (position.x - support.position.x + 0.5) / Math.max(1, size.x);
-      const zProgress = (position.z - support.position.z + 0.5) / Math.max(1, size.z);
-      const progress = support.rotation === 0 ? zProgress : support.rotation === 1 ? xProgress
-        : support.rotation === 2 ? 1 - zProgress : 1 - xProgress;
-      supportElevation = (support.elevation ?? 0) + (supportDefinition.terrainPolicy.elevationStep ?? 0) * Math.max(0, Math.min(1, progress));
+    if (!isSupportLayer(definition) && supportElevation !== undefined && elevation !== undefined
+      && Math.abs(elevation - supportElevation) > 0.35) {
+      return { ok: false, reason: "terrain_clearance", cell: cells[0] };
     }
     const center = { x: position.x + definition.footprint.x / 2, z: position.z + definition.footprint.z / 2 };
-    const hazardStabilized = [...this.instances.values()].some((instance) => {
-      const existing = this.registry.buildings.get(instance.definitionId);
-      if (existing?.terrainPolicy?.role !== "hazard_stabilizer" || (instance.stratumId ?? "surface") !== stratumId) return false;
-      const size = rotatedSize(existing, instance.rotation);
-      return Math.hypot(instance.position.x + size.x / 2 - center.x, instance.position.z + size.z / 2 - center.z) <= 7;
-    });
+    const hazardStabilized = this.isHazardStabilizedAt(center, stratumId);
     const terrainIssue = this.terrainPlacement?.(definition, position, rotation, {
       foundationCoverage, hazardStabilized, stratumId, elevation, supportElevation,
     });

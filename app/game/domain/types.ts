@@ -10,7 +10,8 @@ export type UnlockId =
   | "phase_2_complete"
   | "phase_3_complete"
   | "chemistry_stable"
-  | "thermal_verified";
+  | "thermal_verified"
+  | "survey_casting";
 
 export type TransportMedium = "solid" | "fluid" | "power";
 export type PortDirection = "input" | "output" | "bidirectional";
@@ -163,6 +164,11 @@ export type FluidStoragePolicy = Readonly<{
   locksFluidType: boolean;
 }>;
 
+export type FluidPumpPolicy = Readonly<{
+  /** Maximum vertical lift at full power satisfaction. */
+  headMeters: number;
+}>;
+
 export type TerrainInfrastructureRole =
   | "foundation"
   | "ramp"
@@ -205,6 +211,7 @@ export type BuildingDefinition = Readonly<{
   powerStoragePolicy?: PowerStoragePolicy;
   distributionPolicy?: DistributionPolicy;
   fluidStoragePolicy?: FluidStoragePolicy;
+  fluidPumpPolicy?: FluidPumpPolicy;
   terrainPolicy?: TerrainPolicy;
 }>;
 

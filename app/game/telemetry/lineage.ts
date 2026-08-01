@@ -33,16 +33,18 @@ export type LineageGraph = Readonly<{
   nodeById: ReadonlyMap<string, LineageNode>;
 }>;
 
-const UNLOCK_ORDER: readonly UnlockId[] = [
-  "start",
-  "phase_1_complete",
-  "phase_2_complete",
-  "phase_3_complete",
-  "chemistry_stable",
-  "thermal_verified",
-];
-
-const unlockTier = new Map<UnlockId, number>(UNLOCK_ORDER.map((unlockId, index) => [unlockId, index]));
+// Optional exploration knowledge is a side-grade within the starting tier. It
+// must not shift every campaign tier merely because a new alternate recipe was
+// discovered.
+const unlockTier = new Map<UnlockId, number>([
+  ["start", 0],
+  ["survey_casting", 0],
+  ["phase_1_complete", 1],
+  ["phase_2_complete", 2],
+  ["phase_3_complete", 3],
+  ["chemistry_stable", 4],
+  ["thermal_verified", 5],
+]);
 
 export const itemNodeId = (itemId: string) => `item:${itemId}`;
 export const buildingNodeId = (buildingId: string) => `building:${buildingId}`;
@@ -56,7 +58,7 @@ const itemNode = (item: ItemDefinition): MutableNode => ({
   label: item.name,
   category: item.category,
   unlockId: item.unlockId,
-  tier: unlockTier.get(item.unlockId) ?? UNLOCK_ORDER.length,
+  tier: unlockTier.get(item.unlockId) ?? 6,
   column: 0,
 });
 
@@ -67,7 +69,7 @@ const buildingNode = (building: BuildingDefinition): MutableNode => ({
   label: building.name,
   category: "building",
   unlockId: building.unlockId,
-  tier: unlockTier.get(building.unlockId) ?? UNLOCK_ORDER.length,
+  tier: unlockTier.get(building.unlockId) ?? 6,
   column: 0,
 });
 
@@ -198,4 +200,3 @@ export function buildLineageGraph(definitions: DefinitionSource): LineageGraph {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   return { nodes, edges, nodeById };
 }
-

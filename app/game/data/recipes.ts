@@ -95,6 +95,15 @@ export const START_RECIPES = [
     unlockId: "start",
   },
   {
+    id: "alt_direct_cast_iron_plate",
+    name: "대체: 철판 직접 주조",
+    buildingId: "arc_smelter",
+    inputs: [{ itemId: "iron_ore", amount: 3, portId: "solid_in" }],
+    outputs: [{ itemId: "iron_plate", amount: 3, portId: "solid_out", role: "primary" }],
+    durationSeconds: 5,
+    unlockId: "survey_casting",
+  },
+  {
     id: "crush_construction_block",
     name: "건축 블록 파쇄 성형",
     buildingId: "crusher",

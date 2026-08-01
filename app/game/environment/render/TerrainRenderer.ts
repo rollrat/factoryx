@@ -10,6 +10,7 @@ export class TerrainRenderer {
   readonly sampler: TerrainSampler;
   private readonly definition: EnvironmentDefinition;
   private readonly chunkRoot = new THREE.Group();
+  private editorMode = false;
   private readonly chunkLods = new Map<string, readonly THREE.Mesh[]>();
   private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.05 });
 
@@ -64,8 +65,16 @@ export class TerrainRenderer {
   }
 
   setEditorMode(enabled: boolean) {
+    if (this.editorMode && !enabled) this.chunkLods.forEach((lods) => lods.forEach((mesh) => this.refreshMesh(mesh)));
+    this.editorMode = enabled;
     this.terrain.visible = enabled;
     this.chunkRoot.visible = !enabled;
+  }
+
+  /** Re-samples both the authoring surface and every runtime LOD after an edit. */
+  refreshFromSampler(region?: Readonly<{ x: number; z: number; radius: number }>) {
+    this.refreshMesh(this.terrain, region);
+    if (!this.editorMode) this.chunkLods.forEach((lods) => lods.forEach((mesh) => this.refreshMesh(mesh)));
   }
 
   dispose() {
@@ -104,6 +113,32 @@ export class TerrainRenderer {
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
     return new THREE.Mesh(geometry, this.material);
+  }
+
+  private refreshMesh(mesh: THREE.Mesh, region?: Readonly<{ x: number; z: number; radius: number }>) {
+    const geometry = mesh.geometry as THREE.BufferGeometry;
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const colors = geometry.getAttribute("color") as THREE.BufferAttribute;
+    const color = new THREE.Color();
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const z = positions.getZ(index);
+      if (region && Math.hypot(x - region.x, z - region.z) > region.radius + 1) continue;
+      const sample = this.sampler.sample(x, z);
+      positions.setY(index, sample.height);
+      color.setHex(this.sampler.colorAt(x, z));
+      const tint = sample.surface === "soft" ? 0x40514b
+        : sample.surface === "submerged" ? 0x142f34
+          : sample.surface === "hazard" ? 0x75543e
+            : sample.surface === "steep" ? 0x1b292d : color.getHex();
+      color.lerp(new THREE.Color(tint), sample.surface === "stable" ? 0 : 0.44);
+      const variation = 0.88 + (Math.sin(x * 0.43 + z * 0.19) * 0.5 + 0.5) * 0.15;
+      colors.setXYZ(index, color.r * variation, color.g * variation, color.b * variation);
+    }
+    positions.needsUpdate = true;
+    colors.needsUpdate = true;
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
   }
 
   private createSurveyPad() {

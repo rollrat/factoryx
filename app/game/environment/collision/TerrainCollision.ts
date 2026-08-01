@@ -32,12 +32,15 @@ export const infrastructureHeightAt = (
   return surface.baseElevation + surface.rise * Math.max(0, Math.min(1, progress));
 };
 
-const canTraverse = (sampler: TerrainSampler, from: WorldPoint2, to: WorldPoint2, stratumId: string, surfaces: readonly TerrainInfrastructureSurface[]) => {
+export type HazardTraversalResolver = (position: WorldPoint2, stratumId: string) => boolean;
+
+const canTraverse = (sampler: TerrainSampler, from: WorldPoint2, to: WorldPoint2, stratumId: string, surfaces: readonly TerrainInfrastructureSurface[], hazardTraversal?: HazardTraversalResolver) => {
   const start = sampler.sample(from.x, from.z, stratumId);
   const end = sampler.sample(to.x, to.z, stratumId);
   const startInfrastructure = infrastructureHeightAt(from.x, from.z, surfaces);
   const endInfrastructure = infrastructureHeightAt(to.x, to.z, surfaces);
-  if (endInfrastructure === null && ["submerged", "hazard"].includes(end.surface)) return false;
+  if (endInfrastructure === null && end.surface === "submerged") return false;
+  if (endInfrastructure === null && end.surface === "hazard" && !hazardTraversal?.(to, stratumId)) return false;
   if (endInfrastructure === null && end.slopeDegrees > 38) return false;
   return Math.abs((endInfrastructure ?? end.height) - (startInfrastructure ?? start.height)) <= 0.72;
 };
@@ -49,11 +52,12 @@ export const resolveTerrainMovement = (
   desired: WorldPoint2,
   stratumId = "surface",
   surfaces: readonly TerrainInfrastructureSurface[] = [],
+  hazardTraversal?: HazardTraversalResolver,
 ): TerrainMovementResult => {
-  const afterX = canTraverse(sampler, start, { x: desired.x, z: start.z }, stratumId, surfaces)
+  const afterX = canTraverse(sampler, start, { x: desired.x, z: start.z }, stratumId, surfaces, hazardTraversal)
     ? { x: desired.x, z: start.z }
     : { ...start };
-  const afterZ = canTraverse(sampler, afterX, { x: afterX.x, z: desired.z }, stratumId, surfaces)
+  const afterZ = canTraverse(sampler, afterX, { x: afterX.x, z: desired.z }, stratumId, surfaces, hazardTraversal)
     ? { x: afterX.x, z: desired.z }
     : afterX;
   return {

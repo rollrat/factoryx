@@ -6,6 +6,7 @@ import GameHud, { type ProjectHudState } from "./components/GameHud";
 import ProjectProgressPanel from "./components/ProjectProgressPanel";
 import PowerControlPanel from "./components/PowerControlPanel";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
+import ExplorationJournal from "./components/ExplorationJournal";
 import { FactoryRuntime, type RuntimePowerControlSnapshot } from "./game/runtime";
 import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.ts";
 import type { CampaignSnapshot } from "./game/sim/campaign.ts";
@@ -14,6 +15,7 @@ import { START_DEFINITIONS } from "./game/data/index.ts";
 import { buildDefinitionLineageGraph, highlightLineagePath } from "./game/telemetry/definitionLineage.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 import type { EnvironmentRuntimeInfo } from "./game/environment/types.ts";
+import type { ExplorationSnapshot } from "./game/environment/exploration.ts";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
   dragging: false,
@@ -39,6 +41,9 @@ const INITIAL_ENVIRONMENT: EnvironmentRuntimeInfo = {
   weather: "clear",
   weatherStrength: 0,
   quality: "high",
+  explorationDiscovered: 0,
+  explorationTotal: 6,
+  audioMuted: false,
 };
 const INITIAL_POWER_CONTROL: RuntimePowerControlSnapshot = {
   capacityMW: 0, dispatchableMW: 0, requestedMW: 0, servedMW: 0, storedMWh: 0,
@@ -135,6 +140,8 @@ export default function FactoryGame({
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
   const [powerControlOpen, setPowerControlOpen] = useState(false);
+  const [explorationOpen, setExplorationOpen] = useState(false);
+  const [explorationSnapshot, setExplorationSnapshot] = useState<ExplorationSnapshot>({ version: 1, discoveredSiteIds: [] });
   const [catalogBuildingId, setCatalogBuildingId] = useState<string | null>(null);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
@@ -188,11 +195,13 @@ export default function FactoryGame({
     setCampaignSnapshot(runtime.getCampaignSnapshot());
     setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
     setPowerControl(runtime.getPowerControlSnapshot());
+    setExplorationSnapshot(runtime.getExplorationSnapshot());
     const telemetryTimer = window.setInterval(() => {
       setTopology(runtime.getProductionTopology());
       setCampaignSnapshot(runtime.getCampaignSnapshot());
       setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
       setPowerControl(runtime.getPowerControlSnapshot());
+      setExplorationSnapshot(runtime.getExplorationSnapshot());
     }, 250);
     return () => {
       window.clearInterval(telemetryTimer);
@@ -209,7 +218,17 @@ export default function FactoryGame({
         setCatalogOpen(false);
         setProjectOpen(false);
         setPowerControlOpen(false);
+        setExplorationOpen(false);
         return;
+      }
+      if (
+        event.key.toLowerCase() === "j"
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !isTextEntryTarget(event.target)
+        && !lineageOpen && !catalogOpen && !projectOpen && !powerControlOpen
+      ) {
+        event.preventDefault();
+        if (!event.repeat) setExplorationOpen((open) => !open);
       }
       if (
         event.key.toLowerCase() === "g"
@@ -247,11 +266,11 @@ export default function FactoryGame({
     };
     window.addEventListener("keydown", handleLineageKey);
     return () => window.removeEventListener("keydown", handleLineageKey);
-  }, [catalogOpen, lineageOpen, powerControlOpen, projectOpen]);
+  }, [catalogOpen, explorationOpen, lineageOpen, powerControlOpen, projectOpen]);
 
   useEffect(() => {
-    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen || projectOpen || powerControlOpen);
-  }, [catalogOpen, lineageOpen, powerControlOpen, projectOpen]);
+    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen || projectOpen || powerControlOpen || explorationOpen);
+  }, [catalogOpen, explorationOpen, lineageOpen, powerControlOpen, projectOpen]);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
   const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();
@@ -309,7 +328,16 @@ export default function FactoryGame({
           setPowerControlOpen((open) => !open);
         }}
         onRecipeCycle={() => runtimeRef.current?.cycleSelectedRecipe()}
+        onEnvironmentAudioToggle={() => runtimeRef.current?.toggleEnvironmentAudio()}
+        onExplorationToggle={() => {
+          setLineageOpen(false);
+          setCatalogOpen(false);
+          setProjectOpen(false);
+          setPowerControlOpen(false);
+          setExplorationOpen((open) => !open);
+        }}
       />
+      {explorationOpen ? <ExplorationJournal snapshot={explorationSnapshot} onClose={() => setExplorationOpen(false)} /> : null}
       {powerControlOpen ? (
         <PowerControlPanel
           snapshot={powerControl}

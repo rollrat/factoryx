@@ -115,12 +115,13 @@ button {
 }
 
 .environment-readout {
+  position: relative;
   min-width: 136px;
   min-height: 46px;
   display: grid;
   align-content: center;
   gap: 3px;
-  padding: 7px 12px;
+  padding: 7px 54px 7px 12px;
 }
 
 .environment-readout span,
@@ -137,6 +138,26 @@ button {
 }
 
 .environment-readout small { color: #9bb3ad; letter-spacing: 0; }
+
+.environment-audio-toggle {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  translate: 0 -50%;
+  min-width: 39px;
+  padding: 4px 5px;
+  border: 1px solid rgba(105, 234, 215, 0.25);
+  background: rgba(8, 18, 19, 0.72);
+  color: #9bd9d0;
+  font: 700 7px/1 var(--font-geist-mono), monospace;
+  cursor: pointer;
+}
+
+.environment-audio-toggle:hover,
+.environment-audio-toggle:focus-visible {
+  border-color: rgba(105, 234, 215, 0.65);
+  color: #d7fff9;
+}
 
 .system-readouts {
   min-height: 46px;
@@ -1149,6 +1170,23 @@ kbd {
   cursor: pointer;
   pointer-events: auto;
 }
+.exploration-journal-button {
+  position: absolute;
+  right: 14px;
+  bottom: 224px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 0;
+  color: #b8c4c3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.exploration-journal-button > span { color: var(--cyan); }
+.exploration-journal-button strong { font: 700 8px/1 var(--font-geist-mono), monospace; }
+.exploration-journal-button:hover { border-color: var(--line-strong); background: var(--hud-raised); }
 .power-control-button > span { color: var(--amber); }
 .power-control-button strong { font: 700 8px/1 var(--font-geist-mono), monospace; }
 .power-control-button:hover { border-color: var(--line-strong); background: var(--hud-raised); }
@@ -1169,6 +1207,31 @@ kbd {
 }
 
 .project-progress-overlay > section { width: min(1180px, 100%); max-height: calc(100dvh - 36px); }
+
+.exploration-overlay {
+  position: fixed;
+  inset: 6vh 7vw;
+  z-index: 94;
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid rgba(105, 234, 215, 0.28);
+  background: rgba(6, 15, 17, 0.96);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.56);
+  color: #c9d6d4;
+}
+.exploration-overlay header { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 22px; border-bottom: 1px solid rgba(145, 177, 173, 0.2); padding-bottom: 16px; }
+.exploration-overlay header span { color: var(--cyan); font: 700 8px/1 var(--font-geist-mono), monospace; letter-spacing: .16em; }
+.exploration-overlay h2 { margin: 5px 0 0; font-size: 22px; }
+.exploration-overlay header > strong { color: var(--amber); font: 700 18px/1 var(--font-geist-mono), monospace; }
+.exploration-overlay button { padding: 8px 11px; border: 1px solid rgba(145, 177, 173, .25); background: #111d1f; color: #c9d6d4; cursor: pointer; }
+.exploration-overlay ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0 0; padding: 0; list-style: none; }
+.exploration-overlay li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; min-height: 132px; padding: 16px; border: 1px solid rgba(145, 177, 173, .14); background: rgba(17, 29, 31, .7); opacity: .56; }
+.exploration-overlay li[data-discovered="true"] { border-left: 3px solid var(--cyan); opacity: 1; }
+.exploration-overlay li > span { color: var(--amber); font: 800 12px/1 var(--font-geist-mono), monospace; }
+.exploration-overlay li strong { display: block; margin-bottom: 5px; }
+.exploration-overlay li small { color: #819894; font: 700 8px/1 var(--font-geist-mono), monospace; }
+.exploration-overlay li p { margin: 13px 0 0; color: #aebfbc; font-size: 12px; line-height: 1.55; }
+.exploration-overlay li em { grid-column: 2; color: var(--cyan); font: 700 9px/1.3 var(--font-geist-mono), monospace; font-style: normal; }
 
 .project-progress-close {
   position: fixed;
@@ -1333,6 +1396,9 @@ kbd {
 
   .project-launch-button { right: 8px; bottom: 192px; }
   .power-control-button { right: 8px; bottom: 232px; }
+  .exploration-journal-button { right: 8px; bottom: 272px; }
+  .exploration-overlay { inset: 10px; padding: 14px; }
+  .exploration-overlay ol { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {

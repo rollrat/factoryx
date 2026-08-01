@@ -41,6 +41,8 @@ type GameHudProps = {
   onProjectProgressToggle: () => void;
   onPowerControlToggle: () => void;
   onRecipeCycle: () => void;
+  onEnvironmentAudioToggle: () => void;
+  onExplorationToggle: () => void;
 };
 
 type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
@@ -143,6 +145,8 @@ export default function GameHud({
   onProjectProgressToggle,
   onPowerControlToggle,
   onRecipeCycle,
+  onEnvironmentAudioToggle,
+  onExplorationToggle,
 }: GameHudProps) {
   const activeToolButtonRef = useRef<HTMLButtonElement>(null);
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
@@ -197,9 +201,10 @@ export default function GameHud({
         </div>
 
         <div className="environment-readout instrument-panel" role="status" aria-label={`${environment.biomeName}, ${environment.stratumId === "surface" ? "지상" : "동굴"}`}>
-          <span>{environment.stratumId === "surface" ? "SURFACE" : "SUBTERRANEAN"}</span>
+          <span>{environment.stratumId === "surface" ? "SURFACE" : "SUBTERRANEAN"} · {Math.floor(environment.timeOfDay * 24).toString().padStart(2, "0")}:{Math.floor((environment.timeOfDay * 24 % 1) * 60).toString().padStart(2, "0")}</span>
           <strong>{environment.biomeName}</strong>
-          <small>{environment.weather === "clear" ? "맑음" : environment.weather === "mist" ? "광물 안개" : environment.weather === "mineral_wind" ? "먼지 돌풍" : "전기성 폭풍"}</small>
+          <small>{environment.weather === "clear" ? "맑음" : environment.weather === "mist" ? "광물 안개" : environment.weather === "mineral_wind" ? "먼지 돌풍" : "전기성 폭풍"} {Math.round(environment.weatherStrength * 100)}% · 탐사 {environment.explorationDiscovered}/{environment.explorationTotal}</small>
+          <button type="button" className="environment-audio-toggle" onClick={onEnvironmentAudioToggle} aria-label={environment.audioMuted ? "환경음 켜기" : "환경음 끄기"}>{environment.audioMuted ? "음소거" : "환경음"}</button>
         </div>
 
         <div className="system-readouts instrument-panel">
@@ -428,6 +433,11 @@ export default function GameHud({
         <span aria-hidden="true">ϟ</span>
         <strong>전력망 제어</strong>
         <kbd>H</kbd>
+      </button>
+      <button className="exploration-journal-button instrument-panel" onClick={onExplorationToggle} aria-label="A-17 탐사 기록 열기">
+        <span aria-hidden="true">⌖</span>
+        <strong>탐사 기록</strong>
+        <kbd>J</kbd>
       </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>

@@ -9,7 +9,7 @@ import type {
   PowerGridInputSnapshot,
   PowerGridResult,
 } from "./powerGrid.ts";
-import type { DataDrivenWorld, WorldPort } from "./world.ts";
+import { portsShareStratumOrShaftPair, type DataDrivenWorld, type WorldPort } from "./world.ts";
 
 export type PowerPortRef = Readonly<{ ownerId: string; portId: string }>;
 
@@ -172,6 +172,9 @@ const validateEdges = (edges: readonly PowerEdge[], ports: ReadonlyMap<string, P
     if (!canConnect(from.port.definition, to.port.definition)) {
       throw new Error(`power edge ${edge.id} has incompatible port directions`);
     }
+    if (!portsShareStratumOrShaftPair(from.port, to.port)) {
+      throw new Error(`power edge ${edge.id} crosses strata without an authored shaft pair`);
+    }
   });
 };
 
@@ -189,7 +192,7 @@ export const inferAdjacentPowerEdges = (world: DataDrivenWorld): readonly PowerE
       if (from.instance.id === to.instance.id
         || from.port.connectionCell.x !== to.port.connectionCell.x
         || from.port.connectionCell.z !== to.port.connectionCell.z
-        || (from.port.stratumId !== to.port.stratumId && !(from.port.connectsStrata && to.port.connectsStrata))
+        || !portsShareStratumOrShaftPair(from.port, to.port)
         || (from.port.stratumId === to.port.stratumId
           && Math.abs(from.port.localPosition.y - to.port.localPosition.y) > (from.port.definition.connectorProfile === "power_high_voltage" ? 8 : 3))
         || from.port.definition.connectorProfile !== to.port.definition.connectorProfile
@@ -253,7 +256,8 @@ export const buildPhysicalPowerTopology = (
       });
       return;
     }
-    if (!building.distributionPolicy && building.id !== "substation") return;
+    if (!building.distributionPolicy && building.id !== "substation"
+      && building.terrainPolicy?.role !== "shaft_socket") return;
     const first = instancePorts[0].key;
     instancePorts.slice(1).forEach(({ key }) => {
       grid.union(first, key);

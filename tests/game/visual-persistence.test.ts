@@ -13,6 +13,8 @@ import { WorldProductionSimulation } from "../../app/game/sim/worldProduction.ts
 import { ProjectDockDeliveryCommitter } from "../../app/game/sim/projectDockCommitter.ts";
 import { PhysicalPowerRuntime } from "../../app/game/sim/physicalPowerRuntime.ts";
 import { inferAdjacentPowerEdges } from "../../app/game/sim/physicalPowerNetwork.ts";
+import { A17_ENVIRONMENT } from "../../app/game/environment/data/environment.ts";
+import { createEnvironmentSnapshot } from "../../app/game/environment/persistence/environmentSnapshot.ts";
 
 const snapshot = (): FactoryRuntimeSnapshot => ({
   version: 1,
@@ -84,5 +86,22 @@ test("visual runtime save rejects malformed power control state", () => {
     worldProduction: undefined,
     dockFluidTransferCredit: 0,
     powerControls: { breakers: { bad: "half_open" }, switchboardOutputs: {} },
+  }), false);
+});
+
+test("visual runtime save round-trips concrete environment clearing and powered hazard deltas", () => {
+  const integrated = {
+    ...snapshot(),
+    environment: createEnvironmentSnapshot(A17_ENVIRONMENT, {
+      removedPropIds: ["prop:a17_folded_by_wind:rock:17", "prop:a17_folded_by_wind:vegetation:81"],
+      stabilizedHazardIds: ["pressure_vent"],
+    }, { dayElapsedSeconds: 320, weatherElapsedSeconds: 41 }),
+  };
+  const decoded = factoryRuntimeSaveCodec.decode(factoryRuntimeSaveCodec.encode(integrated, { nowMs: 30 }));
+  assert.equal(decoded.ok, true);
+  if (decoded.ok) assert.deepEqual(decoded.value.snapshot.environment, integrated.environment);
+  assert.equal(isFactoryRuntimeSnapshot({
+    ...integrated,
+    environment: { ...integrated.environment, removedPropIds: [12] },
   }), false);
 });

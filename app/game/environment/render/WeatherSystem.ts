@@ -11,6 +11,7 @@ export class WeatherSystem {
   private strength = 0.34;
   private displayedStrength = 0.34;
   private phase = 0;
+  private biomeId = "windglass_basin";
   private readonly positions: Float32Array;
   private readonly scene: THREE.Scene;
 
@@ -46,13 +47,20 @@ export class WeatherSystem {
 
   getWeather() { return { kind: this.weather, strength: this.strength } as const; }
 
+  setBiome(biomeId: string) { this.biomeId = biomeId; }
+
   update(delta: number, camera: THREE.Camera) {
     this.root.position.x = camera.position.x;
     this.root.position.z = camera.position.z;
     this.phase += delta;
     this.displayedStrength = THREE.MathUtils.lerp(this.displayedStrength, this.strength, 1 - Math.exp(-delta * 1.4));
     const material = this.particles.material as THREE.PointsMaterial;
-    const targetColor = this.weather === "mist" ? 0x9eb9b6 : this.weather === "electrical_storm" ? 0x8f9aa8 : 0xc0ad8e;
+    const biomeColor = this.biomeId === "blackwater_marsh" ? 0x8fa9a2
+      : this.biomeId === "ironwind_faults" ? 0xb88a70
+        : this.biomeId === "silicate_sailwood" ? 0xc8bed5
+          : this.biomeId === "hematite_crown" ? 0xa87c68
+            : this.biomeId === "thermal_rift" ? 0xd8ccb5 : 0xc0ad8e;
+    const targetColor = this.weather === "mist" ? 0x9eb9b6 : this.weather === "electrical_storm" ? 0x8f9aa8 : biomeColor;
     material.color.lerp(new THREE.Color(targetColor), 1 - Math.exp(-delta * 1.2));
     material.opacity = THREE.MathUtils.lerp(material.opacity, this.weather === "clear" ? 0 : 0.06 + this.displayedStrength * 0.5, 1 - Math.exp(-delta * 1.8));
     material.size = THREE.MathUtils.lerp(material.size, this.weather === "mist" ? 0.16 : 0.075, 1 - Math.exp(-delta * 1.8));
@@ -65,8 +73,10 @@ export class WeatherSystem {
     for (let index = 0; index < this.positions.length; index += 3) {
       this.positions[index] += delta * speed;
       this.positions[index + 2] += delta * speed * 0.22;
+      if (this.biomeId === "thermal_rift") this.positions[index + 1] += delta * (0.4 + this.displayedStrength);
       if (this.positions[index] > 58) this.positions[index] -= 116;
       if (this.positions[index + 2] > 58) this.positions[index + 2] -= 116;
+      if (this.positions[index + 1] > 17) this.positions[index + 1] = 0.6;
     }
     (this.particles.geometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
   }
