@@ -256,6 +256,56 @@
   gap: 7px;
 }
 
+.machineGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+}
+
+.machineButton {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 10px 4px 9px;
+  border: 1px solid rgba(145, 199, 207, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  color: #78939b;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.machineButton > span {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(145, 199, 207, 0.15);
+  border-radius: 6px;
+  font: 800 9px/1 var(--font-geist-mono), monospace;
+}
+
+.machineButton strong {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 9px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.machineButton:hover,
+.machineButton.active {
+  border-color: rgba(105, 234, 215, 0.38);
+  background: rgba(105, 234, 215, 0.08);
+  color: #9bfff0;
+}
+
+.machineButton.active > span {
+  border-color: rgba(105, 234, 215, 0.48);
+  background: rgba(105, 234, 215, 0.1);
+}
+
 .modeButton {
   min-height: 58px;
   display: grid;

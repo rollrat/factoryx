@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { COST, TYPE_NAME, cellKey, directionForRotation, machinePorts } from "./config";
+import { COST, STORAGE_CAPACITY, TYPE_NAME, cellKey, directionForRotation, machinePorts } from "./config";
 import {
   createFactoryMaterials,
   createItemModel,
@@ -7,6 +7,9 @@ import {
   createStructureModel,
 } from "./models";
 import { animateMinerModel } from "./models/miner";
+import { animateSmelterModel } from "./models/smelter";
+import { animateAssemblerModel } from "./models/assembler";
+import { animateStorageModel } from "./models/storage";
 import { FactorySimulation } from "./simulation";
 import type {
   BuildType,
@@ -475,7 +478,7 @@ export class FactoryRuntime {
   private updateBeltBuildInfo(dragging: boolean) {
     const first = this.beltPreviewCells[0];
     const connectedStart = Boolean(first && Array.from(this.simulation.structures.values()).some((machine) => {
-      if (machine.type === "belt") return false;
+      if (machine.type === "belt" || machine.type === "storage") return false;
       const ports = machinePorts(machine);
       return ports.output.x === first.x
         && ports.output.z === first.z
@@ -572,7 +575,10 @@ export class FactoryRuntime {
     this.changeCredits(this.credits - cost);
     const connected = added.some((belt) =>
       Array.from(this.simulation.structures.values()).some(
-        (machine) => machine.type !== "belt" && machinePorts(machine).output.x === belt.x && machinePorts(machine).output.z === belt.z,
+        (machine) => machine.type !== "belt"
+          && machine.type !== "storage"
+          && machinePorts(machine).output.x === belt.x
+          && machinePorts(machine).output.z === belt.z,
       ),
     );
     this.callbacks.onToast(connected ? `출력 포트 연결 · 벨트 ${added.length}칸` : `컨베이어 ${added.length}칸 설치 완료`);
@@ -794,7 +800,8 @@ export class FactoryRuntime {
       const machineTime = (state?.animationTime ?? this.elapsed) + id * 0.17;
       const activity = state?.activity ?? 1;
       const outputQueued = (state?.output.length ?? 0) > 0;
-      const hasInputConnection = data.type !== "belt" && this.simulation.hasInputConnection(data);
+      const inputConnections = data.type === "belt" ? [] : this.simulation.getInputConnections(data);
+      const hasInputConnection = inputConnections.some(Boolean);
       const hasOutputConnection = data.type !== "belt" && this.simulation.hasOutputConnection(data);
       if (data.type === "miner") {
         animateMinerModel(group, {
@@ -805,6 +812,42 @@ export class FactoryRuntime {
           working: state?.working ?? false,
           outputQueued,
           outputConnected: hasOutputConnection,
+        });
+      }
+      if (data.type === "smelter") {
+        animateSmelterModel(group, {
+          time: machineTime,
+          delta,
+          progress: state?.progress ?? 0,
+          activity,
+          working: state?.working ?? false,
+          inputCount: state?.input.length ?? 0,
+          outputQueued,
+          inputConnected: hasInputConnection,
+          outputConnected: hasOutputConnection,
+        });
+      }
+      if (data.type === "assembler") {
+        animateAssemblerModel(group, {
+          time: machineTime,
+          delta,
+          progress: state?.progress ?? 0,
+          activity,
+          working: state?.working ?? false,
+          inputCount: state?.input.length ?? 0,
+          outputQueued,
+          inputConnected: hasInputConnection,
+          outputConnected: hasOutputConnection,
+        });
+      }
+      if (data.type === "storage") {
+        animateStorageModel(group, {
+          time: machineTime,
+          delta,
+          stored: state?.stored ?? 0,
+          capacity: STORAGE_CAPACITY,
+          intakePulse: state?.intakePulse ?? 0,
+          inputConnected: hasInputConnection,
         });
       }
       const beltItem = data.type === "belt" ? this.simulation.beltItems.get(id) : undefined;
@@ -826,40 +869,11 @@ export class FactoryRuntime {
             material.emissiveIntensity = beltJammed ? 1.8 + Math.sin(this.elapsed * 5) * 0.5 : 1.5;
           }
         }
-        if (role === "smelterGlow" && part instanceof THREE.Mesh) {
-          const material = part.material;
-          if (material instanceof THREE.MeshStandardMaterial) {
-            material.emissiveIntensity = 0.3 + activity * (1.9 + Math.sin(machineTime * 5.4) * 0.7);
-          }
-        }
-        if (role === "smelterHeatRing" && part instanceof THREE.Mesh) {
-          const heat = 1 + Math.sin(machineTime * 5.4) * 0.035 * activity;
-          part.scale.setScalar(heat);
-          const material = part.material;
-          if (material instanceof THREE.MeshStandardMaterial) material.opacity = 0.12 + activity * 0.55;
-        }
-        if (role === "smelterFan") part.rotation.z = -machineTime * 5.6;
-        if (role === "smelterSmoke" && part instanceof THREE.Mesh) {
-          const smokePhase = (machineTime * 0.34 + (part.userData.offset as number)) % 1;
-          part.position.y = (part.userData.baseY as number) + smokePhase * 0.92;
-          part.position.x = 0.34 + Math.sin(smokePhase * Math.PI * 2) * 0.08;
-          part.scale.setScalar(0.55 + smokePhase * 1.25);
-          const material = part.material;
-          if (material instanceof THREE.MeshStandardMaterial) material.opacity = (1 - smokePhase) * 0.24 * activity;
-        }
-        if (role === "assemblerTurntable") part.rotation.y = machineTime * 1.55;
-        if (role === "assemblerWorkpiece") {
-          part.rotation.y = -machineTime * 1.55;
-          part.position.y = 1.02 + Math.sin(machineTime * 6.2) * 0.025 * activity;
-        }
-        if (role === "assemblerArm") {
-          const baseY = part.userData.baseY as number;
-          const phase = machineTime * 0.72 + (part.userData.phase as number);
-          const press = Math.pow(Math.max(0, Math.sin(phase * Math.PI * 2)), 5) * activity;
-          part.position.y = baseY - press * 0.39;
-        }
         if ((role === "inputPort" || role === "outputPort") && part instanceof THREE.Mesh && data.type !== "belt") {
-          const connected = role === "inputPort" ? hasInputConnection : hasOutputConnection;
+          const inputIndex = (part.userData.inputIndex as number | undefined) ?? 0;
+          const connected = role === "inputPort"
+            ? (inputConnections[inputIndex] ?? false)
+            : hasOutputConnection;
           const material = part.material;
           if (material instanceof THREE.MeshStandardMaterial) material.emissiveIntensity = connected ? 1.6 : 0.15;
         }

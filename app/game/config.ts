@@ -32,12 +32,14 @@ export const TYPE_NAME: Record<BuildType, string> = {
   storage: "소형 저장고",
 };
 
+export const STORAGE_CAPACITY = 400;
+
 export const TYPE_RATE: Record<BuildType, string> = {
   belt: "52 /분",
   miner: "24 /분",
   smelter: "18 /분",
   assembler: "10 /분",
-  storage: "400 슬롯",
+  storage: `${STORAGE_CAPACITY} 슬롯`,
 };
 
 export const ORE_ANCHORS = new Set(["-8,-3", "7,4"]);
@@ -74,7 +76,17 @@ export const machinePorts = (data: StructureData): MachinePorts => {
     { input: { x: data.x + 2, z: data.z + 1 }, output: { x: data.x - 1, z: data.z + 1 } },
     { input: { x: data.x + 1, z: data.z - 1 }, output: { x: data.x + 1, z: data.z + 2 } },
   ];
-  return { ...ports[rotation], flow };
+  const secondaryAssemblerInputs: Cell[] = [
+    { x: data.x - 1, z: data.z + 1 },
+    { x: data.x + 1, z: data.z + 2 },
+    { x: data.x + 2, z: data.z },
+    { x: data.x, z: data.z - 1 },
+  ];
+  const primary = ports[rotation];
+  const inputs = data.type === "assembler"
+    ? [primary.input, secondaryAssemblerInputs[rotation]]
+    : [primary.input];
+  return { ...primary, inputs, flow };
 };
 
 export const sameDirection = (a: Direction, b: Direction) => a.x === b.x && a.z === b.z;

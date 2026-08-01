@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import type { BuildType, ItemType } from "./types";
 import { createMinerModel } from "./models/miner";
+import { createSmelterModel } from "./models/smelter";
+import { createAssemblerModel } from "./models/assembler";
+import { createStorageModel } from "./models/storage";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -47,21 +50,6 @@ const addBox = (
   mesh.receiveShadow = true;
   group.add(mesh);
   return mesh;
-};
-
-const addPort = (group: THREE.Group, x: number, color: number, role: "inputPort" | "outputPort") => {
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.2,
-    metalness: 0.3,
-    roughness: 0.3,
-  });
-  const port = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.34, 4), material);
-  port.position.set(x, 0.32, -0.5);
-  port.rotation.z = Math.PI / 2;
-  port.userData.animationRole = role;
-  group.add(port);
 };
 
 export const createStructureModel = (type: BuildType, materials: FactoryMaterials) => {
@@ -130,113 +118,9 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
   }
 
   if (type === "miner") return createMinerModel(materials);
-
-  addBox(group, [1.78, 0.24, 1.78], [0, 0.12, 0], materials.dark);
-  addBox(group, [1.5, 0.12, 1.5], [0, 0.3, 0], materials.steel);
-  addPort(group, -0.96, 0x5de4d1, "inputPort");
-  if (type !== "storage") addPort(group, 0.96, 0xffa94d, "outputPort");
-
-  if (type === "smelter") {
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.76, 1.16, 10), materials.steel);
-    body.position.y = 0.88;
-    body.castShadow = true;
-    group.add(body);
-    const furnace = new THREE.Mesh(
-      new THREE.BoxGeometry(0.58, 0.36, 0.08),
-      new THREE.MeshStandardMaterial({ color: 0xffb25b, emissive: 0xff641a, emissiveIntensity: 1.2 }),
-    );
-    furnace.position.set(0, 0.72, 0.68);
-    furnace.userData.animationRole = "smelterGlow";
-    group.add(furnace);
-    const heatRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.66, 0.045, 6, 18),
-      new THREE.MeshStandardMaterial({
-        color: 0xff9b42,
-        emissive: 0xff5218,
-        emissiveIntensity: 1.8,
-        transparent: true,
-        opacity: 0.35,
-      }),
-    );
-    heatRing.position.y = 1.12;
-    heatRing.rotation.x = Math.PI / 2;
-    heatRing.userData.animationRole = "smelterHeatRing";
-    group.add(heatRing);
-    const fan = new THREE.Group();
-    fan.position.set(-0.43, 0.92, 0.64);
-    fan.userData.animationRole = "smelterFan";
-    const fanHub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 10), materials.dark);
-    fanHub.rotation.x = Math.PI / 2;
-    fan.add(fanHub);
-    for (let index = 0; index < 3; index += 1) {
-      const blade = addBox(fan, [0.08, 0.31, 0.055], [0, 0.16, 0], materials.steel, false);
-      blade.rotation.z = index * ((Math.PI * 2) / 3);
-    }
-    group.add(fan);
-    const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.85, 8), materials.dark);
-    chimney.position.set(0.34, 1.65, -0.15);
-    chimney.castShadow = true;
-    group.add(chimney);
-    for (let index = 0; index < 3; index += 1) {
-      const smoke = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.14, 1),
-        new THREE.MeshStandardMaterial({
-          color: 0x8fa2a5,
-          transparent: true,
-          opacity: 0,
-          roughness: 1,
-          depthWrite: false,
-        }),
-      );
-      smoke.position.set(0.34, 2.12, -0.15);
-      smoke.userData.animationRole = "smelterSmoke";
-      smoke.userData.offset = index / 3;
-      smoke.userData.baseY = smoke.position.y;
-      group.add(smoke);
-    }
-  }
-
-  if (type === "assembler") {
-    addBox(group, [1.42, 0.46, 1.3], [0, 0.56, 0], materials.pale);
-    addBox(group, [0.22, 1.08, 0.22], [-0.65, 1.08, 0], materials.dark);
-    addBox(group, [0.22, 1.08, 0.22], [0.65, 1.08, 0], materials.dark);
-    addBox(group, [1.48, 0.18, 0.28], [0, 1.58, 0], materials.steel);
-    const turntable = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.58, 0.12, 12), materials.dark);
-    turntable.position.y = 0.86;
-    turntable.userData.animationRole = "assemblerTurntable";
-    turntable.castShadow = true;
-    group.add(turntable);
-    const workpiece = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.24, 0.36), materials.copper);
-    workpiece.position.y = 1.02;
-    workpiece.userData.animationRole = "assemblerWorkpiece";
-    group.add(workpiece);
-    [-0.36, 0.36].forEach((x, index) => {
-      const arm = new THREE.Group();
-      arm.position.set(x, 1.1, 0);
-      arm.userData.animationRole = "assemblerArm";
-      arm.userData.baseY = arm.position.y;
-      arm.userData.phase = index * 0.5;
-      const piston = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.58, 8), materials.steel);
-      piston.position.y = 0.24;
-      piston.castShadow = true;
-      arm.add(piston);
-      const head = new THREE.Mesh(
-        new THREE.BoxGeometry(0.3, 0.18, 0.3),
-        index === 0 ? materials.cyan : materials.amber,
-      );
-      head.position.y = -0.08;
-      head.castShadow = true;
-      arm.add(head);
-      group.add(arm);
-    });
-  }
-
-  if (type === "storage") {
-    addBox(group, [1.45, 1.22, 1.38], [0, 0.92, 0], materials.steel);
-    for (const y of [0.48, 0.86, 1.24]) addBox(group, [1.5, 0.07, 1.43], [0, y, 0], materials.dark);
-    addBox(group, [0.58, 0.18, 0.07], [0, 1.12, 0.72], materials.amber, false);
-  }
-
+  if (type === "smelter") return createSmelterModel(materials);
+  if (type === "assembler") return createAssemblerModel(materials);
+  if (type === "storage") return createStorageModel(materials);
   return group;
 };
 

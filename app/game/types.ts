@@ -26,6 +26,7 @@ export type Direction = { x: number; z: number };
 
 export type MachinePorts = {
   input: Cell;
+  inputs: Cell[];
   output: Cell;
   flow: Direction;
 };
@@ -38,6 +39,7 @@ export type MachineState = {
   activity: number;
   animationTime: number;
   stored: number;
+  intakePulse: number;
 };
 
 export type BeltItem = {

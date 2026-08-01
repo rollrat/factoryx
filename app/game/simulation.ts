@@ -1,5 +1,6 @@
 import {
   ORE_ANCHORS,
+  STORAGE_CAPACITY,
   cellKey,
   directionForRotation,
   footprint,
@@ -21,7 +22,7 @@ export class FactorySimulation {
   readonly beltItems = new Map<number, BeltItem>();
 
   private nextItemId = 1;
-  private inputPorts = new Map<string, number>();
+  private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
 
   addStructure(data: StructureData) {
     this.structures.set(data.id, { ...data });
@@ -35,6 +36,7 @@ export class FactorySimulation {
         activity: 0,
         animationTime: 0,
         stored: 0,
+        intakePulse: 0,
       });
     }
     this.rebuildPorts();
@@ -68,7 +70,7 @@ export class FactorySimulation {
   }
 
   hasOutputConnection(data: StructureData) {
-    if (data.type === "belt") return false;
+    if (data.type === "belt" || data.type === "storage") return false;
     const ports = machinePorts(data);
     const belt = this.getStructureAt(ports.output.x, ports.output.z);
     return belt?.type === "belt" && sameDirection(directionForRotation(belt.rotation), ports.flow);
@@ -76,9 +78,16 @@ export class FactorySimulation {
 
   hasInputConnection(data: StructureData) {
     if (data.type === "belt") return false;
+    return this.getInputConnections(data).some(Boolean);
+  }
+
+  getInputConnections(data: StructureData) {
+    if (data.type === "belt") return [];
     const ports = machinePorts(data);
-    const belt = this.getStructureAt(ports.input.x, ports.input.z);
-    return belt?.type === "belt" && sameDirection(directionForRotation(belt.rotation), ports.flow);
+    return ports.inputs.map((input) => {
+      const belt = this.getStructureAt(input.x, input.z);
+      return belt?.type === "belt" && sameDirection(directionForRotation(belt.rotation), ports.flow);
+    });
   }
 
   getStoredComponents() {
@@ -107,14 +116,17 @@ export class FactorySimulation {
     const state = this.machines.get(id);
     if (!state) return null;
     let status = "재료 대기";
-    if (data.type === "storage") status = state.stored > 0 ? "보관 중" : "입고 대기";
+    if (data.type === "storage") {
+      if (state.stored >= STORAGE_CAPACITY) status = "가득 참";
+      else status = state.stored > 0 ? "보관 중" : this.hasInputConnection(data) ? "입고 대기" : "벨트 연결 필요";
+    }
     else if (state.working) status = "가동 중";
     else if (state.output.length > 0) status = this.hasOutputConnection(data) ? "출력 대기" : "벨트 연결 필요";
     return {
       id,
       type: data.type,
       status,
-      progress: state.progress,
+      progress: data.type === "storage" ? state.stored / STORAGE_CAPACITY : state.progress,
       inputCount: data.type === "storage" ? state.stored : state.input.length,
       outputCount: state.output.length,
     };
@@ -128,9 +140,15 @@ export class FactorySimulation {
 
   private updateMachines(delta: number) {
     this.structures.forEach((data, id) => {
-      if (data.type === "belt" || data.type === "storage") return;
+      if (data.type === "belt") return;
       const state = this.machines.get(id);
       if (!state) return;
+      if (data.type === "storage") {
+        state.intakePulse = Math.max(0, state.intakePulse - delta / 0.42);
+        state.activity = state.intakePulse;
+        state.animationTime += delta;
+        return;
+      }
 
       if (!state.working && state.output.length === 0) {
         if (data.type === "miner") {
@@ -202,10 +220,11 @@ export class FactorySimulation {
       if (item.progress < 1) return;
 
       const direction = directionForRotation(belt.rotation);
-      const inputMachineId = this.inputPorts.get(cellKey(belt.x, belt.z));
-      if (inputMachineId !== undefined) {
-        const machine = this.structures.get(inputMachineId);
-        if (machine && sameDirection(machinePorts(machine).flow, direction) && this.acceptItem(inputMachineId, item.type)) {
+      const inputPort = this.inputPorts.get(cellKey(belt.x, belt.z));
+      if (inputPort !== undefined) {
+        const machine = this.structures.get(inputPort.machineId);
+        if (machine && sameDirection(machinePorts(machine).flow, direction)
+          && this.acceptItem(inputPort.machineId, item.type)) {
           this.beltItems.delete(beltId);
           return;
         }
@@ -235,8 +254,9 @@ export class FactorySimulation {
       state.input.push(item);
       return true;
     }
-    if (machine.type === "storage" && item === "component") {
+    if (machine.type === "storage" && item === "component" && state.stored < STORAGE_CAPACITY) {
       state.stored += 1;
+      state.intakePulse = 1;
       return true;
     }
     return false;
@@ -246,8 +266,9 @@ export class FactorySimulation {
     this.inputPorts.clear();
     this.structures.forEach((data) => {
       if (data.type === "belt" || data.type === "miner") return;
-      const input = machinePorts(data).input;
-      this.inputPorts.set(cellKey(input.x, input.z), data.id);
+      machinePorts(data).inputs.forEach((input, inputIndex) => {
+        this.inputPorts.set(cellKey(input.x, input.z), { machineId: data.id, inputIndex });
+      });
     });
   }
 }

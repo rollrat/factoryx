@@ -1,5 +1,5 @@
-import MinerStudio from "../components/MinerStudio";
+import MachineStudio from "../components/MachineStudio";
 
 export default function StudioPage() {
-  return <MinerStudio />;
+  return <MachineStudio />;
 }
