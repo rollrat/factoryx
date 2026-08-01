@@ -10,6 +10,7 @@ import {
   createFactoryMaterials,
 } from "../../app/game/models.ts";
 import {
+  animateGenericBuildingModel,
   createGenericBuildingModel,
   genericBuildingCategory,
   type GenericBuildingMaterials,
@@ -152,4 +153,93 @@ test("modelKey selects a dedicated model independently from the registry id", ()
   assert.equal(model.userData.modelKey, "vein_miner");
   assert.equal(model.userData.modelSource, "dedicated");
   assert.ok(hasAnimationRole(model, "minerDrill"));
+});
+
+const rolePart = (model: THREE.Object3D, role: string) => {
+  let found: THREE.Object3D | null = null;
+  model.traverse((part: THREE.Object3D) => {
+    if (!found && part.userData.animationRole === role) found = part;
+  });
+  assert.ok(found, `missing animation role ${role}`);
+  return found;
+};
+
+test("working progress drives actuators and gates while stopped states restore safe positions", () => {
+  const model = createGenericBuildingModel(building("hydraulic_former"), materials);
+  const actuator = rolePart(model, "processActuator");
+  const inputGate = rolePart(model, "inputGate");
+  const outputGate = rolePart(model, "outputGate");
+  const safeActuatorY = actuator.position.y;
+  const safeInputY = inputGate.position.y;
+  const safeOutputY = outputGate.position.y;
+
+  animateGenericBuildingModel(model, { runtimeState: "working", progress: 0.5, activity: 1, time: 2 });
+  assert.notEqual(actuator.position.y, safeActuatorY);
+  animateGenericBuildingModel(model, { runtimeState: "working", progress: 0.05, activity: 1, time: 2 });
+  assert.ok(inputGate.position.y > safeInputY);
+  animateGenericBuildingModel(model, { runtimeState: "working", progress: 0.9, activity: 1, time: 2 });
+  assert.ok(outputGate.position.y > safeOutputY);
+
+  for (const runtimeState of ["idle", "starved", "blocked", "disconnected", "paused"] as const) {
+    animateGenericBuildingModel(model, { runtimeState, progress: 0.9, activity: 1, time: 5 });
+    assert.equal(actuator.position.y, safeActuatorY, runtimeState);
+    assert.equal(inputGate.position.y, safeInputY, runtimeState);
+    assert.equal(outputGate.position.y, safeOutputY, runtimeState);
+  }
+});
+
+test("pump, fluid, routing, and generator motion follows working activity", () => {
+  const pump = createGenericBuildingModel(building("pipe_pump"), materials);
+  const rotor = rolePart(pump, "pumpRotor");
+  const fluidPath = rolePart(pump, "fluidPath");
+  const safeRotor = rotor.rotation.z;
+  animateGenericBuildingModel(pump, { runtimeState: "working", progress: 0.5, activity: 0.75, time: 3 });
+  assert.notEqual(rotor.rotation.z, safeRotor);
+  assert.notEqual(fluidPath.scale.y, 1);
+  animateGenericBuildingModel(pump, { runtimeState: "disconnected", progress: 0.5, activity: 1, time: 8 });
+  assert.equal(rotor.rotation.z, safeRotor);
+  assert.equal(fluidPath.scale.y, 1);
+
+  const junction = createGenericBuildingModel(building("splitter"), materials);
+  const gate = rolePart(junction, "routingGate");
+  const safeGate = gate.rotation.y;
+  animateGenericBuildingModel(junction, { runtimeState: "working", progress: 0.5, activity: 1, time: 0.7 });
+  assert.notEqual(gate.rotation.y, safeGate);
+  animateGenericBuildingModel(junction, { runtimeState: "paused", progress: 0.5, activity: 1, time: 4 });
+  assert.equal(gate.rotation.y, safeGate);
+
+  const generator = createGenericBuildingModel(building("combined_fuel_turbine"), materials);
+  const generatorRotor = rolePart(generator, "generatorRotor");
+  const safeGenerator = generatorRotor.rotation.x;
+  animateGenericBuildingModel(generator, { runtimeState: "working", progress: 0.4, activity: 1, time: 2 });
+  assert.notEqual(generatorRotor.rotation.x, safeGenerator);
+  animateGenericBuildingModel(generator, { runtimeState: "blocked", progress: 0.4, activity: 1, time: 7 });
+  assert.equal(generatorRotor.rotation.x, safeGenerator);
+});
+
+test("status light encodes every generic runtime state without sharing material mutation", () => {
+  const first = createGenericBuildingModel(building("industrial_winder"), materials);
+  const second = createGenericBuildingModel(building("industrial_winder"), materials);
+  const firstStatus = rolePart(first, "status") as THREE.Mesh;
+  const secondStatus = rolePart(second, "status") as THREE.Mesh;
+  assert.notEqual(firstStatus.material, secondStatus.material);
+
+  const expected = {
+    idle: 0x5d7b80,
+    working: 0x5de4d1,
+    starved: 0xffa94d,
+    blocked: 0xffa94d,
+    disconnected: 0xd96f32,
+    paused: 0xa8bcc0,
+  } as const;
+  for (const [runtimeState, color] of Object.entries(expected)) {
+    animateGenericBuildingModel(first, {
+      runtimeState: runtimeState as keyof typeof expected,
+      progress: 0.5,
+      activity: 1,
+      time: 1,
+    });
+    assert.equal((firstStatus.material as THREE.MeshStandardMaterial).color.getHex(), color);
+  }
+  assert.equal((secondStatus.material as THREE.MeshStandardMaterial).color.getHex(), 0x5de4d1);
 });

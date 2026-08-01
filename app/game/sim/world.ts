@@ -44,6 +44,10 @@ export type WorldPlacementResult =
     cell?: GridCell;
   }>;
 
+export type WorldBatchPlacementResult =
+  | Readonly<{ ok: true; instances: readonly BuildingInstance[]; consumedItems: readonly ItemStack[] }>
+  | Extract<WorldPlacementResult, { ok: false }>;
+
 export type WorldDemolitionResult =
   | Readonly<{ ok: true; instance: BuildingInstance; recoveredItems: readonly ItemStack[] }>
   | Readonly<{ ok: false; reason: "unknown_instance" | "immutable_preplaced" }>;
@@ -179,19 +183,27 @@ export class DataDrivenWorld {
     stacks.forEach(({ itemId, amount }) => this.addInventory(itemId, amount));
   }
 
-  place(request: WorldPlacementRequest): WorldPlacementResult {
+  previewPlace(request: WorldPlacementRequest): Readonly<{ ok: true }> | Extract<WorldPlacementResult, { ok: false }> {
     const definition = this.registry.buildings.get(request.buildingId);
     if (!definition) return { ok: false, reason: "unknown_building" };
     if (definition.placementMode === "preplaced_unique") return { ok: false, reason: "preplaced_unique" };
     if (!this.unlockedIds.has(definition.unlockId)) return { ok: false, reason: "locked" };
     const placementIssue = this.validatePlacement(definition, request.position, request.rotation);
     if (placementIssue) return placementIssue;
-    const buildCost = aggregateStacks(definition.buildCost);
-    for (const cost of buildCost) {
+    for (const cost of aggregateStacks(definition.buildCost)) {
       if (this.inventoryAmount(cost.itemId) < cost.amount) {
         return { ok: false, reason: "insufficient_materials", itemId: cost.itemId };
       }
     }
+    return { ok: true };
+  }
+
+  place(request: WorldPlacementRequest): WorldPlacementResult {
+    const definition = this.registry.buildings.get(request.buildingId);
+    if (!definition) return { ok: false, reason: "unknown_building" };
+    const preview = this.previewPlace(request);
+    if (!preview.ok) return preview;
+    const buildCost = aggregateStacks(definition.buildCost);
 
     const instance = this.createInstance(
       `building-${this.nextInstanceId}`,
@@ -204,6 +216,23 @@ export class DataDrivenWorld {
     this.nextInstanceId += 1;
     this.insertInstance(instance, definition);
     return { ok: true, instance: cloneInstance(instance), consumedItems: cloneStacks(buildCost) };
+  }
+
+  /** Places a drag-built route as one transaction; a failed segment rolls back every prior segment. */
+  placeBatch(requests: readonly WorldPlacementRequest[]): WorldBatchPlacementResult {
+    const before = this.snapshot();
+    const instances: BuildingInstance[] = [];
+    const consumed: ItemStack[] = [];
+    for (const request of requests) {
+      const result = this.place(request);
+      if (!result.ok) {
+        this.restore(before);
+        return result;
+      }
+      instances.push(result.instance);
+      consumed.push(...result.consumedItems);
+    }
+    return { ok: true, instances, consumedItems: aggregateStacks(consumed) };
   }
 
   demolish(instanceId: string): WorldDemolitionResult {

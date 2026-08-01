@@ -1,5 +1,7 @@
 import { BrowserSaveStorage, createJsonSaveCodec } from "./persistence.ts";
 import { FactorySimulation, type FactorySimulationSnapshot } from "./simulation.ts";
+import { START_REGISTRY } from "./data/index.ts";
+import { DataDrivenWorld, type WorldSnapshot } from "./sim/world.ts";
 import type { CameraMode } from "./types.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
@@ -7,6 +9,7 @@ export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
 export type FactoryRuntimeSnapshot = Readonly<{
   version: 1;
   simulation: FactorySimulationSnapshot;
+  world?: WorldSnapshot;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -34,7 +37,10 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     "cameraAngle", "cameraMode", "cameraTarget", "cameraZoom", "credits",
     "firstPersonPitch", "firstPersonYaw", "nextId", "playerPosition", "simulation", "version",
   ].sort();
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) return false;
+  const expectedWithWorld = [...expected, "world"].sort();
+  const matches = (candidate: readonly string[]) => keys.length === candidate.length
+    && keys.every((key, index) => key === candidate[index]);
+  if (!matches(expected) && !matches(expectedWithWorld)) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -47,6 +53,11 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     || !isFiniteNumber(value.firstPersonPitch)) return false;
   try {
     new FactorySimulation(24, value.simulation as FactorySimulationSnapshot);
+    if (value.world !== undefined) {
+      if (!isRecord(value.world) || !isRecord(value.world.bounds)) return false;
+      const bounds = value.world.bounds as WorldSnapshot["bounds"];
+      new DataDrivenWorld({ registry: START_REGISTRY, bounds, snapshot: value.world as WorldSnapshot });
+    }
     return true;
   } catch {
     return false;

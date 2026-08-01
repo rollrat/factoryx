@@ -25,6 +25,7 @@ export type StructureData = {
   id: number;
   type: BuildType;
   buildingId?: BuildingId;
+  worldInstanceId?: string;
   x: number;
   z: number;
   rotation: number;
@@ -121,7 +122,13 @@ export type GameCallbacks = {
   onBeltBuildInfo: (info: BeltBuildInfo) => void;
   onPower: (power: PowerInfo) => void;
   onProject: (project: ProjectInfo) => void;
+  onConstructionState: (state: ConstructionUiState) => void;
 };
+
+export type ConstructionUiState = Readonly<{
+  unlockedIds: readonly UnlockId[];
+  inventoryByItemId: Readonly<Record<string, number>>;
+}>;
 
 // New data-driven contracts live beside the legacy prototype types so the
 // runtime can migrate one vertical slice at a time without breaking the game.

@@ -176,6 +176,17 @@ test("insufficient materials fail without partial consumption", () => {
   assert.equal(world.instanceAt({ x: 0, z: 0 }), null);
 });
 
+test("batch placement rolls back every segment when a later segment fails", () => {
+  const world = createWorld();
+  const before = world.snapshot();
+  const result = world.placeBatch([
+    { buildingId: "machine", position: { x: 0, z: 0 }, rotation: 0 },
+    { buildingId: "machine", position: { x: 0, z: 0 }, rotation: 0 },
+  ]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(world.snapshot(), before);
+});
+
 test("snapshot restore preserves inventory, unlocks, instances, runtime contents, and next id", () => {
   const original = createWorld();
   original.unlock("phase_1_complete");

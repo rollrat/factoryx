@@ -23,6 +23,21 @@ export type GenericBuildingCategory =
   | "storage"
   | "infrastructure";
 
+export type GenericBuildingRuntimeState =
+  | "idle"
+  | "working"
+  | "starved"
+  | "blocked"
+  | "disconnected"
+  | "paused";
+
+export type GenericBuildingVisualState = Readonly<{
+  runtimeState: GenericBuildingRuntimeState;
+  progress: number;
+  activity: number;
+  time: number;
+}>;
+
 const add = (
   group: THREE.Group,
   geometry: THREE.BufferGeometry,
@@ -108,10 +123,17 @@ const addStatus = (
     "controlPanel",
   );
   panel.userData.activeMW = definition.activeMW ?? 0;
+  const statusMaterial = new THREE.MeshStandardMaterial({
+    color: 0x5de4d1,
+    emissive: 0x1a8f82,
+    emissiveIntensity: 0.5,
+    metalness: 0.2,
+    roughness: 0.3,
+  });
   const lamp = add(
     group,
     new THREE.SphereGeometry(0.045, 8, 6),
-    definition.activeMW ? materials.cyan : materials.amber,
+    statusMaterial,
     [definition.footprint.x / 2 - 0.13, Math.min(height + 0.09, 1.36), definition.footprint.z / 2 - 0.3],
     [0, 0, 0],
     "status",
@@ -299,6 +321,21 @@ const addPortMarker = (
       port.direction === "input" ? materials.amber : materials.cyan,
       role,
     );
+    if (port.direction !== "bidirectional") {
+      const gatePosition: [number, number, number] = [
+        position[0] - port.localFacing.x * 0.075,
+        position[1] + 0.09,
+        position[2] - port.localFacing.z * 0.075,
+      ];
+      const gate = box(
+        group,
+        alongX ? [0.055, 0.2, 0.58] : [0.58, 0.2, 0.055],
+        gatePosition,
+        materials.orange,
+        port.direction === "input" ? "inputGate" : "outputGate",
+      );
+      gate.userData.controlledPortId = port.id;
+    }
   } else if (port.medium === "fluid") {
     const rotation: [number, number, number] = port.localFacing.x !== 0
       ? [0, 0, Math.PI / 2]
@@ -345,4 +382,172 @@ export const createGenericBuildingModel = (
 
   definition.ports.forEach((port, index) => addPortMarker(group, port, index, materials));
   return group;
+};
+
+type GenericBaseTransform = Readonly<{
+  position: readonly [number, number, number];
+  rotation: readonly [number, number, number];
+  scale: readonly [number, number, number];
+  visible: boolean;
+}>;
+
+const baseTransform = (part: THREE.Object3D): GenericBaseTransform => {
+  const existing = part.userData.genericBaseTransform as GenericBaseTransform | undefined;
+  if (existing) return existing;
+  const created: GenericBaseTransform = {
+    position: [part.position.x, part.position.y, part.position.z],
+    rotation: [part.rotation.x, part.rotation.y, part.rotation.z],
+    scale: [part.scale.x, part.scale.y, part.scale.z],
+    visible: part.visible,
+  };
+  part.userData.genericBaseTransform = created;
+  return created;
+};
+
+const restoreTransform = (part: THREE.Object3D, base: GenericBaseTransform) => {
+  part.position.set(...base.position);
+  part.rotation.set(...base.rotation);
+  part.scale.set(...base.scale);
+  part.visible = base.visible;
+};
+
+const setStatusMaterial = (
+  part: THREE.Object3D,
+  color: number,
+  emissive: number,
+  intensity: number,
+) => {
+  if (!(part instanceof THREE.Mesh) || !(part.material instanceof THREE.MeshStandardMaterial)) return;
+  part.material.color.setHex(color);
+  part.material.emissive.setHex(emissive);
+  part.material.emissiveIntensity = intensity;
+};
+
+const animateStatus = (
+  part: THREE.Object3D,
+  state: GenericBuildingRuntimeState,
+  time: number,
+  activity: number,
+) => {
+  if (state === "working") {
+    setStatusMaterial(part, 0x5de4d1, 0x1a8f82, 1.15 + Math.sin(time * 4) * 0.22 * activity);
+  } else if (state === "starved") {
+    const flash = Math.sin(time * 7) > 0.45 ? 1.65 : 0.35;
+    setStatusMaterial(part, 0xffa94d, 0x9b480c, flash);
+  } else if (state === "blocked") {
+    setStatusMaterial(part, 0xffa94d, 0x9b480c, 1.15 + Math.sin(time * 2.5) * 0.28);
+  } else if (state === "disconnected") {
+    setStatusMaterial(part, 0xd96f32, 0x5f2410, 0.28);
+  } else if (state === "paused") {
+    setStatusMaterial(part, 0xa8bcc0, 0x263136, 0.12);
+  } else {
+    setStatusMaterial(part, 0x5d7b80, 0x163e3c, 0.24);
+  }
+};
+
+/** Applies deterministic, non-accumulating motion to a generic data-driven blockout. */
+export const animateGenericBuildingModel = (
+  group: THREE.Group,
+  visual: GenericBuildingVisualState,
+) => {
+  const progress = THREE.MathUtils.clamp(visual.progress, 0, 1);
+  const activity = THREE.MathUtils.clamp(visual.activity, 0, 1);
+  const operating = visual.runtimeState === "working" && activity > 0;
+  const motion = operating ? activity : 0;
+  const intake = operating ? 1 - THREE.MathUtils.smoothstep(progress, 0.14, 0.28) : 0;
+  const process = operating
+    ? THREE.MathUtils.smoothstep(progress, 0.22, 0.36) * (1 - THREE.MathUtils.smoothstep(progress, 0.76, 0.88))
+    : 0;
+  const release = operating
+    ? THREE.MathUtils.smoothstep(progress, 0.8, 0.92) * (1 - THREE.MathUtils.smoothstep(progress, 0.98, 1))
+    : 0;
+
+  group.traverse((part: THREE.Object3D) => {
+    const role = part.userData.animationRole as string | undefined;
+    if (!role) return;
+    const base = baseTransform(part);
+    restoreTransform(part, base);
+
+    if (role === "status") {
+      animateStatus(part, visual.runtimeState, visual.time, activity);
+      return;
+    }
+    if (role === "processCore") {
+      part.rotation.y = base.rotation[1] + visual.time * 3.2 * motion * Math.max(0.2, process);
+      return;
+    }
+    if (role === "processRing") {
+      const pulse = 1 + process * (0.04 + Math.sin(visual.time * 6) * 0.025);
+      part.scale.set(base.scale[0] * pulse, base.scale[1] * pulse, base.scale[2] * pulse);
+      part.rotation.z = base.rotation[2] + visual.time * 0.7 * motion;
+      return;
+    }
+    if (role === "processActuator") {
+      part.position.y = base.position[1] - process * (0.11 + Math.sin(progress * Math.PI * 6) * 0.025);
+      return;
+    }
+    if (role === "inputGate") {
+      part.position.y = base.position[1] + intake * 0.16;
+      return;
+    }
+    if (role === "outputGate") {
+      part.position.y = base.position[1] + release * 0.16;
+      return;
+    }
+    if (role === "routingGate") {
+      part.rotation.y = base.rotation[1] + Math.sin(visual.time * 5) * 0.58 * motion;
+      return;
+    }
+    if (role === "transportLane") {
+      part.position.x = base.position[0] + (operating ? ((visual.time * 0.32 * activity + 0.09) % 0.18) - 0.09 : 0);
+      return;
+    }
+    if (role === "pumpRotor") {
+      part.rotation.z = base.rotation[2] + visual.time * 7 * motion;
+      return;
+    }
+    if (role === "fluidPath" || role === "fluidBranch") {
+      const flowPulse = operating ? 1 + Math.sin(visual.time * 5) * 0.018 * activity : 1;
+      part.scale.set(base.scale[0], base.scale[1] * flowPulse, base.scale[2] * flowPulse);
+      return;
+    }
+    if (role === "flareFlame") {
+      part.visible = operating;
+      const flamePulse = 0.88 + (Math.sin(visual.time * 9) * 0.5 + 0.5) * 0.22;
+      part.scale.set(base.scale[0] * flamePulse, base.scale[1] * flamePulse, base.scale[2] * flamePulse);
+      return;
+    }
+    if (role === "generatorRotor") {
+      part.rotation.x = base.rotation[0] + visual.time * 4.5 * motion;
+      return;
+    }
+    if (role === "generatorCoil") {
+      const loadPulse = operating ? 1 + Math.sin(visual.time * 4) * 0.025 * activity : 1;
+      part.scale.set(base.scale[0] * loadPulse, base.scale[1] * loadPulse, base.scale[2] * loadPulse);
+      return;
+    }
+    if (role === "powerPulse") {
+      part.visible = operating;
+      const pulse = 0.8 + (Math.sin(visual.time * 6 + part.position.x * 3) * 0.5 + 0.5) * 0.45;
+      part.scale.set(base.scale[0] * pulse, base.scale[1] * pulse, base.scale[2] * pulse);
+      return;
+    }
+    if (role === "distributionBusbar") {
+      const busPulse = operating ? 1 + Math.sin(visual.time * 3 + part.position.z * 4) * 0.018 : 1;
+      part.scale.set(base.scale[0] * busPulse, base.scale[1], base.scale[2]);
+      return;
+    }
+    if (role === "storageLift") {
+      part.position.y = base.position[1] + (operating ? Math.sin(progress * Math.PI) * 0.24 : 0);
+      return;
+    }
+    if (role === "storageGauge") {
+      part.scale.y = base.scale[1] * Math.max(0.08, progress);
+      part.position.y = base.position[1] - (1 - Math.max(0.08, progress)) * 0.12;
+      return;
+    }
+    if (role === "assemblyCradle") {
+      part.rotation.y = base.rotation[1] + visual.time * 0.45 * motion;
+    }
+  });
 };

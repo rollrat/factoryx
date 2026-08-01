@@ -13,6 +13,7 @@ import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
 import { animateLogisticsModel } from "./models/logistics";
 import { animateCrusherModel } from "./models/crusher";
+import { animateGenericBuildingModel } from "./models/genericBuilding.ts";
 import {
   animateDistributionPoleModel,
   animateFieldPowerCoreModel,
@@ -21,8 +22,9 @@ import {
 } from "./models/power";
 import { animateProjectDockModel, createProjectDockModel } from "./models/projectDock";
 import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
-import { START_REGISTRY } from "./data/index.ts";
+import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
+import { DataDrivenWorld } from "./sim/world.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
@@ -58,6 +60,17 @@ const legacyTypeForBuilding = (buildingId: BuildingId): BuildType => {
   return "assembler";
 };
 
+const defaultBuildingForLegacyType = (type: BuildType): BuildingId => ({
+  belt: "conveyor_mk1",
+  splitter: "splitter",
+  merger: "merger",
+  miner: "vein_miner",
+  smelter: "arc_smelter",
+  crusher: "crusher",
+  assembler: "hydraulic_former",
+  storage: "small_storage",
+})[type];
+
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly powerCoreGroup: THREE.Group;
@@ -68,6 +81,7 @@ export class FactoryRuntime {
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
   private readonly materials = createFactoryMaterials();
   private readonly simulation: FactorySimulation;
+  private readonly world: DataDrivenWorld;
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
@@ -159,6 +173,13 @@ export class FactoryRuntime {
     const loaded = this.saveStorage.load();
     const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
     this.simulation = new FactorySimulation(24, restored?.simulation);
+    this.world = new DataDrivenWorld({
+      registry: START_REGISTRY,
+      bounds: { minX: -12, maxX: 12, minZ: -12, maxZ: 12 },
+      constructionInventory: CAMPAIGN_START_INVENTORY,
+      ...(restored?.world ? { snapshot: restored.world } : {}),
+    });
+    if (restored && !restored.world) this.rebuildWorldFromLegacySave();
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -194,13 +215,13 @@ export class FactoryRuntime {
     this.powerPoleGroup = powerModels.pole;
     this.projectDockGroup = powerModels.projectDock;
     if (restored) this.simulation.structures.forEach((structure) => this.mountStructure(structure));
-    else this.seedFactory();
     this.bindEvents();
     this.resize();
     this.updateCamera();
     this.callbacks.onCredits(this.credits);
     this.publishPower();
     this.publishProject();
+    this.publishConstructionState();
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
@@ -227,6 +248,10 @@ export class FactoryRuntime {
     const definition = START_REGISTRY.buildings.get(buildingId);
     if (!definition || definition.placementMode !== "buildable") {
       this.callbacks.onToast("건설할 수 없는 설비입니다");
+      return false;
+    }
+    if (!this.world.snapshot().unlockedIds.includes(definition.unlockId)) {
+      this.callbacks.onToast("아직 해금되지 않은 설비입니다");
       return false;
     }
     const type = legacyTypeForBuilding(buildingId);
@@ -468,6 +493,7 @@ export class FactoryRuntime {
     return {
       version: 1,
       simulation: this.simulation.snapshot(),
+      world: this.world.snapshot(),
       credits: this.credits,
       nextId: this.nextId,
       cameraMode: this.cameraMode,
@@ -478,6 +504,37 @@ export class FactoryRuntime {
       firstPersonYaw: this.firstPersonYaw,
       firstPersonPitch: this.firstPersonPitch,
     };
+  }
+
+  private rebuildWorldFromLegacySave() {
+    const structures = [...this.simulation.structures.values()];
+    const costs = new Map<string, number>();
+    structures.forEach((structure) => {
+      const buildingId = structure.buildingId ?? defaultBuildingForLegacyType(structure.type);
+      START_REGISTRY.buildings.get(buildingId)?.buildCost.forEach(({ itemId, amount }) => {
+        costs.set(itemId, (costs.get(itemId) ?? 0) + amount);
+      });
+    });
+    this.world.grantItems([...costs].map(([itemId, amount]) => ({ itemId, amount })));
+    structures.forEach((structure) => {
+      const buildingId = structure.buildingId ?? defaultBuildingForLegacyType(structure.type);
+      const placed = this.world.place({
+        buildingId,
+        position: { x: structure.x, z: structure.z },
+        rotation: structure.rotation as 0 | 1 | 2 | 3,
+      });
+      if (!placed.ok) return;
+      structure.buildingId = buildingId;
+      structure.worldInstanceId = placed.instance.id;
+    });
+  }
+
+  private publishConstructionState() {
+    const snapshot = this.world.snapshot();
+    this.callbacks.onConstructionState({
+      unlockedIds: snapshot.unlockedIds,
+      inventoryByItemId: Object.fromEntries(snapshot.constructionInventory.map(({ itemId, amount }) => [itemId, amount])),
+    });
   }
 
   private save(paused: boolean) {
@@ -616,7 +673,13 @@ export class FactoryRuntime {
       this.ghostBuildingId = this.selectedBuildingId;
       this.scene.add(this.ghost);
     }
-    this.ghostValid = this.simulation.canPlace(type, this.currentCell.x, this.currentCell.z);
+    this.ghostValid = this.selectedBuildingId
+      ? this.world.previewPlace({
+        buildingId: this.selectedBuildingId,
+        position: { x: this.currentCell.x, z: this.currentCell.z },
+        rotation: this.rotation as 0 | 1 | 2 | 3,
+      }).ok
+      : this.simulation.canPlace(type, this.currentCell.x, this.currentCell.z);
     const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
     this.ghost.position.copy(definition
       ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
@@ -732,8 +795,31 @@ export class FactoryRuntime {
       this.callbacks.onToast(type === "miner" ? "채굴기는 광맥 위에 설치해야 합니다" : "이 위치에는 설치할 수 없습니다");
       return;
     }
-    const cost = COST[type];
-    if (this.credits < cost) {
+    const selectedDefinition = this.selectedBuildingId
+      ? START_REGISTRY.buildings.get(this.selectedBuildingId)
+      : null;
+    const worldPlacement = this.selectedBuildingId
+      ? this.world.place({
+        buildingId: this.selectedBuildingId,
+        position: { x: this.currentCell.x, z: this.currentCell.z },
+        rotation: this.rotation as 0 | 1 | 2 | 3,
+      })
+      : null;
+    if (worldPlacement && !worldPlacement.ok) {
+      const messages = {
+        locked: "아직 해금되지 않은 설비입니다",
+        insufficient_materials: "건설 재료가 부족합니다",
+        occupied: "실제 설비 점유 영역이 겹칩니다",
+        out_of_bounds: "공장 경계를 벗어났습니다",
+        invalid_rotation: "지원하지 않는 회전입니다",
+        unknown_building: "알 수 없는 설비입니다",
+        preplaced_unique: "고정 설비는 건설할 수 없습니다",
+      } as const;
+      this.callbacks.onToast(messages[worldPlacement.reason]);
+      return;
+    }
+    const cost = selectedDefinition ? 0 : COST[type];
+    if (!selectedDefinition && this.credits < cost) {
       this.callbacks.onToast("크레딧이 부족합니다");
       return;
     }
@@ -741,12 +827,15 @@ export class FactoryRuntime {
       id: this.nextId++,
       type,
       ...(this.selectedBuildingId ? { buildingId: this.selectedBuildingId } : {}),
+      ...(worldPlacement?.ok ? { worldInstanceId: worldPlacement.instance.id } : {}),
       x: this.currentCell.x,
       z: this.currentCell.z,
       rotation: this.rotation,
     });
-    this.history.push({ added: [{ ...data }], removed: [], creditDelta: -cost });
-    this.changeCredits(this.credits - cost);
+    if (!selectedDefinition) {
+      this.history.push({ added: [{ ...data }], removed: [], creditDelta: -cost });
+      this.changeCredits(this.credits - cost);
+    } else this.publishConstructionState();
     const buildingName = this.selectedBuildingId
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)?.name
       : TYPE_NAME[type];
@@ -759,21 +848,40 @@ export class FactoryRuntime {
       this.callbacks.onToast("경로가 막혀 있습니다");
       return;
     }
-    const cost = COST.belt * this.beltPreviewCells.length;
-    if (this.credits < cost) {
+    const selectedDefinition = this.selectedBuildingId
+      ? START_REGISTRY.buildings.get(this.selectedBuildingId)
+      : null;
+    const worldPlacement = this.selectedBuildingId
+      ? this.world.placeBatch(this.beltPreviewCells.map((cell) => ({
+        buildingId: this.selectedBuildingId!,
+        position: { x: cell.x, z: cell.z },
+        rotation: cell.rotation as 0 | 1 | 2 | 3,
+      })))
+      : null;
+    if (worldPlacement && !worldPlacement.ok) {
+      this.callbacks.onToast(worldPlacement.reason === "insufficient_materials"
+        ? "컨베이어 건설 재료가 부족합니다"
+        : "컨베이어 경로가 실제 설비 점유 영역과 겹칩니다");
+      return;
+    }
+    const cost = selectedDefinition ? 0 : COST.belt * this.beltPreviewCells.length;
+    if (!selectedDefinition && this.credits < cost) {
       this.callbacks.onToast("크레딧이 부족합니다");
       return;
     }
-    const added = this.beltPreviewCells.map((cell) => this.addStructure({
+    const added = this.beltPreviewCells.map((cell, index) => this.addStructure({
       id: this.nextId++,
       type: "belt",
       ...(this.selectedBuildingId ? { buildingId: this.selectedBuildingId } : {}),
+      ...(worldPlacement?.ok ? { worldInstanceId: worldPlacement.instances[index]?.id } : {}),
       x: cell.x,
       z: cell.z,
       rotation: cell.rotation,
     }));
-    this.history.push({ added: added.map((data) => ({ ...data })), removed: [], creditDelta: -cost });
-    this.changeCredits(this.credits - cost);
+    if (!selectedDefinition) {
+      this.history.push({ added: added.map((data) => ({ ...data })), removed: [], creditDelta: -cost });
+      this.changeCredits(this.credits - cost);
+    } else this.publishConstructionState();
     const connected = added.some((belt) =>
       Array.from(this.simulation.structures.values()).some(
         (machine) => !isTransportType(machine.type)
@@ -889,12 +997,25 @@ export class FactoryRuntime {
         this.callbacks.onToast("철거할 설비를 선택하세요");
         return;
       }
+      const structure = this.simulation.structures.get(id);
+      if (structure?.worldInstanceId) {
+        const demolition = this.world.demolish(structure.worldInstanceId);
+        if (!demolition.ok) {
+          this.callbacks.onToast("이 설비는 철거할 수 없습니다");
+          return;
+        }
+      }
       const removed = this.removeStructure(id);
       if (removed) {
-        const refund = Math.floor(COST[removed.type] * 0.5);
-        this.history.push({ added: [], removed: [removed], creditDelta: refund });
-        this.changeCredits(this.credits + refund);
-        this.callbacks.onToast(`${TYPE_NAME[removed.type]} 철거 · ${refund} 환급`);
+        if (removed.worldInstanceId) {
+          this.publishConstructionState();
+          this.callbacks.onToast(`${removed.buildingId ? START_REGISTRY.buildings.get(removed.buildingId)?.name : TYPE_NAME[removed.type]} 철거 · 재료 회수`);
+        } else {
+          const refund = Math.floor(COST[removed.type] * 0.5);
+          this.history.push({ added: [], removed: [removed], creditDelta: refund });
+          this.changeCredits(this.credits + refund);
+          this.callbacks.onToast(`${TYPE_NAME[removed.type]} 철거 · ${refund} 환급`);
+        }
       }
       return;
     }
@@ -1032,7 +1153,19 @@ export class FactoryRuntime {
       const inputConnections = isTransportType(data.type) ? [] : this.simulation.getInputConnections(data);
       const hasInputConnection = inputConnections.some(Boolean);
       const hasOutputConnection = !isTransportType(data.type) && this.simulation.hasOutputConnection(data);
-      if (data.type === "miner") {
+      const beltItem = isTransportType(data.type) ? this.simulation.beltItems.get(id) : undefined;
+      const genericModel = group.userData.modelSource === "generic";
+      if (genericModel) {
+        animateGenericBuildingModel(group, {
+          time: machineTime,
+          progress: state?.progress ?? (beltItem ? beltItem.progress : 0),
+          activity: state?.activity ?? (beltItem ? 1 : 0),
+          runtimeState: state?.working || beltItem
+            ? "working"
+            : outputQueued ? "blocked" : hasInputConnection ? "idle" : "disconnected",
+        });
+      }
+      if (!genericModel && data.type === "miner") {
         animateMinerModel(group, {
           time: machineTime,
           delta,
@@ -1043,7 +1176,7 @@ export class FactoryRuntime {
           outputConnected: hasOutputConnection,
         });
       }
-      if (data.type === "smelter") {
+      if (!genericModel && data.type === "smelter") {
         animateSmelterModel(group, {
           time: machineTime,
           delta,
@@ -1056,7 +1189,7 @@ export class FactoryRuntime {
           outputConnected: hasOutputConnection,
         });
       }
-      if (data.type === "crusher") {
+      if (!genericModel && data.type === "crusher") {
         animateCrusherModel(group, {
           time: machineTime,
           delta,
@@ -1069,7 +1202,7 @@ export class FactoryRuntime {
           outputConnected: hasOutputConnection,
         });
       }
-      if (data.type === "assembler") {
+      if (!genericModel && data.type === "assembler") {
         animateAssemblerModel(group, {
           time: machineTime,
           delta,
@@ -1082,7 +1215,7 @@ export class FactoryRuntime {
           outputConnected: hasOutputConnection,
         });
       }
-      if (data.type === "storage") {
+      if (!genericModel && data.type === "storage") {
         animateStorageModel(group, {
           time: machineTime,
           delta,
@@ -1092,7 +1225,6 @@ export class FactoryRuntime {
           inputConnected: hasInputConnection,
         });
       }
-      const beltItem = isTransportType(data.type) ? this.simulation.beltItems.get(id) : undefined;
       const beltJammed = Boolean(beltItem && beltItem.progress >= 0.979);
       const beltSpeed = beltJammed ? 0 : 1;
       const beltTravel = ((group.userData.beltTravel as number | undefined) ?? 0) + delta * beltSpeed;

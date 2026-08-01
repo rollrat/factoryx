@@ -102,6 +102,10 @@ export default function FactoryGame({
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
   const [project, setProject] = useState<ProjectHudState>(INITIAL_PROJECT);
+  const [constructionState, setConstructionState] = useState(() => ({
+    unlockedIds,
+    inventoryByItemId: inventoryByItemId ?? {},
+  }));
 
   const showToast = (message: string) => {
     setToast(message);
@@ -124,6 +128,7 @@ export default function FactoryGame({
       onBeltBuildInfo: setBeltBuildInfo,
       onPower: setPower,
       onProject: setProject,
+      onConstructionState: setConstructionState,
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
@@ -206,8 +211,8 @@ export default function FactoryGame({
       />
       <BuildCatalogDialog
         open={catalogOpen}
-        unlockedIds={unlockedIds}
-        inventoryByItemId={inventoryByItemId}
+        unlockedIds={constructionState.unlockedIds}
+        inventoryByItemId={constructionState.inventoryByItemId}
         credits={credits}
         selectedBuildingId={catalogBuildingId}
         onSelect={chooseCatalogBuilding}
