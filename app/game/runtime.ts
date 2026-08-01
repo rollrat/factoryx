@@ -52,6 +52,22 @@ export class FactoryRuntime {
     opacity: 0.48,
     depthWrite: false,
   });
+  private readonly ghostDirectionValid = new THREE.MeshStandardMaterial({
+    color: 0xd7fff9,
+    emissive: 0x36dcc7,
+    emissiveIntensity: 2.4,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+  });
+  private readonly ghostDirectionInvalid = new THREE.MeshStandardMaterial({
+    color: 0xffc1c9,
+    emissive: 0xff4058,
+    emissiveIntensity: 2.2,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+  });
 
   private nextId = 1;
   private credits = 1200;
@@ -65,6 +81,7 @@ export class FactoryRuntime {
   private beltStart: Cell | null = null;
   private beltPreview: THREE.Group | null = null;
   private beltPreviewCells: Array<Cell & { rotation: number }> = [];
+  private beltBuildSignature = "";
   private panning = false;
   private panOrigin = { x: 0, y: 0 };
   private pointerDown = { x: 0, y: 0 };
@@ -115,6 +132,7 @@ export class FactoryRuntime {
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
+    this.updateBeltBuildInfo(false);
     this.animate(performance.now());
   }
 
@@ -125,6 +143,7 @@ export class FactoryRuntime {
     if (this.beltPreview) this.scene.remove(this.beltPreview);
     this.beltPreview = null;
     this.beltPreviewCells = [];
+    this.updateBeltBuildInfo(false);
     this.renderer.domElement.style.cursor =
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
     this.updateGhost();
@@ -383,7 +402,11 @@ export class FactoryRuntime {
 
   private recolorGhost(group: THREE.Group, valid: boolean) {
     group.traverse((child) => {
-      if (child instanceof THREE.Mesh) child.material = valid ? this.ghostMaterialValid : this.ghostMaterialInvalid;
+      if (!(child instanceof THREE.Mesh)) return;
+      const role = child.userData.animationRole as string | undefined;
+      child.material = role === "beltFlowArrow" || role === "beltStatusLight"
+        ? valid ? this.ghostDirectionValid : this.ghostDirectionInvalid
+        : valid ? this.ghostMaterialValid : this.ghostMaterialInvalid;
     });
   }
 
@@ -406,25 +429,25 @@ export class FactoryRuntime {
   }
 
   private getBeltPath(start: Cell, end: Cell, zFirst: boolean) {
-    const cells: Array<Cell & { rotation: number }> = [];
+    const path: Cell[] = [];
     let x = start.x;
     let z = start.z;
-    const push = (nextX: number, nextZ: number, rotation: number) => {
-      if (!cells.some((cell) => cell.x === nextX && cell.z === nextZ)) cells.push({ x: nextX, z: nextZ, rotation });
+    const push = (nextX: number, nextZ: number) => {
+      if (!path.some((cell) => cell.x === nextX && cell.z === nextZ)) path.push({ x: nextX, z: nextZ });
     };
-    push(x, z, this.rotation);
+    push(x, z);
     const walkX = () => {
       while (x !== end.x) {
         const step = Math.sign(end.x - x);
         x += step;
-        push(x, z, step > 0 ? 1 : 3);
+        push(x, z);
       }
     };
     const walkZ = () => {
       while (z !== end.z) {
         const step = Math.sign(end.z - z);
         z += step;
-        push(x, z, step > 0 ? 0 : 2);
+        push(x, z);
       }
     };
     if (zFirst) {
@@ -434,8 +457,39 @@ export class FactoryRuntime {
       walkX();
       walkZ();
     }
-    if (cells.length > 1) cells[0].rotation = cells[1].rotation;
-    return cells;
+    return path.map((cell, index) => {
+      const next = path[index + 1];
+      const previous = path[index - 1];
+      const destination = next ?? previous;
+      if (!destination) return { ...cell, rotation: this.rotation };
+      const direction = next
+        ? { x: destination.x - cell.x, z: destination.z - cell.z }
+        : { x: cell.x - destination.x, z: cell.z - destination.z };
+      const rotation = direction.x > 0 ? 1 : direction.x < 0 ? 3 : direction.z > 0 ? 0 : 2;
+      return { ...cell, rotation };
+    });
+  }
+
+  private updateBeltBuildInfo(dragging: boolean) {
+    const first = this.beltPreviewCells[0];
+    const connectedStart = Boolean(first && Array.from(this.simulation.structures.values()).some((machine) => {
+      if (machine.type === "belt") return false;
+      const ports = machinePorts(machine);
+      return ports.output.x === first.x
+        && ports.output.z === first.z
+        && sameDirection(directionForRotation(first.rotation), ports.flow);
+    }));
+    const info = {
+      dragging,
+      length: dragging ? this.beltPreviewCells.length : 0,
+      cost: dragging ? this.beltPreviewCells.length * COST.belt : 0,
+      valid: dragging ? this.ghostValid : true,
+      connectedStart,
+    };
+    const signature = `${info.dragging}:${info.length}:${info.cost}:${info.valid}:${info.connectedStart}`;
+    if (signature === this.beltBuildSignature) return;
+    this.beltBuildSignature = signature;
+    this.callbacks.onBeltBuildInfo(info);
   }
 
   private updateBeltPreview(end: Cell, zFirst: boolean) {
@@ -457,6 +511,7 @@ export class FactoryRuntime {
     });
     this.ghostValid = allValid;
     this.scene.add(this.beltPreview);
+    this.updateBeltBuildInfo(true);
   }
 
   private pickStructure() {
@@ -601,6 +656,7 @@ export class FactoryRuntime {
       if (this.beltPreview) this.scene.remove(this.beltPreview);
       this.beltPreview = null;
       this.beltPreviewCells = [];
+      this.updateBeltBuildInfo(false);
       return;
     }
     if (moved > 6) return;
@@ -660,8 +716,9 @@ export class FactoryRuntime {
     if (tools[key]) this.setTool(tools[key]);
     if (key === "r") {
       this.rotation = (this.rotation + 1) % 4;
-      this.updateGhost();
-      this.callbacks.onToast("설비 방향을 회전했습니다");
+      if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(this.currentCell, false);
+      else this.updateGhost();
+      this.callbacks.onToast(this.activeTool === "belt" ? "벨트 시작 방향을 회전했습니다" : "설비 방향을 회전했습니다");
     }
     if (key === "q" || key === "e") {
       this.desiredCameraAngle += key === "q" ? -Math.PI / 2 : Math.PI / 2;
@@ -715,19 +772,40 @@ export class FactoryRuntime {
     });
   }
 
-  private animateMachines() {
+  private animateMachines(delta: number) {
     this.simulation.structures.forEach((data, id) => {
       const group = this.groups.get(id);
       if (!group) return;
       const state = this.simulation.machines.get(id);
       const machineTime = (state?.animationTime ?? this.elapsed) + id * 0.17;
       const activity = state?.activity ?? 1;
+      const beltItem = data.type === "belt" ? this.simulation.beltItems.get(id) : undefined;
+      const beltJammed = Boolean(beltItem && beltItem.progress >= 0.979);
+      const beltSpeed = beltJammed ? 0 : 1;
+      const beltTravel = ((group.userData.beltTravel as number | undefined) ?? 0) + delta * beltSpeed;
+      group.userData.beltTravel = beltTravel;
       group.traverse((part) => {
         const role = part.userData.animationRole as string | undefined;
-        if (role === "beltRoller") part.rotation.x = -this.elapsed * 9;
-        if (role === "beltSlat") {
+        if (role === "beltRoller") part.rotation.x = -beltTravel * 11;
+        if (role === "beltDriveCap") part.rotation.x = -beltTravel * 8;
+        if (role === "beltTread") {
           const offset = part.userData.offset as number;
-          part.position.z = ((offset + this.elapsed * 0.62 + 0.45) % 0.9) - 0.45;
+          part.position.z = ((offset + beltTravel * 0.62 + 0.47) % 0.94) - 0.47;
+        }
+        if (role === "beltFlowArrow" && part instanceof THREE.Mesh) {
+          const material = part.material;
+          if (material instanceof THREE.MeshStandardMaterial) {
+            const phase = (part.userData.phase as number) ?? 0;
+            material.emissiveIntensity = beltJammed ? 0.25 : 1.2 + Math.sin(this.elapsed * 5 + phase * Math.PI * 2) * 0.45;
+          }
+        }
+        if (role === "beltStatusLight" && part instanceof THREE.Mesh) {
+          const material = part.material;
+          if (material instanceof THREE.MeshStandardMaterial) {
+            material.color.setHex(beltJammed ? 0xff6577 : 0x5de4d1);
+            material.emissive.setHex(beltJammed ? 0xa8172b : 0x1a8f82);
+            material.emissiveIntensity = beltJammed ? 2.4 : 1.5;
+          }
         }
         if (role === "minerDrill") {
           const baseY = part.userData.baseY as number;
@@ -805,7 +883,7 @@ export class FactoryRuntime {
 
     this.simulation.update(delta);
     this.syncItems(delta);
-    this.animateMachines();
+    this.animateMachines(delta);
     this.selectedUiClock += delta;
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;

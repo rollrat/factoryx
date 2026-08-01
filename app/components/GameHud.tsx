@@ -1,5 +1,5 @@
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
-import type { CameraMode, SelectedInfo, Tool } from "../game/types";
+import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 
 type GameHudProps = {
   activeTool: Tool;
@@ -8,6 +8,7 @@ type GameHudProps = {
   credits: number;
   motors: number;
   selected: SelectedInfo;
+  beltBuildInfo: BeltBuildInfo;
   toast: string;
   toastVisible: boolean;
   onToolChange: (tool: Tool) => void;
@@ -21,6 +22,7 @@ export default function GameHud({
   credits,
   motors,
   selected,
+  beltBuildInfo,
   toast,
   toastVisible,
   onToolChange,
@@ -102,6 +104,34 @@ export default function GameHud({
         {toast}
       </div>
 
+      {cameraMode === "overview" && activeTool === "belt" ? (
+        <section className={`belt-build-panel glass ${beltBuildInfo.dragging ? "is-routing" : ""}`}>
+          <div className="belt-build-icon" aria-hidden="true">
+            <span /><span /><span />
+          </div>
+          <div className="belt-build-copy">
+            <div className="belt-build-heading">
+              <strong>컨베이어 경로</strong>
+              {beltBuildInfo.dragging ? (
+                <span className={beltBuildInfo.valid ? "route-valid" : "route-invalid"}>
+                  {beltBuildInfo.valid ? "설치 가능" : "경로 막힘"}
+                </span>
+              ) : null}
+            </div>
+            <p>
+              {beltBuildInfo.dragging
+                ? `${beltBuildInfo.length}칸 · ${beltBuildInfo.cost.toLocaleString("ko-KR")} 크레딧`
+                : "시작점을 누른 채 끝 지점까지 드래그"}
+            </p>
+            <div className="belt-build-controls">
+              <span><kbd>SHIFT</kbd> 꺾임 우선</span>
+              <span><kbd>R</kbd> 한 칸 방향</span>
+              {beltBuildInfo.connectedStart ? <em>출력 포트 연결됨</em> : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div className="hintbar glass">
         {cameraMode === "firstPerson" ? (
           <><kbd>클릭</kbd> 시점 고정 <kbd>WASD</kbd> 이동 <kbd>SHIFT</kbd> 달리기 <kbd>V</kbd> 건설 시점</>
@@ -121,7 +151,11 @@ export default function GameHud({
               aria-label={`${tool.name}${tool.cost ? `, 비용 ${tool.cost}` : ""}`}
             >
               <span className="tool-key">{tool.key}</span>
-              <span className="tool-glyph">{tool.glyph}</span>
+              {tool.id === "belt" ? (
+                <span className="belt-tool-glyph" aria-hidden="true"><i /><i /><i /></span>
+              ) : (
+                <span className="tool-glyph">{tool.glyph}</span>
+              )}
               <span className="tool-name">{tool.name}</span>
               {tool.cost ? <span className="tool-cost">₡ {tool.cost}</span> : null}
             </button>

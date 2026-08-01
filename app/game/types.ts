@@ -46,6 +46,14 @@ export type BeltItem = {
   progress: number;
 };
 
+export type BeltBuildInfo = {
+  dragging: boolean;
+  length: number;
+  cost: number;
+  valid: boolean;
+  connectedStart: boolean;
+};
+
 export type HistoryEntry = {
   added: StructureData[];
   removed: StructureData[];
@@ -69,4 +77,5 @@ export type GameCallbacks = {
   onToolChange: (tool: Tool) => void;
   onCameraMode: (mode: CameraMode) => void;
   onPointerLock: (locked: boolean) => void;
+  onBeltBuildInfo: (info: BeltBuildInfo) => void;
 };

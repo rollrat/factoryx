@@ -64,25 +64,87 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
   const group = new THREE.Group();
 
   if (type === "belt") {
-    addBox(group, [0.92, 0.16, 0.94], [0, 0.1, 0], materials.dark);
-    addBox(group, [0.74, 0.075, 0.9], [0, 0.21, 0], materials.belt, false);
-    for (const z of [-0.32, 0, 0.32]) {
+    // A modular conveyor reads better when the load surface, frame, guides and drive are distinct.
+    addBox(group, [0.1, 0.2, 0.96], [-0.43, 0.18, 0], materials.dark);
+    addBox(group, [0.1, 0.2, 0.96], [0.43, 0.18, 0], materials.dark);
+    addBox(group, [0.7, 0.07, 0.94], [0, 0.31, 0], materials.belt, false);
+    for (const x of [-0.36, 0.36]) {
+      for (const z of [-0.34, 0.34]) addBox(group, [0.1, 0.2, 0.1], [x, 0.1, z], materials.steel);
+    }
+
+    for (const z of [-0.36, 0, 0.36]) {
       const rollerAssembly = new THREE.Group();
-      rollerAssembly.position.set(0, 0.25, z);
+      rollerAssembly.position.set(0, 0.315, z);
       rollerAssembly.userData.animationRole = "beltRoller";
-      const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.76, 10), materials.steel);
+      const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.76, 12), materials.steel);
       roller.rotation.z = Math.PI / 2;
       roller.castShadow = true;
       rollerAssembly.add(roller);
-      const marker = addBox(rollerAssembly, [0.7, 0.022, 0.032], [0, 0.076, 0], materials.cyan, false);
-      marker.renderOrder = 2;
+      const marker = addBox(rollerAssembly, [0.72, 0.018, 0.025], [0, 0.067, 0], materials.pale, false);
+      marker.userData.animationRole = "beltRollerStripe";
       group.add(rollerAssembly);
     }
-    [-0.28, 0, 0.28].forEach((offset) => {
-      const slat = addBox(group, [0.66, 0.018, 0.055], [0, 0.275, offset], materials.cyan, false);
-      slat.userData.animationRole = "beltSlat";
+
+    [-0.39, -0.21, -0.03, 0.15, 0.33].forEach((offset) => {
+      const slat = addBox(group, [0.65, 0.016, 0.038], [0, 0.355, offset], materials.pale, false);
+      slat.userData.animationRole = "beltTread";
       slat.userData.offset = offset;
     });
+
+    for (const x of [-0.4, 0.4]) {
+      addBox(group, [0.045, 0.15, 0.94], [x, 0.415, 0], materials.steel);
+      for (const z of [-0.34, 0.34]) addBox(group, [0.065, 0.24, 0.065], [x, 0.33, z], materials.dark);
+    }
+
+    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.22, 10), materials.dark);
+    motor.position.set(0.51, 0.23, -0.31);
+    motor.rotation.z = Math.PI / 2;
+    motor.castShadow = true;
+    group.add(motor);
+    const motorCap = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.235, 10), materials.amber);
+    motorCap.position.copy(motor.position);
+    motorCap.rotation.z = Math.PI / 2;
+    motorCap.userData.animationRole = "beltDriveCap";
+    group.add(motorCap);
+
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(-0.07, -0.14);
+    arrowShape.lineTo(0.07, -0.14);
+    arrowShape.lineTo(0.07, 0.01);
+    arrowShape.lineTo(0.15, 0.01);
+    arrowShape.lineTo(0, 0.18);
+    arrowShape.lineTo(-0.15, 0.01);
+    arrowShape.lineTo(-0.07, 0.01);
+    arrowShape.closePath();
+    [-0.19, 0.23].forEach((z, index) => {
+      const arrowMaterial = new THREE.MeshStandardMaterial({
+        color: 0x87fff0,
+        emissive: 0x20b9a7,
+        emissiveIntensity: 1.5,
+        metalness: 0.15,
+        roughness: 0.28,
+      });
+      const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), arrowMaterial);
+      arrow.position.set(0, 0.368, z);
+      arrow.rotation.x = Math.PI / 2;
+      arrow.scale.setScalar(0.72);
+      arrow.userData.animationRole = "beltFlowArrow";
+      arrow.userData.phase = index * 0.5;
+      arrow.renderOrder = 2;
+      group.add(arrow);
+    });
+
+    const statusMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5de4d1,
+      emissive: 0x1a8f82,
+      emissiveIntensity: 1.7,
+      metalness: 0.2,
+      roughness: 0.25,
+    });
+    const status = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), statusMaterial);
+    status.position.set(0.47, 0.43, 0.29);
+    status.userData.animationRole = "beltStatusLight";
+    group.add(status);
     return group;
   }
 

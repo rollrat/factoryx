@@ -94,13 +94,14 @@ export class FactorySimulation {
     if (!data) return null;
     if (data.type === "belt") {
       const item = this.beltItems.get(id);
+      const jammed = Boolean(item && item.progress >= 0.979);
       return {
         id,
         type: data.type,
-        status: item ? "운송 중" : "대기",
+        status: jammed ? "출력 막힘" : item ? "운송 중" : "가동 대기",
         progress: item?.progress ?? 0,
         inputCount: item ? 1 : 0,
-        outputCount: 0,
+        outputCount: jammed ? 1 : 0,
       };
     }
     const state = this.machines.get(id);

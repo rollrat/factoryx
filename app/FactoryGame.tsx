@@ -3,7 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import GameHud from "./components/GameHud";
 import { FactoryRuntime } from "./game/runtime";
-import type { CameraMode, SelectedInfo, Tool } from "./game/types";
+import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "./game/types";
+
+const IDLE_BELT_BUILD: BeltBuildInfo = {
+  dragging: false,
+  length: 0,
+  cost: 0,
+  valid: true,
+  connectedStart: false,
+};
 
 export default function FactoryGame() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -15,6 +23,7 @@ export default function FactoryGame() {
   const [credits, setCredits] = useState(1200);
   const [motors, setMotors] = useState(0);
   const [selected, setSelected] = useState<SelectedInfo>(null);
+  const [beltBuildInfo, setBeltBuildInfo] = useState<BeltBuildInfo>(IDLE_BELT_BUILD);
   const [toast, setToast] = useState("출력 포트에서 벨트를 연결하세요");
   const [toastVisible, setToastVisible] = useState(true);
 
@@ -36,6 +45,7 @@ export default function FactoryGame() {
       onToolChange: setActiveTool,
       onCameraMode: setCameraMode,
       onPointerLock: setPointerLocked,
+      onBeltBuildInfo: setBeltBuildInfo,
     });
     runtimeRef.current = runtime;
     return () => {
@@ -58,6 +68,7 @@ export default function FactoryGame() {
         credits={credits}
         motors={motors}
         selected={selected}
+        beltBuildInfo={beltBuildInfo}
         toast={toast}
         toastVisible={toastVisible}
         onToolChange={chooseTool}
