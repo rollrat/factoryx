@@ -19,6 +19,7 @@ import {
   createFieldPowerCoreModel,
 } from "./models/power";
 import { animateProjectDockModel, createProjectDockModel } from "./models/projectDock";
+import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
 import { START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
@@ -337,7 +338,10 @@ export class FactoryRuntime {
   private removeStructure(id: number) {
     const data = this.simulation.removeStructure(id);
     const group = this.groups.get(id);
-    if (group) this.scene.remove(group);
+    if (group) {
+      removeGridVisualState(group);
+      this.scene.remove(group);
+    }
     this.groups.delete(id);
     if (this.selectedId === id) this.selectStructure(null);
     return data;
@@ -853,6 +857,7 @@ export class FactoryRuntime {
   }
 
   private animateMachines(delta: number) {
+    const power = this.simulation.getPowerGrid();
     this.simulation.structures.forEach((data, id) => {
       const group = this.groups.get(id);
       if (!group) return;
@@ -960,8 +965,16 @@ export class FactoryRuntime {
           disconnected: false,
         });
       }
+      if (!isTransportType(data.type)) {
+        const powered = power.poweredByStructureId.get(id) ?? true;
+        applyGridVisualState(group, {
+          time: this.elapsed,
+          powered,
+          overloaded: power.overloaded && !powered,
+          supplyRatio: power.supplyMW > 0 ? power.servedMW / power.supplyMW : 0,
+        });
+      }
     });
-    const power = this.simulation.getPowerGrid();
     const powerState = {
       time: this.elapsed,
       delta,

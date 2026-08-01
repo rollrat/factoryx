@@ -18,7 +18,7 @@
   height: min(900px, 100%);
   min-height: 420px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid rgba(190, 206, 205, 0.28);
   background: #0c1416;
@@ -78,13 +78,27 @@
 .factory-graph-close kbd { padding: 3px 4px; border: 1px solid rgba(190, 206, 205, 0.2); color: #8f9b9c; font: 750 7px/1 var(--font-geist-mono, monospace); }
 
 .factory-graph-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); border-bottom: 1px solid rgba(190, 206, 205, 0.17); background: #11191b; }
-.factory-graph-summary > div { min-height: 58px; display: flex; align-items: baseline; gap: 6px; padding: 13px 16px; border-right: 1px solid rgba(190, 206, 205, 0.12); }
-.factory-graph-summary > div:last-child { border-right: 0; }
+.factory-summary-cell { min-height: 58px; display: flex; align-items: baseline; gap: 6px; padding: 13px 16px; border: 0; border-right: 1px solid rgba(190, 206, 205, 0.12); background: transparent; color: inherit; text-align: left; }
+.factory-summary-cell:last-child { border-right: 0; }
+button.factory-summary-cell { cursor: pointer; }
+button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { outline: 1px solid rgba(98, 215, 199, 0.52); outline-offset: -2px; background: rgba(98, 215, 199, 0.055); }
 .factory-graph-summary span { margin-right: auto; color: #819092; font-size: 9px; }
 .factory-graph-summary strong { color: #e2e9e8; font: 780 18px/1 var(--font-geist-mono, monospace); }
 .factory-graph-summary small { color: #788587; font: 700 7px/1 var(--font-geist-mono, monospace); }
 .factory-graph-summary .is-danger strong { color: var(--graph-danger); }
 .factory-graph-summary .is-warning strong { color: var(--graph-amber); }
+
+.factory-graph-controls { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 7px 14px; border-bottom: 1px solid rgba(190, 206, 205, 0.14); background: #0f1719; }
+.factory-graph-search { min-width: 210px; display: flex; align-items: center; gap: 8px; }
+.factory-graph-search > span { color: #738183; font: 740 7px/1 var(--font-geist-mono, monospace); letter-spacing: 0.1em; white-space: nowrap; }
+.factory-graph-search input { width: 100%; min-width: 0; height: 30px; padding: 0 9px; border: 1px solid rgba(190, 206, 205, 0.18); border-radius: 0; outline: none; background: #151e20; color: #dce5e4; font-size: 10px; user-select: text; }
+.factory-graph-search input:focus { border-color: var(--graph-cyan); box-shadow: inset 0 -2px rgba(98, 215, 199, 0.45); }
+.factory-graph-search input::placeholder { color: #647274; }
+.factory-graph-filters { display: flex; gap: 3px; overflow-x: auto; }
+.factory-graph-filters button { min-height: 30px; padding: 0 10px; border: 1px solid rgba(190, 206, 205, 0.15); background: #151d1f; color: #899798; font-size: 9px; white-space: nowrap; cursor: pointer; }
+.factory-graph-filters button:hover, .factory-graph-filters button:focus-visible { outline: none; border-color: #718082; color: #d7e0df; }
+.factory-graph-filters button.is-active { border-color: var(--graph-amber); background: rgba(230, 160, 75, 0.1); color: #edbd7f; }
+.factory-graph-controls output { margin-left: auto; color: #849193; font: 700 8px/1 var(--font-geist-mono, monospace); white-space: nowrap; }
 
 .factory-graph-main { position: relative; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .factory-columns { min-width: 0; display: flex; align-items: flex-start; gap: 46px; overflow: auto; padding: 18px 20px 30px; scrollbar-color: #536264 #151d1f; scrollbar-width: thin; }
@@ -121,6 +135,8 @@
 .factory-node-building { border-left-color: var(--graph-cyan); }
 .factory-node-storage { border-left-color: var(--graph-amber); }
 .factory-node-project { border-left-color: #d3b071; }
+.factory-node.is-bottleneck { border-color: rgba(230, 160, 75, 0.65); box-shadow: inset 0 0 0 1px rgba(230, 160, 75, 0.13), 0 0 16px rgba(230, 160, 75, 0.07); }
+.factory-node.is-disconnected { border-color: rgba(228, 92, 97, 0.7); box-shadow: inset 0 0 0 1px rgba(228, 92, 97, 0.14), 0 0 16px rgba(228, 92, 97, 0.08); }
 
 .factory-node > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
 .factory-node > header > span { color: #768486; font: 760 7px/1 var(--font-geist-mono, monospace); letter-spacing: 0.13em; }
@@ -129,6 +145,10 @@
 .factory-instance { margin-bottom: 3px; color: var(--graph-amber); font: 720 8px/1 var(--font-geist-mono, monospace); letter-spacing: 0.06em; }
 .factory-node h3 { margin: 0; overflow: hidden; color: #e1e8e7; font-size: 15px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .factory-node > p { margin: 4px 0 0; overflow: hidden; color: #899697; font-size: 9px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.factory-node-alerts { display: flex; gap: 4px; margin-top: 7px; }
+.factory-node-alerts span { padding: 3px 5px; border: 1px solid currentColor; font: 720 7px/1 var(--font-geist-mono, monospace); }
+.factory-node-alerts .is-bottleneck { color: var(--graph-amber); background: rgba(230, 160, 75, 0.08); }
+.factory-node-alerts .is-disconnected { color: #ef888d; background: rgba(228, 92, 97, 0.08); }
 
 .factory-node-metrics { display: flex; gap: 13px; min-height: 20px; margin: 10px 0 0; }
 .factory-node-metrics div { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
@@ -173,9 +193,13 @@
   .factory-graph-live { display: none; }
   .factory-graph-close span { display: none; }
   .factory-graph-summary { grid-template-columns: repeat(4, minmax(100px, 1fr)); overflow-x: auto; }
-  .factory-graph-summary > div { min-height: 51px; padding: 10px; }
+  .factory-summary-cell { min-height: 51px; padding: 10px; }
   .factory-graph-summary span { font-size: 8px; white-space: nowrap; }
   .factory-graph-summary strong { font-size: 15px; }
+  .factory-graph-controls { align-items: stretch; flex-wrap: wrap; gap: 6px; padding: 7px 10px; }
+  .factory-graph-search { width: 100%; min-width: 0; }
+  .factory-graph-filters { flex: 1 1 auto; }
+  .factory-graph-controls output { align-self: center; }
   .factory-columns { gap: 36px; padding: 14px 12px 22px; }
   .factory-column { width: 284px; min-width: 284px; }
   .factory-graph-legend { overflow-x: auto; padding-right: 10px; padding-left: 10px; }

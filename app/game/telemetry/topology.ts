@@ -1,11 +1,13 @@
 import { TYPE_NAME, directionForRotation, machinePorts, sameDirection } from "../config.ts";
+import { START_REGISTRY } from "../data/index.ts";
 import type { FactorySimulation } from "../simulation.ts";
+import { FIELD_CORE_CAPACITY_MW, POWER_DEMAND_MW } from "../sim/power.ts";
 import type { ItemType, MachineType, StructureData } from "../types.ts";
 import type { LiveRuntimeState } from "./live.ts";
 
 export type RuntimeTopologyNode = Readonly<{
   id: string;
-  kind: "machine" | "item";
+  kind: "machine" | "item" | "infrastructure" | "contract";
   label: string;
   column: number;
   order: number;
@@ -23,11 +25,12 @@ export type RuntimeTopologyEdge = Readonly<{
   id: string;
   source: string;
   target: string;
-  kind: "physical";
+  kind: "physical" | "power";
+  medium: "solid" | "power";
   itemId: string;
   itemName: string;
   amount: number;
-  structureId: number;
+  structureId: number | null;
   connected: boolean;
   beltCount: number;
   jammed: boolean;
@@ -94,6 +97,13 @@ const STATUS_LABEL: Record<LiveRuntimeState | "storing", string> = {
 
 const machineNodeId = (id: number) => `structure:${id}`;
 const itemNodeId = (item: ItemType) => `item:${ITEM_INFO[item].id}`;
+const PROJECT_DOCK_NODE_ID = "infrastructure:project_dock";
+const FIELD_POWER_CORE_NODE_ID = "infrastructure:field_power_core";
+const DOCK_INPUT_CELL: Record<string, Readonly<{ x: number; z: number }>> = {
+  phase1_plate_in: { x: 5, z: 7 },
+  phase1_block_in: { x: 5, z: 8 },
+  phase1_fastener_in: { x: 5, z: 9 },
+};
 const distance = (a: StructureData, b: StructureData) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
 const isTransportStructure = (structure: StructureData | null): structure is StructureData => Boolean(
   structure && (structure.type === "belt" || structure.type === "splitter" || structure.type === "merger"),
@@ -188,7 +198,7 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
   const structures = [...simulation.structures.values()];
   const machines = structures.filter((structure): structure is StructureData & { type: MachineType } => (
     structure.type === "miner" || structure.type === "smelter"
-      || structure.type === "assembler" || structure.type === "storage"
+      || structure.type === "crusher" || structure.type === "assembler" || structure.type === "storage"
   ));
   const nodes: RuntimeTopologyNode[] = [];
   const nodeStates: Record<string, RuntimeTopology["live"]["nodeStates"][string]> = {};
@@ -271,6 +281,51 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
     nodeStates[id] = { status: stock > 0 ? "storing" : "idle", stock };
   });
 
+  const powerGrid = simulation.getPowerGrid();
+  const projectProgress = simulation.getProjectProgress();
+  const powerStatus = powerGrid.overloaded ? "blocked" : "working";
+  nodes.push({
+    id: FIELD_POWER_CORE_NODE_ID,
+    kind: "infrastructure",
+    label: "현장 전력 코어",
+    column: -1,
+    order: 0,
+    structureId: null,
+    buildingId: "field_power_core",
+    status: powerStatus,
+    statusLabel: `${powerGrid.servedMW} / ${FIELD_CORE_CAPACITY_MW} MW`,
+    progress: Math.min(1, powerGrid.demandMW / FIELD_CORE_CAPACITY_MW),
+    stock: powerGrid.servedMW,
+    capacity: FIELD_CORE_CAPACITY_MW,
+  });
+  nodeStates[FIELD_POWER_CORE_NODE_ID] = {
+    status: powerStatus,
+    stock: powerGrid.servedMW,
+    capacity: FIELD_CORE_CAPACITY_MW,
+    progress: Math.min(1, powerGrid.demandMW / FIELD_CORE_CAPACITY_MW),
+  };
+
+  nodes.push({
+    id: PROJECT_DOCK_NODE_ID,
+    kind: "infrastructure",
+    label: "개척 프로젝트 도크",
+    column: 8,
+    order: 0,
+    structureId: null,
+    buildingId: "project_dock",
+    status: projectProgress.completed ? "storing" : "idle",
+    statusLabel: projectProgress.completed ? "1단계 납품 완료" : "1단계 납품 대기",
+    progress: projectProgress.totalProgress,
+    stock: projectProgress.deliveredTotal,
+    capacity: projectProgress.requiredTotal,
+  });
+  nodeStates[PROJECT_DOCK_NODE_ID] = {
+    status: projectProgress.completed ? "storing" : "idle",
+    stock: projectProgress.deliveredTotal,
+    capacity: projectProgress.requiredTotal,
+    progress: projectProgress.totalProgress,
+  };
+
   const edges: RuntimeTopologyEdge[] = [];
   machines.forEach((source) => {
     const outputItem = outputItemFor(simulation, source);
@@ -287,6 +342,7 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
       source: machineNodeId(source.id),
       target: machineNodeId(target.id),
       kind: "physical",
+      medium: "solid",
       itemId: info.id,
       itemName: info.label,
       amount: 1,
@@ -295,6 +351,68 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
       beltCount: trace.beltIds.length,
       jammed: trace.jammed,
       beltIds: trace.beltIds,
+    });
+  });
+
+  powerGrid.structures.filter((power) => machines.some(({ id }) => id === power.structureId)).forEach((power) => {
+    edges.push({
+      id: `power:${power.structureId}`,
+      source: FIELD_POWER_CORE_NODE_ID,
+      target: machineNodeId(power.structureId),
+      kind: "power",
+      medium: "power",
+      itemId: "power",
+      itemName: "전력",
+      amount: POWER_DEMAND_MW[power.type],
+      structureId: power.structureId,
+      connected: power.powered,
+      beltCount: 0,
+      jammed: false,
+      beltIds: [],
+    });
+  });
+
+  const phaseOne = START_REGISTRY.projectStages.get("phase_1_settlement_package");
+  phaseOne?.deliveries.forEach((delivery, order) => {
+    const inputCell = DOCK_INPUT_CELL[delivery.portId];
+    const transport = inputCell ? simulation.getStructureAt(inputCell.x, inputCell.z) : null;
+    const connected = Boolean(transport && isTransportStructure(transport)
+      && sameDirection(directionForRotation(transport.rotation), { x: 1, z: 0 }));
+    const beltItem = transport ? simulation.beltItems.get(transport.id) : undefined;
+    const existingItemNode = nodes.find((node) => node.kind === "item" && node.itemId === delivery.itemId);
+    const source = existingItemNode?.id ?? `contract:${delivery.itemId}`;
+    if (!existingItemNode) {
+      const label = START_REGISTRY.items.get(delivery.itemId)?.name ?? delivery.itemId;
+      nodes.push({
+        id: source,
+        kind: "contract",
+        label,
+        column: 7,
+        order,
+        structureId: null,
+        buildingId: null,
+        itemId: delivery.itemId,
+        status: "idle",
+        statusLabel: "납품 생산선 미설치",
+        progress: 0,
+        stock: 0,
+      });
+      nodeStates[source] = { status: "idle", stock: 0, progress: 0 };
+    }
+    edges.push({
+      id: `dock:${delivery.portId}`,
+      source,
+      target: PROJECT_DOCK_NODE_ID,
+      kind: "physical",
+      medium: "solid",
+      itemId: delivery.itemId,
+      itemName: START_REGISTRY.items.get(delivery.itemId)?.name ?? delivery.itemId,
+      amount: delivery.amount,
+      structureId: null,
+      connected,
+      beltCount: connected ? 1 : 0,
+      jammed: Boolean(beltItem && beltItem.progress >= 0.979),
+      beltIds: connected && transport ? [transport.id] : [],
     });
   });
 

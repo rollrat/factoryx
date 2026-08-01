@@ -39,9 +39,11 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
     nodes: topology.graph.nodes.map((node) => ({
       id: node.id,
       label: node.label,
-      kind: node.kind === "item"
+      kind: node.kind === "item" || node.kind === "contract"
         ? "resource" as const
-        : node.buildingId === "small_storage"
+        : node.buildingId === "project_dock"
+          ? "project" as const
+          : node.buildingId === "small_storage"
           ? "storage" as const
           : "building" as const,
       detail: node.kind === "item" ? "현재 공장 내 실재고" : node.statusLabel,
@@ -54,7 +56,7 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
       from: edge.source,
       to: edge.target,
       itemName: edge.itemName,
-      medium: "solid" as const,
+      medium: edge.medium,
       connected: edge.connected,
       beltCount: edge.beltCount,
       jammed: edge.jammed,

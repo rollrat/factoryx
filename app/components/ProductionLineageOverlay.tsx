@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "../production-lineage.css";
 
 export type ProductionLineageStatus =
@@ -27,7 +27,7 @@ export type ProductionLineageEdge = Readonly<{
   from: string;
   to: string;
   itemName: string;
-  medium?: "solid" | "fluid";
+  medium?: "solid" | "fluid" | "power";
   plannedRatePerMinute?: number;
   connected?: boolean;
   beltCount?: number;
@@ -75,6 +75,15 @@ const KIND_LABEL: Record<ProductionLineageNode["kind"], string> = {
   building: "FACILITY",
   storage: "STORAGE",
   project: "PROJECT",
+};
+
+type GraphFilter = "all" | "facility" | "item" | "problem";
+
+const FILTER_LABEL: Record<GraphFilter, string> = {
+  all: "전체",
+  facility: "설비",
+  item: "품목",
+  problem: "문제",
 };
 
 const formatRate = (value?: number) => Number.isFinite(value) ? `${value!.toLocaleString("ko-KR")} /분` : "—";
@@ -152,17 +161,24 @@ function FactoryNodeCard({
   inputs,
   outputs,
   nodeById,
+  bottleneck,
+  disconnected,
 }: Readonly<{
   node: ProductionLineageNode;
   live?: ProductionLineageNodeLiveState;
   inputs: readonly ProductionLineageEdge[];
   outputs: readonly ProductionLineageEdge[];
   nodeById: ReadonlyMap<string, ProductionLineageNode>;
+  bottleneck: boolean;
+  disconnected: boolean;
 }>) {
-  const status = live?.status ?? (inputs.some((edge) => edge.connected === false) ? "disconnected" : "idle");
+  const status = live?.status ?? (disconnected ? "disconnected" : "idle");
   const progress = Number.isFinite(live?.progress) ? Math.max(0, Math.min(100, (live?.progress ?? 0) * 100)) : null;
   return (
-    <article className={`factory-node factory-node-${node.kind} factory-status-${status}`} role="listitem">
+    <article
+      className={`factory-node factory-node-${node.kind} factory-status-${status} ${bottleneck ? "is-bottleneck" : ""} ${disconnected ? "is-disconnected" : ""}`}
+      role="listitem"
+    >
       <header>
         <span>{KIND_LABEL[node.kind]}</span>
         <em><i aria-hidden="true" />{STATUS_LABEL[status]}</em>
@@ -170,6 +186,12 @@ function FactoryNodeCard({
       {node.instanceLabel ? <div className="factory-instance">{node.instanceLabel}</div> : null}
       <h3>{node.label}</h3>
       {node.detail ? <p>{node.detail}</p> : null}
+      {bottleneck || disconnected ? (
+        <div className="factory-node-alerts" aria-label="문제 상태">
+          {bottleneck ? <span className="is-bottleneck">병목</span> : null}
+          {disconnected ? <span className="is-disconnected">연결 끊김</span> : null}
+        </div>
+      ) : null}
       <dl className="factory-node-metrics">
         <div><dt>실측</dt><dd>{formatRate(live?.actualRatePerMinute)}</dd></div>
         {live?.stock !== undefined ? <div><dt>재고</dt><dd>{live.stock.toLocaleString("ko-KR")}{live.capacity !== undefined ? ` / ${live.capacity.toLocaleString("ko-KR")}` : ""}</dd></div> : null}
@@ -196,8 +218,9 @@ function FactoryNodeCard({
 export default function ProductionLineageOverlay({ open, onClose, graph, live }: ProductionLineageOverlayProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<GraphFilter>("all");
   const nodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
-  const columns = useMemo(() => groupNodesByColumn(graph.nodes, graph.edges), [graph.nodes, graph.edges]);
   const inputsByNode = useMemo(() => {
     const grouped = new Map<string, ProductionLineageEdge[]>();
     graph.edges.forEach((edge) => grouped.set(edge.to, [...(grouped.get(edge.to) ?? []), edge]));
@@ -208,13 +231,55 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live }:
     graph.edges.forEach((edge) => grouped.set(edge.from, [...(grouped.get(edge.from) ?? []), edge]));
     return grouped;
   }, [graph.edges]);
+  const disconnectedNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    graph.edges.forEach((edge) => {
+      if (edge.connected !== false) return;
+      ids.add(edge.from);
+      ids.add(edge.to);
+    });
+    graph.nodes.forEach((node) => {
+      if (live.nodeStates[node.id]?.status === "disconnected") ids.add(node.id);
+    });
+    return ids;
+  }, [graph.edges, graph.nodes, live.nodeStates]);
+  const bottleneckNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    graph.edges.forEach((edge) => {
+      if (!edge.jammed) return;
+      ids.add(edge.from);
+      ids.add(edge.to);
+    });
+    graph.nodes.forEach((node) => {
+      const status = live.nodeStates[node.id]?.status;
+      if (status === "blocked" || status === "starved") ids.add(node.id);
+    });
+    return ids;
+  }, [graph.edges, graph.nodes, live.nodeStates]);
+  const problemNodeIds = useMemo(
+    () => new Set([...disconnectedNodeIds, ...bottleneckNodeIds]),
+    [bottleneckNodeIds, disconnectedNodeIds],
+  );
+  const visibleNodes = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
+    return graph.nodes.filter((node) => {
+      const matchesQuery = normalizedQuery.length === 0
+        || [node.label, node.instanceLabel, node.detail].some((value) => value?.toLocaleLowerCase("ko-KR").includes(normalizedQuery));
+      const matchesFilter = filter === "all"
+        || (filter === "facility" && node.kind !== "resource")
+        || (filter === "item" && node.kind === "resource")
+        || (filter === "problem" && problemNodeIds.has(node.id));
+      return matchesQuery && matchesFilter;
+    });
+  }, [filter, graph.nodes, problemNodeIds, query]);
+  const columns = useMemo(() => groupNodesByColumn(visibleNodes, graph.edges), [visibleNodes, graph.edges]);
   const facilityNodes = graph.nodes.filter((node) => node.kind !== "resource");
   const activeCount = facilityNodes.filter((node) => {
     const state = live.nodeStates[node.id];
     return state?.status === "working" || state?.status === "storing";
   }).length;
   const disconnectedCount = graph.edges.filter((edge) => edge.connected === false).length;
-  const jammedCount = graph.edges.filter((edge) => edge.jammed).length;
+  const bottleneckCount = bottleneckNodeIds.size;
 
   useEffect(() => {
     if (!open) return;
@@ -246,15 +311,50 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live }:
         </header>
 
         <section className="factory-graph-summary" aria-label="실제 공장 연결 요약">
-          <div><span>실제 설비</span><strong>{facilityNodes.length}</strong><small> NODE</small></div>
-          <div><span>가동 설비</span><strong>{activeCount}</strong><small> LIVE</small></div>
-          <div className={disconnectedCount > 0 ? "is-danger" : ""}><span>끊긴 연결</span><strong>{disconnectedCount}</strong><small> EDGE</small></div>
-          <div className={jammedCount > 0 ? "is-warning" : ""}><span>막힌 벨트</span><strong>{jammedCount}</strong><small> EDGE</small></div>
+          <div className="factory-summary-cell"><span>실제 설비</span><strong>{facilityNodes.length}</strong><small> NODE</small></div>
+          <div className="factory-summary-cell"><span>가동 설비</span><strong>{activeCount}</strong><small> LIVE</small></div>
+          <button
+            type="button"
+            className={`factory-summary-cell ${bottleneckCount > 0 ? "is-warning" : ""}`}
+            onClick={() => setFilter("problem")}
+            aria-label={`병목 관련 노드 ${bottleneckCount}개만 보기`}
+          ><span>병목 노드</span><strong>{bottleneckCount}</strong><small> NODE</small></button>
+          <button
+            type="button"
+            className={`factory-summary-cell ${disconnectedCount > 0 ? "is-danger" : ""}`}
+            onClick={() => setFilter("problem")}
+            aria-label={`끊긴 연결 ${disconnectedCount}개와 관련된 노드 보기`}
+          ><span>끊긴 연결</span><strong>{disconnectedCount}</strong><small> EDGE</small></button>
+        </section>
+
+        <section className="factory-graph-controls" aria-label="그래프 검색 및 표시 필터">
+          <label className="factory-graph-search">
+            <span>NODE SEARCH</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="노드명 검색"
+              autoComplete="off"
+            />
+          </label>
+          <div className="factory-graph-filters" role="group" aria-label="노드 표시 범위">
+            {(Object.keys(FILTER_LABEL) as GraphFilter[]).map((option) => (
+              <button
+                type="button"
+                key={option}
+                className={filter === option ? "is-active" : ""}
+                aria-pressed={filter === option}
+                onClick={() => setFilter(option)}
+              >{FILTER_LABEL[option]}{option === "problem" && problemNodeIds.size > 0 ? ` ${problemNodeIds.size}` : ""}</button>
+            ))}
+          </div>
+          <output aria-live="polite">{visibleNodes.length} / {nodeById.size} 노드</output>
         </section>
 
         <div className="factory-graph-main">
           <section className="factory-columns" aria-label="실제 공장 가로 생산 흐름" role="list">
-            {columns.length === 0 ? <p className="factory-graph-empty">배치된 실제 설비가 없습니다.</p> : null}
+            {columns.length === 0 ? <p className="factory-graph-empty">검색 또는 필터 조건에 맞는 노드가 없습니다.</p> : null}
             {columns.map(([column, nodes], index) => (
               <section className="factory-column" key={column} aria-labelledby={`factory-column-${column}`}>
                 <header><span>STEP {String(index + 1).padStart(2, "0")}</span><strong id={`factory-column-${column}`}>생산 단계 {index + 1}</strong><em>{nodes.length} 설비</em></header>
@@ -267,6 +367,8 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live }:
                       inputs={inputsByNode.get(node.id) ?? []}
                       outputs={outputsByNode.get(node.id) ?? []}
                       nodeById={nodeById}
+                      bottleneck={bottleneckNodeIds.has(node.id)}
+                      disconnected={disconnectedNodeIds.has(node.id)}
                     />
                   ))}
                 </div>
