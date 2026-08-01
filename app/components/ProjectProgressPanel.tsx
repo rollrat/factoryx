@@ -69,6 +69,8 @@ export type ProjectProgressStageView = Readonly<{
   }>;
   rewards: readonly string[];
   nextUnlock: string | null;
+  repeatable: boolean;
+  completedCycles: number;
 }>;
 
 export type ProjectProgressView = Readonly<{
@@ -155,6 +157,8 @@ export const buildProjectProgressView = (
       nextUnlock: stage.completionUnlockId
         ? UNLOCK_LABELS[stage.completionUnlockId] ?? stage.completionUnlockId
         : null,
+      repeatable: stage.repeatable === true,
+      completedCycles: progress.completedCycles,
     };
   });
 
@@ -166,6 +170,7 @@ export type ProjectProgressPanelProps = Readonly<{
   suppliedPowerMW?: number;
   initialStageId?: ProjectStageId;
   onStageSelect?: (stageId: ProjectStageId) => void;
+  onRestartRepeatable?: (stageId: ProjectStageId) => void;
   className?: string;
 }>;
 
@@ -176,6 +181,7 @@ export function ProjectProgressPanel({
   suppliedPowerMW = 0,
   initialStageId,
   onStageSelect,
+  onRestartRepeatable,
   className,
 }: ProjectProgressPanelProps) {
   const view = useMemo(() => buildProjectProgressView(snapshot, suppliedPowerMW), [snapshot, suppliedPowerMW]);
@@ -257,6 +263,10 @@ export function ProjectProgressPanel({
               <span style={{ width: `${selected.progress * 100}%` }} />
             </div>
           </div>
+
+          {selected.repeatable && selected.completed ? <button className={styles.repeatButton} type="button" onClick={() => onRestartRepeatable?.(selected.id)}>
+            반복 계약 다시 시작 · 완료 {selected.completedCycles}회
+          </button> : null}
 
           {selected.prerequisites.length > 0 && (
             <section className={styles.section} aria-labelledby="project-prerequisite-title">

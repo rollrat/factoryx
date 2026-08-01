@@ -1,32 +1,35 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { MachineType } from "./types";
+import type { BuildingId } from "./domain/types.ts";
+import { START_REGISTRY } from "./data/index.ts";
 import {
+  createBuildingModel,
   createFactoryMaterials,
   createItemModel,
   createOrePatch,
   createStructureModel,
+  buildingModelRotationY,
 } from "./models";
 import { animateMinerModel } from "./models/miner";
 import { animateSmelterModel } from "./models/smelter";
 import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
+import { animateGenericBuildingModel, applyDecoratedBuildingLod } from "./models/genericBuilding.ts";
 import { triangleCount } from "./models/shared";
 
-export type MachineStudioMode = "working" | "idle" | "blocked" | "disconnected";
-export type MachineStudioView = "threeQuarter" | "output" | "side" | "top";
+export type MachineStudioMode = "working" | "idle" | "blocked" | "disconnected" | "manual_off" | "tripped" | "restoring";
+export type MachineStudioView = "threeQuarter" | "output" | "side" | "top" | "firstPerson";
 export type MachineStudioStats = ReturnType<typeof triangleCount>;
+export type MachineStudioMachineId = BuildingId;
 
 type MachineStudioCallbacks = {
   onProgress: (progress: number) => void;
   onStats: (stats: MachineStudioStats) => void;
 };
 
-const PROCESS_TIME: Record<MachineType, number> = {
-  miner: 2.1,
-  smelter: 2.7,
-  assembler: 3.4,
-  storage: 6,
+const processTime = (buildingId: BuildingId) => {
+  const recipeId = START_REGISTRY.buildings.get(buildingId)?.recipeIds[0];
+  return recipeId ? START_REGISTRY.recipes.get(recipeId)?.durationSeconds ?? 4 : 4;
 };
 
 const VIEW_POSITIONS: Record<MachineStudioView, THREE.Vector3> = {
@@ -34,22 +37,19 @@ const VIEW_POSITIONS: Record<MachineStudioView, THREE.Vector3> = {
   output: new THREE.Vector3(5.2, 1.75, -0.45),
   side: new THREE.Vector3(0.15, 1.8, 5.4),
   top: new THREE.Vector3(3.5, 5.5, 3.5),
+  firstPerson: new THREE.Vector3(0, 1.68, 3.25),
 };
 
-const INPUT_COUNT: Record<MachineType, number> = {
-  miner: 0,
-  smelter: 1,
-  assembler: 2,
-  storage: 0,
-};
+const inputCount = (buildingId: BuildingId) => START_REGISTRY.buildings.get(buildingId)?.ports
+  .filter(({ direction, medium }) => direction !== "output" && medium !== "power").length ?? 0;
 
 export class MachineStudioRuntime {
   private readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(42, 1, 0.05, 80);
   private readonly controls: OrbitControls;
-  private readonly models: Record<MachineType, THREE.Group>;
-  private readonly contextEntries: Array<{ object: THREE.Object3D; machines: MachineType[] }> = [];
+  private readonly models = new Map<BuildingId, THREE.Group>();
+  private readonly contextEntries: Array<{ object: THREE.Object3D; machines: BuildingId[] }> = [];
   private readonly floor: THREE.Mesh;
   private readonly grid: THREE.GridHelper;
   private readonly silhouetteMaterial = new THREE.MeshBasicMaterial({ color: 0x101719 });
@@ -64,12 +64,14 @@ export class MachineStudioRuntime {
   private speed = 1;
   private playing = true;
   private mode: MachineStudioMode = "working";
-  private machine: MachineType = "miner";
+  private machine: BuildingId = "vein_miner";
   private gridEnabled = true;
   private contextEnabled = true;
   private silhouette = false;
   private storagePulse = 0;
   private previousPreviewStored = 0;
+  private rotation: 0 | 1 | 2 | 3 = 0;
+  private lodTier: 0 | 1 | 2 = 0;
 
   constructor(mount: HTMLElement, callbacks: MachineStudioCallbacks) {
     this.callbacks = callbacks;
@@ -97,13 +99,8 @@ export class MachineStudioRuntime {
     this.controls.update();
 
     const materials = createFactoryMaterials();
-    this.models = {
-      miner: createStructureModel("miner", materials),
-      smelter: createStructureModel("smelter", materials),
-      assembler: createStructureModel("assembler", materials),
-      storage: createStructureModel("storage", materials),
-    };
-    Object.entries(this.models).forEach(([type, model]) => {
+    START_REGISTRY.buildings.forEach((definition) => this.models.set(definition.id, createBuildingModel(definition.id, materials)));
+    this.models.forEach((model, type) => {
       model.position.y = 0.04;
       model.visible = type === this.machine;
       this.scene.add(model);
@@ -112,37 +109,37 @@ export class MachineStudioRuntime {
     const orePatch = createOrePatch(materials);
     orePatch.position.set(-0.08, 0.065, 0.02);
     orePatch.scale.setScalar(0.62);
-    this.addContext(orePatch, ["miner"]);
+    this.addContext(orePatch, ["vein_miner"]);
 
     const inputBelt = createStructureModel("belt", materials);
     inputBelt.position.set(-1.52, 0.04, -0.5);
     inputBelt.rotation.y = Math.PI / 2;
-    this.addContext(inputBelt, ["smelter", "assembler", "storage"]);
+    this.addContext(inputBelt, ["arc_smelter", "precision_assembler", "small_storage"]);
 
     const secondaryInputBelt = createStructureModel("belt", materials);
     secondaryInputBelt.position.set(-1.52, 0.04, 0.5);
     secondaryInputBelt.rotation.y = Math.PI / 2;
-    this.addContext(secondaryInputBelt, ["assembler"]);
+    this.addContext(secondaryInputBelt, ["precision_assembler"]);
 
     const outputBelt = createStructureModel("belt", materials);
     outputBelt.position.set(1.52, 0.04, -0.5);
     outputBelt.rotation.y = Math.PI / 2;
-    this.addContext(outputBelt, ["miner", "smelter", "assembler"]);
+    this.addContext(outputBelt, ["vein_miner", "arc_smelter", "precision_assembler"]);
 
     const ore = createItemModel("iron_ore", materials);
     ore.position.set(-1.55, 0.53, -0.5);
-    this.addContext(ore, ["smelter"]);
+    this.addContext(ore, ["arc_smelter"]);
 
     const ingotA = createItemModel("iron_ingot", materials);
     ingotA.position.set(-1.55, 0.53, -0.5);
-    this.addContext(ingotA, ["assembler"]);
+    this.addContext(ingotA, ["precision_assembler"]);
     const ingotB = createItemModel("iron_ingot", materials);
     ingotB.position.set(-1.55, 0.53, 0.5);
-    this.addContext(ingotB, ["assembler"]);
+    this.addContext(ingotB, ["precision_assembler"]);
 
     const component = createItemModel("iron_plate", materials);
     component.position.set(-1.55, 0.53, -0.5);
-    this.addContext(component, ["storage"]);
+    this.addContext(component, ["small_storage"]);
 
     this.floor = new THREE.Mesh(
       new THREE.CircleGeometry(5.8, 64),
@@ -175,34 +172,37 @@ export class MachineStudioRuntime {
     this.scene.add(rim);
 
     this.updateContextVisibility();
-    callbacks.onStats(triangleCount(this.models[this.machine]));
+    callbacks.onStats(triangleCount(this.models.get(this.machine)!));
     this.resizeObserver = new ResizeObserver(this.resize);
     this.resizeObserver.observe(mount);
     this.resize();
     this.animationId = requestAnimationFrame(this.animate);
   }
 
-  private addContext(object: THREE.Object3D, machines: MachineType[]) {
+  private addContext(object: THREE.Object3D, machines: BuildingId[]) {
     this.contextEntries.push({ object, machines });
     this.scene.add(object);
   }
 
-  setMachine(machine: MachineType) {
-    this.models[this.machine].visible = false;
+  setMachine(machine: BuildingId) {
+    if (!this.models.has(machine)) throw new Error(`unknown studio building: ${machine}`);
+    this.models.get(this.machine)!.visible = false;
     this.machine = machine;
-    this.models[this.machine].visible = true;
-    this.renderer.domElement.setAttribute("aria-label", `${machine} 3D 디자인 미리보기`);
+    this.models.get(this.machine)!.visible = true;
+    this.models.get(this.machine)!.rotation.y = buildingModelRotationY(this.rotation);
+    this.models.get(this.machine)!.userData.lodTier = this.lodTier;
+    this.renderer.domElement.setAttribute("aria-label", `${START_REGISTRY.buildings.get(machine)?.name ?? machine} 3D 디자인 미리보기`);
     this.elapsed = 0;
     this.storagePulse = 0;
     this.previousPreviewStored = 0;
     this.updateContextVisibility();
-    this.callbacks.onStats(triangleCount(this.models[this.machine]));
+    this.callbacks.onStats(triangleCount(this.models.get(this.machine)!));
   }
 
   setMode(mode: MachineStudioMode) {
     this.mode = mode;
     if (mode !== "working") this.playing = false;
-    if (mode === "blocked") this.progress = this.machine === "storage" ? 1 : 0;
+    if (mode === "blocked") this.progress = this.machine.includes("storage") ? 1 : 0;
   }
 
   setPlaying(playing: boolean) {
@@ -240,8 +240,20 @@ export class MachineStudioRuntime {
 
   setView(view: MachineStudioView) {
     this.camera.position.copy(VIEW_POSITIONS[view]);
-    this.controls.target.set(0, this.machine === "storage" ? 1.1 : 1.02, 0);
+    this.controls.target.set(0, this.machine.includes("storage") ? 1.1 : 1.02, 0);
     this.controls.update();
+  }
+
+  setRotation(rotation: 0 | 1 | 2 | 3) {
+    this.rotation = rotation;
+    this.models.get(this.machine)!.rotation.y = buildingModelRotationY(rotation);
+  }
+
+  setLodTier(tier: 0 | 1 | 2) {
+    this.lodTier = tier;
+    const model = this.models.get(this.machine)!;
+    model.userData.lodTier = tier;
+    applyDecoratedBuildingLod(model, tier);
   }
 
   private updateContextVisibility() {
@@ -269,17 +281,17 @@ export class MachineStudioRuntime {
     const targetActivity = this.mode === "working" ? 1 : 0;
     this.activity += (targetActivity - this.activity) * (1 - Math.exp(-delta * 8));
     if (this.playing && this.mode === "working") {
-      this.progress = (this.progress + (delta / PROCESS_TIME[this.machine]) * this.speed) % 1;
+      this.progress = (this.progress + (delta / processTime(this.machine)) * this.speed) % 1;
       this.elapsed += delta * this.activity;
     }
 
-    const model = this.models[this.machine];
+    const model = this.models.get(this.machine)!;
     const working = this.mode === "working";
-    const outputQueued = this.mode === "blocked" && this.machine !== "storage";
+    const outputQueued = this.mode === "blocked" && !this.machine.includes("storage");
     const inputConnected = this.mode !== "disconnected";
     const outputConnected = this.mode !== "disconnected";
 
-    if (this.machine === "miner") {
+    if (this.machine === "vein_miner") {
       animateMinerModel(model, {
         time: this.elapsed,
         delta,
@@ -290,33 +302,33 @@ export class MachineStudioRuntime {
         outputConnected,
       });
     }
-    if (this.machine === "smelter") {
+    if (this.machine === "arc_smelter") {
       animateSmelterModel(model, {
         time: this.elapsed,
         delta,
         progress: this.progress,
         activity: this.activity,
         working,
-        inputCount: working ? INPUT_COUNT.smelter : 0,
+        inputCount: working ? inputCount(this.machine) : 0,
         outputQueued,
         inputConnected,
         outputConnected,
       });
     }
-    if (this.machine === "assembler") {
+    if (this.machine === "precision_assembler") {
       animateAssemblerModel(model, {
         time: this.elapsed,
         delta,
         progress: this.progress,
         activity: this.activity,
         working,
-        inputCount: working ? INPUT_COUNT.assembler : 0,
+        inputCount: working ? inputCount(this.machine) : 0,
         outputQueued,
         inputConnected,
         outputConnected,
       });
     }
-    if (this.machine === "storage") {
+    if (this.machine === "small_storage") {
       const stored = this.mode === "blocked"
         ? 400
         : this.mode === "idle" ? 0 : Math.round(this.progress * 24);
@@ -332,6 +344,16 @@ export class MachineStudioRuntime {
         inputConnected,
       });
     }
+    if (!["vein_miner", "arc_smelter", "precision_assembler", "small_storage"].includes(this.machine)) {
+      animateGenericBuildingModel(model, {
+        time: this.elapsed,
+        progress: this.progress,
+        activity: this.activity,
+        runtimeState: this.mode === "working" ? "working" : this.mode,
+        storedRatio: this.mode === "blocked" ? 1 : this.progress,
+      });
+    }
+    applyDecoratedBuildingLod(model, this.lodTier);
 
     model.traverse((part) => {
       const role = part.userData.animationRole as string | undefined;

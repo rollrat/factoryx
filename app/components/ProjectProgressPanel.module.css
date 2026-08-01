@@ -110,6 +110,8 @@
 .rewardHeading span { color: var(--project-amber); font-size: 10px; }
 .rewards { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .rewards li { padding: 6px 8px; border: 1px solid var(--project-line); background: var(--project-raised); color: #b8c5c3; font-size: 10px; }
+.repeatButton { width: 100%; margin: 12px 0 0; padding: 11px 14px; border: 1px solid var(--project-amber); color: var(--project-amber); background: rgba(232, 159, 59, 0.08); font: inherit; cursor: pointer; }
+.repeatButton:hover, .repeatButton:focus-visible { color: #fff1d6; background: rgba(232, 159, 59, 0.16); }
 
 @media (max-width: 720px) {
   .panel { max-height: calc(100dvh - 16px); }

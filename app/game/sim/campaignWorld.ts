@@ -134,6 +134,10 @@ export class CampaignWorldRuntime {
     return result;
   }
 
+  restartRepeatableProject(stageId: ProjectStageId): boolean {
+    return this.campaign.restartRepeatableStage(stageId);
+  }
+
   stepPower(
     deltaSeconds: number,
     overrides: Readonly<Record<string, PowerInstanceOverride>> = {},

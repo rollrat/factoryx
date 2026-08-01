@@ -212,6 +212,7 @@ export type ProjectStageDefinition = Readonly<{
   dockPowerMode: "manual" | "powered";
   requiredPowerMW?: number;
   completionSequence?: string;
+  repeatable?: boolean;
 }>;
 
 export type ItemStack = Readonly<{ itemId: ItemId; amount: number }>;

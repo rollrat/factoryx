@@ -277,6 +277,9 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     stage.prerequisiteIds.forEach((stageId, prerequisiteIndex) => {
       if (!stages.has(stageId)) issues.push({ code: "missing_stage", path: `${basePath}.prerequisiteIds[${prerequisiteIndex}]`, message: `Unknown project stage: ${stageId}` });
     });
+    if (stage.repeatable && source.projectStages.some((candidate) => candidate.prerequisiteIds.includes(stage.id))) {
+      issues.push({ code: "nonterminal_repeatable_stage", path: `${basePath}.repeatable`, message: "Only a terminal project stage can be repeatable" });
+    }
     stage.deliveries.forEach((delivery, deliveryIndex) => {
       const deliveryPath = `${basePath}.deliveries[${deliveryIndex}]`;
       const item = items.get(delivery.itemId);

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { MachineType } from "../game/types";
+import type { BuildingId } from "../game/domain/types.ts";
+import { START_REGISTRY } from "../game/data/index.ts";
 import {
   MachineStudioRuntime,
   type MachineStudioMode,
@@ -12,7 +13,7 @@ import {
 import styles from "../studio/studio.module.css";
 
 type MachineDefinition = {
-  id: MachineType;
+  id: BuildingId;
   short: string;
   label: string;
   code: string;
@@ -22,9 +23,9 @@ type MachineDefinition = {
   modes: Record<MachineStudioMode, { label: string; description: string }>;
 };
 
-const MACHINES: MachineDefinition[] = [
+const CORE_MACHINES: MachineDefinition[] = [
   {
-    id: "miner",
+    id: "vein_miner",
     short: "M",
     label: "채굴기",
     code: "IRON MINER / BLOCKOUT 02",
@@ -36,10 +37,13 @@ const MACHINES: MachineDefinition[] = [
       idle: { label: "대기", description: "연결됨, 정지 상태" },
       blocked: { label: "막힘", description: "출력 슈트 정체" },
       disconnected: { label: "미연결", description: "출력 벨트 없음" },
+      manual_off: { label: "수동 OFF", description: "수동 정지 자세" },
+      tripped: { label: "트립", description: "보호 차단 자세" },
+      restoring: { label: "복구", description: "순차 재기동 상태" },
     },
   },
   {
-    id: "smelter",
+    id: "arc_smelter",
     short: "S",
     label: "제련기",
     code: "ARC SMELTER / BLOCKOUT 02",
@@ -51,10 +55,13 @@ const MACHINES: MachineDefinition[] = [
       idle: { label: "대기", description: "노심 냉각, 재료 대기" },
       blocked: { label: "막힘", description: "주조 슈트 잉곳 정체" },
       disconnected: { label: "미연결", description: "입출력 벨트 없음" },
+      manual_off: { label: "수동 OFF", description: "수동 정지 자세" },
+      tripped: { label: "트립", description: "보호 차단 자세" },
+      restoring: { label: "복구", description: "순차 재기동 상태" },
     },
   },
   {
-    id: "assembler",
+    id: "precision_assembler",
     short: "A",
     label: "조립기",
     code: "PRECISION ASSEMBLER / BLOCKOUT 02",
@@ -66,10 +73,13 @@ const MACHINES: MachineDefinition[] = [
       idle: { label: "대기", description: "재료 두 개 대기" },
       blocked: { label: "막힘", description: "완성 부품 출력 정체" },
       disconnected: { label: "미연결", description: "입출력 벨트 없음" },
+      manual_off: { label: "수동 OFF", description: "수동 정지 자세" },
+      tripped: { label: "트립", description: "보호 차단 자세" },
+      restoring: { label: "복구", description: "순차 재기동 상태" },
     },
   },
   {
-    id: "storage",
+    id: "small_storage",
     short: "C",
     label: "창고",
     code: "COMPACT STORAGE / BLOCKOUT 02",
@@ -81,23 +91,49 @@ const MACHINES: MachineDefinition[] = [
       idle: { label: "비어 있음", description: "입력 대기 상태" },
       blocked: { label: "가득 참", description: "400 슬롯 적재 완료" },
       disconnected: { label: "미연결", description: "입력 벨트 없음" },
+      manual_off: { label: "수동 OFF", description: "입출고 수동 정지" },
+      tripped: { label: "트립", description: "보호 차단 상태" },
+      restoring: { label: "복구", description: "입출고 복구 상태" },
     },
   },
 ];
 
-const MODE_ORDER: MachineStudioMode[] = ["working", "idle", "blocked", "disconnected"];
+const DEFAULT_MODES: MachineDefinition["modes"] = {
+  working: { label: "가동", description: "정상 작동 사이클" },
+  idle: { label: "대기", description: "연결된 안전 정지 자세" },
+  blocked: { label: "막힘", description: "출력 또는 계통 차단 상태" },
+  disconnected: { label: "미연결", description: "입출력 연결 없음" },
+  manual_off: { label: "수동 OFF", description: "운전자가 정지시킨 안전 자세" },
+  tripped: { label: "트립", description: "보호 계전 차단 상태" },
+  restoring: { label: "복구", description: "우선순위에 따른 순차 재기동" },
+};
+
+const coreById = new Map(CORE_MACHINES.map((machine) => [machine.id, machine]));
+const MACHINES: MachineDefinition[] = [...START_REGISTRY.buildings.values()].map((building) => coreById.get(building.id) ?? ({
+  id: building.id,
+  short: building.name.slice(0, 1),
+  label: building.name,
+  code: `${building.id.toUpperCase()} / DATA BLOCKOUT`,
+  cycleTitle: building.recipeIds.length > 0 ? "공정 주기" : "운전 상태",
+  cycleLabels: ["투입", "가동", "검사", "배출"],
+  focus: `${building.footprint.x}×${building.footprint.z} 점유, 포트 ${building.ports.length}개, 회전·LOD·정지 자세`,
+  modes: DEFAULT_MODES,
+}));
+
+const MODE_ORDER: MachineStudioMode[] = ["working", "idle", "blocked", "disconnected", "manual_off", "tripped", "restoring"];
 const VIEWS: Array<{ id: MachineStudioView; label: string }> = [
   { id: "threeQuarter", label: "3/4" },
   { id: "output", label: "물류" },
   { id: "side", label: "측면" },
   { id: "top", label: "상단" },
+  { id: "firstPerson", label: "1인칭" },
 ];
 const EMPTY_STATS: MachineStudioStats = { meshes: 0, triangles: 0, materials: 0 };
 
 export default function MachineStudio() {
   const mountRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<MachineStudioRuntime | null>(null);
-  const [machine, setMachine] = useState<MachineType>("miner");
+  const [machine, setMachine] = useState<BuildingId>("vein_miner");
   const [mode, setMode] = useState<MachineStudioMode>("working");
   const [playing, setPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -106,6 +142,8 @@ export default function MachineStudio() {
   const [contextVisible, setContextVisible] = useState(true);
   const [silhouette, setSilhouette] = useState(false);
   const [stats, setStats] = useState<MachineStudioStats>(EMPTY_STATS);
+  const [rotation, setRotation] = useState<0 | 1 | 2 | 3>(0);
+  const [lodTier, setLodTier] = useState<0 | 1 | 2>(0);
   const studioStateRef = useRef({
     machine,
     mode,
@@ -156,8 +194,8 @@ export default function MachineStudio() {
   const definition = MACHINES.find((item) => item.id === machine) ?? MACHINES[0];
   const currentMode = definition.modes[mode];
 
-  const chooseMachine = (nextMachine: MachineType) => {
-    const nextProgress = nextMachine === "storage" ? 0.2 : 0;
+  const chooseMachine = (nextMachine: BuildingId) => {
+    const nextProgress = nextMachine.includes("storage") ? 0.2 : 0;
     setMachine(nextMachine);
     setMode("working");
     setPlaying(true);
@@ -330,6 +368,12 @@ export default function MachineStudio() {
                   data-testid={`studio-view-${view.id}`}
                 >{view.label}</button>
               ))}
+            </div>
+            <div className={styles.viewGrid} aria-label="설비 회전 검사">
+              {([0, 1, 2, 3] as const).map((quarter) => <button key={quarter} type="button" aria-pressed={rotation === quarter} onClick={() => { setRotation(quarter); runtimeRef.current?.setRotation(quarter); }}>{quarter * 90}°</button>)}
+            </div>
+            <div className={styles.viewGrid} aria-label="LOD 검사">
+              {([0, 1, 2] as const).map((tier) => <button key={tier} type="button" aria-pressed={lodTier === tier} onClick={() => { setLodTier(tier); runtimeRef.current?.setLodTier(tier); }}>LOD {tier}</button>)}
             </div>
             <div className={styles.toggleList}>
               <label>

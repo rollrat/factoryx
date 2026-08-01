@@ -54,7 +54,7 @@ export const buildDefinitionLineageGraph = (definitions: DefinitionSource): Prod
       id: `stage:${stage.id}`,
       label: STAGE_LABELS[stage.id] ?? stage.id.replaceAll("_", " "),
       kind: "project",
-      detail: `${stage.dockPowerMode === "powered" ? `${stage.requiredPowerMW ?? 32} MW` : "수동"} 도크 · 역산 ${plan.machineMinutes.toFixed(1)} 기계-분 · ${raw}`,
+      detail: `${stage.dockPowerMode === "powered" ? `${stage.requiredPowerMW ?? 32} MW` : "수동"} 도크 · 목표 ${plan.targetPlayMinutes.min}~${plan.targetPlayMinutes.max}분 · 역산 ${plan.machineMinutes.toFixed(1)} 기계-분 / 권장 병렬 ${plan.recommendedParallelMachines}대 · ${raw}`,
       column: maxColumn + 1 + index,
       order: index,
     });

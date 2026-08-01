@@ -83,3 +83,18 @@ test("restore rejects corrupt or cross-stage snapshots", () => {
   }), /invalid project snapshot amount/);
 });
 
+test("the AX-17 final contract can restart and preserves its completed cycle count", () => {
+  const definition = START_REGISTRY.projectStages.get("phase_4_colony_seed")!;
+  const project = new ProjectStageTracker(definition);
+  definition.deliveries.forEach((delivery) => {
+    assert.equal(project.deliver({ portId: delivery.portId, itemId: delivery.itemId, amount: delivery.amount }).accepted, true);
+  });
+  assert.equal(project.progress().completed, true);
+  assert.equal(project.progress().completedCycles, 1);
+  assert.equal(project.restartRepeatableCycle(), true);
+  assert.equal(project.progress().completed, false);
+  assert.equal(project.progress().deliveredTotal, 0);
+  assert.equal(project.progress().completedCycles, 1);
+  const restored = new ProjectStageTracker(definition, project.snapshot());
+  assert.deepEqual(restored.progress(), project.progress());
+});

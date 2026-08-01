@@ -26,6 +26,7 @@ export type ProjectDeliveryResult =
 export type ProjectStageSnapshot = Readonly<{
   stageId: ProjectStageId;
   delivered: readonly Readonly<{ portId: PortId; itemId: ItemId; amount: number }>[];
+  completedCycles?: number;
 }>;
 
 export type ProjectDeliveryProgress = Readonly<{
@@ -36,6 +37,8 @@ export type ProjectDeliveryProgress = Readonly<{
   remaining: number;
   progress: number;
   completed: boolean;
+  completedCycles: number;
+  repeatable: boolean;
 }>;
 
 export type ProjectStageProgress = Readonly<{
@@ -57,6 +60,7 @@ const requiredPhaseOne = () => {
 export class ProjectStageTracker {
   readonly definition: ProjectStageDefinition;
   private readonly deliveredByPort = new Map<PortId, number>();
+  private completedCycles = 0;
 
   constructor(definition: ProjectStageDefinition, snapshot?: ProjectStageSnapshot) {
     this.definition = definition;
@@ -84,6 +88,7 @@ export class ProjectStageTracker {
 
     this.deliveredByPort.set(request.portId, requirement.amount - (remaining - request.amount));
     const completed = this.progress().completed;
+    if (completed) this.completedCycles += 1;
     return {
       accepted: true,
       portId: request.portId,
@@ -117,6 +122,8 @@ export class ProjectStageTracker {
       deliveredTotal,
       totalProgress: requiredTotal === 0 ? 1 : deliveredTotal / requiredTotal,
       completed: deliveries.every((delivery) => delivery.completed),
+      completedCycles: this.completedCycles,
+      repeatable: this.definition.repeatable === true,
     };
   }
 
@@ -128,7 +135,14 @@ export class ProjectStageTracker {
         itemId: requirement.itemId,
         amount: this.deliveredByPort.get(requirement.portId) ?? 0,
       })),
+      completedCycles: this.completedCycles,
     };
+  }
+
+  restartRepeatableCycle(): boolean {
+    if (!this.definition.repeatable || !this.progress().completed) return false;
+    this.deliveredByPort.forEach((_amount, portId) => this.deliveredByPort.set(portId, 0));
+    return true;
   }
 
   restore(snapshot: ProjectStageSnapshot) {
@@ -146,10 +160,12 @@ export class ProjectStageTracker {
       }
       this.deliveredByPort.set(entry.portId, entry.amount);
     });
+    const completedCycles = snapshot.completedCycles ?? (this.progress().completed ? 1 : 0);
+    if (!Number.isSafeInteger(completedCycles) || completedCycles < 0) throw new RangeError("invalid project completed cycle count");
+    this.completedCycles = completedCycles;
   }
 }
 
 export const createPhaseOneProject = (snapshot?: ProjectStageSnapshot) => (
   new ProjectStageTracker(requiredPhaseOne(), snapshot)
 );
-

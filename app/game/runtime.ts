@@ -423,6 +423,16 @@ export class FactoryRuntime {
     return this.campaignWorld.campaign.snapshot();
   }
 
+  restartRepeatableProject(stageId: string) {
+    if (!this.campaignWorld.restartRepeatableProject(stageId)) {
+      this.callbacks.onToast("완료된 반복 프로젝트만 다시 시작할 수 있습니다");
+      return false;
+    }
+    this.publishProject();
+    this.callbacks.onToast("AX-17 반복 프로젝트를 다시 시작했습니다");
+    return true;
+  }
+
   getDockSuppliedPowerMW() {
     return this.campaignWorld.snapshot().dockSuppliedPowerMW;
   }

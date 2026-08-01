@@ -19,6 +19,11 @@ test("project reverse planning reproduces the documented machine-minute balance 
     assert.ok(Math.abs(plan.machineMinutes - machineMinutes) < 1e-9, stageId);
     assert.equal(plan.unresolvedItemIds.length, 0);
     assert.ok(plan.rawRequirements.size > 0);
+    assert.ok(plan.normalizedDeliveryUnits > 0);
+    assert.ok(plan.targetPlayMinutes.max > plan.targetPlayMinutes.min);
+    assert.ok(plan.recommendedParallelMachines >= 1);
+    assert.equal([...plan.recommendedBuildingCounts.values()].reduce((sum, count) => sum + count, 0), plan.recommendedParallelMachines);
+    assert.ok(plan.recommendedBuildCost.size > 0);
   });
 });
 

@@ -48,6 +48,10 @@ export class CampaignProjectTracker {
     return tracker.definition.prerequisiteIds.every((id) => this.trackers.get(id)?.progress().completed === true);
   }
 
+  restartRepeatableStage(stageId: ProjectStageId): boolean {
+    return this.trackers.get(stageId)?.restartRepeatableCycle() ?? false;
+  }
+
   deliver(
     stageId: ProjectStageId,
     request: ProjectDeliveryRequest,

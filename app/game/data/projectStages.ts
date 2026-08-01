@@ -155,5 +155,6 @@ export const START_PROJECT_STAGES = [
     dockPowerMode: "powered",
     requiredPowerMW: 32,
     completionSequence: "ax17_colony_seed_final_assembly_and_launch",
+    repeatable: true,
   },
 ] as const satisfies readonly ProjectStageDefinition[];

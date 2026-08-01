@@ -322,7 +322,15 @@ export default function FactoryGame({
       {projectOpen && campaignSnapshot ? (
         <div className="project-progress-overlay" role="dialog" aria-modal="true" aria-label="프로젝트 계약 진행 상황">
           <button className="project-progress-close" type="button" onClick={() => setProjectOpen(false)} aria-label="프로젝트 진행 상황 닫기">닫기 <kbd>ESC</kbd></button>
-          <ProjectProgressPanel snapshot={campaignSnapshot} suppliedPowerMW={dockSuppliedPowerMW} />
+          <ProjectProgressPanel
+            snapshot={campaignSnapshot}
+            suppliedPowerMW={dockSuppliedPowerMW}
+            onRestartRepeatable={(stageId) => {
+              if (!runtimeRef.current?.restartRepeatableProject(stageId)) return;
+              setCampaignSnapshot(runtimeRef.current.getCampaignSnapshot());
+              setTopology(runtimeRef.current.getProductionTopology());
+            }}
+          />
         </div>
       ) : null}
       <BuildCatalogDialog
