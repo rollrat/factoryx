@@ -49,6 +49,15 @@ export class EnvironmentRenderer {
 
   setTimeOfDay(value: number) { this.sky.setTimeOfDay(value); }
   setWeather(kind: WeatherKind, strength?: number) { this.weather.setWeather(kind, strength); }
+  setFogDensity(value: number) {
+    if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = THREE.MathUtils.clamp(value, 0, 0.04);
+  }
+  setPropsVisible(visible: boolean) { this.props.root.visible = visible; }
+  setLandmarksVisible(visible: boolean) {
+    this.props.root.children.forEach((child) => {
+      if (child.name.startsWith("landmark:")) child.visible = visible;
+    });
+  }
 
   stats(renderer?: THREE.WebGLRenderer): EnvironmentFrameStats {
     return {
