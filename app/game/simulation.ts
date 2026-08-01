@@ -9,6 +9,7 @@ import {
 } from "./config.ts";
 import { FixedStepClock } from "./sim/clock.ts";
 import { MergerRouter, SplitterRouter } from "./sim/junction.ts";
+import { computePowerGrid, type PowerGridResult } from "./sim/power.ts";
 import { START_REGISTRY } from "./data/index.ts";
 import { getRuntimeRecipe, resolveRuntimeRecipe, type RuntimeRecipe } from "./recipes/runtimeRecipes.ts";
 import type { BeltItem, BuildType, Direction, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
@@ -44,10 +45,16 @@ export class FactorySimulation {
   readonly beltItems = new Map<number, BeltItem>();
 
   private readonly clock = new FixedStepClock();
+  private powerGrid: PowerGridResult = computePowerGrid([]);
   private readonly splitterRouters = new Map<number, SplitterRouter<ItemType>>();
   private readonly mergerRouters = new Map<number, MergerRouter<ItemType>>();
   private nextItemId = 1;
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
+  private readonly powerSupplyMW: number;
+
+  constructor(powerSupplyMW = 24) {
+    this.powerSupplyMW = powerSupplyMW;
+  }
 
   addStructure(data: StructureData) {
     this.structures.set(data.id, { ...data });
@@ -138,6 +145,13 @@ export class FactorySimulation {
     return total;
   }
 
+  getPowerGrid() {
+    return computePowerGrid(
+      [...this.structures.values()].map(({ id, type }) => ({ structureId: id, type })),
+      this.powerSupplyMW,
+    );
+  }
+
   getSelectedInfo(id: number): SelectedInfo {
     const data = this.structures.get(id);
     if (!data) return null;
@@ -162,7 +176,11 @@ export class FactorySimulation {
     const recipe = state.recipeId ? getRuntimeRecipe(state.recipeId) : null;
     let status = "재료 대기";
     let runtimeState: NonNullable<SelectedInfo>["runtimeState"] = "starved";
-    if (data.type === "storage") {
+    if (this.powerGrid.poweredByStructureId.get(id) === false) {
+      status = "전력 부족";
+      runtimeState = "paused";
+    }
+    else if (data.type === "storage") {
       if (state.stored >= STORAGE_CAPACITY) {
         status = "가득 참";
         runtimeState = "blocked";
@@ -212,6 +230,7 @@ export class FactorySimulation {
   }
 
   private step(delta: number) {
+    this.powerGrid = this.getPowerGrid();
     this.updateMachines(delta);
     this.dispatchMachineOutputs();
     this.updateBelts(delta);
@@ -222,6 +241,10 @@ export class FactorySimulation {
       if (isTransport(data.type)) return;
       const state = this.machines.get(id);
       if (!state) return;
+      if (this.powerGrid.poweredByStructureId.get(id) === false) {
+        state.activity += (0 - state.activity) * (1 - Math.exp(-delta * 8));
+        return;
+      }
       if (data.type === "storage") {
         state.intakePulse = Math.max(0, state.intakePulse - delta / 0.42);
         state.activity = state.intakePulse;
@@ -263,6 +286,7 @@ export class FactorySimulation {
       if (isTransport(data.type)) return;
       const state = this.machines.get(id);
       if (!state) return;
+      if (this.powerGrid.poweredByStructureId.get(id) === false) return;
       const outputItems = data.type === "storage" ? state.storedItems : state.output;
       if (!outputItems.length) return;
       const ports = machinePorts(data);

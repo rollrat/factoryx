@@ -148,12 +148,54 @@ button {
 }
 
 .power-readout {
+  position: relative;
   grid-template-columns: auto auto auto;
+  gap: 3px 6px;
 }
 
 .power-readout strong {
   grid-column: auto;
   color: #bdd8d4;
+}
+
+.power-readout em {
+  grid-column: 1 / -1;
+  justify-self: end;
+  color: #758486;
+  font: 700 6px/1 var(--font-geist-mono), monospace;
+  font-style: normal;
+  letter-spacing: 0.06em;
+}
+
+.power-readout.is-overloaded {
+  margin: -3px -5px;
+  padding: 3px 5px;
+  border-left: 2px solid var(--danger);
+  background: rgba(228, 92, 97, 0.08);
+}
+
+.power-readout.is-overloaded span,
+.power-readout.is-overloaded strong,
+.power-readout.is-overloaded em {
+  color: #f08a8e;
+}
+
+.power-readout.is-overloaded::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 7px rgba(228, 92, 97, 0.72);
+  animation: power-overload-pulse 850ms ease-in-out infinite;
+}
+
+@keyframes power-overload-pulse {
+  0%, 100% { opacity: 0.32; }
+  50% { opacity: 1; }
 }
 
 .readout-divider {

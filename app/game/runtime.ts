@@ -12,6 +12,12 @@ import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
 import { animateLogisticsModel } from "./models/logistics";
 import { animateCrusherModel } from "./models/crusher";
+import {
+  animateDistributionPoleModel,
+  animateFieldPowerCoreModel,
+  createDistributionPoleModel,
+  createFieldPowerCoreModel,
+} from "./models/power";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildRuntimeTopology } from "./telemetry/topology.ts";
@@ -34,6 +40,8 @@ const modelPosition = (type: BuildType, x: number, z: number) =>
 
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
+  private readonly powerCoreGroup: THREE.Group;
+  private readonly powerPoleGroup: THREE.Group;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
@@ -111,6 +119,7 @@ export class FactoryRuntime {
   private animationId = 0;
   private lastTime = performance.now();
   private elapsed = 0;
+  private lastPowerSignature = "";
   private lastMotorCount = -1;
   private selectedUiClock = 0;
 
@@ -135,12 +144,15 @@ export class FactoryRuntime {
     );
     this.hoverTile.position.y = 0.035;
 
-    this.setupWorld();
+    const powerModels = this.setupWorld();
+    this.powerCoreGroup = powerModels.core;
+    this.powerPoleGroup = powerModels.pole;
     this.seedFactory();
     this.bindEvents();
     this.resize();
     this.updateCamera();
     this.callbacks.onCredits(this.credits);
+    this.publishPower();
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
@@ -271,7 +283,14 @@ export class FactoryRuntime {
     const limestonePatch = createOrePatch(this.materials, false, true);
     limestonePatch.position.set(-6.5, 0, 7.5);
     this.scene.add(limestonePatch);
+    const core = createFieldPowerCoreModel(this.materials);
+    core.position.set(9.5, 0, -9.5);
+    this.scene.add(core);
+    const pole = createDistributionPoleModel(this.materials);
+    pole.position.set(7.5, 0, -9.5);
+    this.scene.add(pole);
     this.scene.add(this.hoverTile);
+    return { core, pole };
   }
 
   private seedFactory() {
@@ -923,6 +942,26 @@ export class FactoryRuntime {
         });
       }
     });
+    const power = this.simulation.getPowerGrid();
+    const powerState = {
+      time: this.elapsed,
+      delta,
+      generating: true,
+      connected: true,
+      supplyRatio: power.supplyMW > 0 ? power.servedMW / power.supplyMW : 0,
+      loadRatio: power.supplyMW > 0 ? power.demandMW / power.supplyMW : 0,
+      overloaded: power.overloaded,
+    };
+    animateFieldPowerCoreModel(this.powerCoreGroup, powerState);
+    animateDistributionPoleModel(this.powerPoleGroup, powerState);
+  }
+
+  private publishPower() {
+    const power = this.simulation.getPowerGrid();
+    const signature = `${power.supplyMW}:${power.demandMW}:${power.servedMW}:${power.overloaded}`;
+    if (signature === this.lastPowerSignature) return;
+    this.lastPowerSignature = signature;
+    this.callbacks.onPower(power);
   }
 
   private animate = (time: number) => {
@@ -952,6 +991,7 @@ export class FactoryRuntime {
     }
 
     this.simulation.update(delta);
+    this.publishPower();
     this.syncItems(delta);
     this.animateMachines(delta);
     this.selectedUiClock += delta;

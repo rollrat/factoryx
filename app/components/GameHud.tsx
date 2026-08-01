@@ -8,6 +8,10 @@ type GameHudProps = {
   pointerLocked: boolean;
   credits: number;
   motors: number;
+  powerSupply: number;
+  powerDemand: number;
+  powerServed: number;
+  powerOverloaded: boolean;
   selected: SelectedInfo;
   beltBuildInfo: BeltBuildInfo;
   toast: string;
@@ -54,6 +58,10 @@ const STATUS_LABEL: Record<EquipmentStatus, string> = {
   idle: "대기",
 };
 
+const formatPower = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0).toLocaleString("ko-KR", {
+  maximumFractionDigits: 1,
+});
+
 const itemSummary = (
   items: SelectedDetails["inputItems"],
   fallbackCount: number,
@@ -97,6 +105,10 @@ export default function GameHud({
   pointerLocked,
   credits,
   motors,
+  powerSupply,
+  powerDemand,
+  powerServed,
+  powerOverloaded,
   selected,
   beltBuildInfo,
   toast,
@@ -111,6 +123,7 @@ export default function GameHud({
   const toolKeyRange = numericToolKeys.length > 1
     ? `${numericToolKeys[0]}–${numericToolKeys[numericToolKeys.length - 1]}`
     : numericToolKeys[0] ?? "숫자";
+  const isPowerLimited = powerOverloaded || powerDemand > powerSupply || powerServed < powerDemand;
   const objectiveProgress = Math.min(100, (motors / 20) * 100);
   const selectedDetails = selected as SelectedDetails | null;
   const selectedStatus = selectedDetails ? getEquipmentStatus(selectedDetails) : "idle";
@@ -153,10 +166,15 @@ export default function GameHud({
             <strong>{credits.toLocaleString("ko-KR")}</strong>
           </div>
           <div className="readout-divider" />
-          <div className="system-readout power-readout">
-            <span>GRID</span>
-            <strong>68 / 120</strong>
+          <div
+            className={`system-readout power-readout ${isPowerLimited ? "is-overloaded" : ""}`}
+            role="status"
+            aria-label={`전력 공급 ${formatPower(powerServed)} 메가와트, 요청 부하 ${formatPower(powerDemand)} 메가와트, 설비 용량 ${formatPower(powerSupply)} 메가와트${isPowerLimited ? ", 과부하" : ""}`}
+          >
+            <span>{isPowerLimited ? "OVERLOAD" : "GRID"}</span>
+            <strong>{formatPower(powerServed)} / {formatPower(powerDemand)}</strong>
             <small>MW</small>
+            <em>CAP {formatPower(powerSupply)}</em>
           </div>
         </div>
 
@@ -298,7 +316,7 @@ export default function GameHud({
           <strong>{activeToolInfo.name}</strong>
           <em>{activeToolInfo.cost ? `₡ ${activeToolInfo.cost}` : "조작 도구"}</em>
         </div>
-        <nav className="toolbar" aria-label="건설 도구" aria-description="항목이 더 있으면 가로로 스크롤하세요.">
+        <nav className="toolbar" aria-label="건설 도구" title="항목이 더 있으면 가로로 스크롤하세요.">
           {TOOL_INFO.map((tool) => (
             <button
               key={tool.id}

@@ -24,7 +24,7 @@ const lineSeed: Array<Omit<StructureData, "id">> = [
 ];
 
 test("ore anchors and recipe machines preserve concrete item identity", () => {
-  const simulation = new FactorySimulation();
+  const simulation = new FactorySimulation(40);
   simulation.addStructure({ id: 1, type: "miner", x: -8, z: -3, rotation: 0 });
   simulation.addStructure({ id: 2, type: "miner", x: 7, z: 4, rotation: 0 });
   simulation.addStructure({ id: 3, type: "smelter", x: 0, z: 0, rotation: 0 });

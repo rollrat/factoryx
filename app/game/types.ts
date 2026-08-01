@@ -67,6 +67,13 @@ export type BeltBuildInfo = {
   connectedStart: boolean;
 };
 
+export type PowerInfo = {
+  supplyMW: number;
+  demandMW: number;
+  servedMW: number;
+  overloaded: boolean;
+};
+
 export type HistoryEntry = {
   added: StructureData[];
   removed: StructureData[];
@@ -97,6 +104,7 @@ export type GameCallbacks = {
   onCameraMode: (mode: CameraMode) => void;
   onPointerLock: (locked: boolean) => void;
   onBeltBuildInfo: (info: BeltBuildInfo) => void;
+  onPower: (power: PowerInfo) => void;
 };
 
 // New data-driven contracts live beside the legacy prototype types so the

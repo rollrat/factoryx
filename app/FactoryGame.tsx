@@ -5,7 +5,7 @@ import GameHud from "./components/GameHud";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
 import { FactoryRuntime } from "./game/runtime";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
-import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "./game/types";
+import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
   dragging: false,
@@ -19,6 +19,8 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
   graph: { title: "실제 공장 생산 계보", nodes: [], edges: [] },
   live: { nodeStates: {}, updatedAt: 0 },
 };
+
+const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
 
 const topologyForOverlay = (topology: RuntimeTopology) => ({
   graph: {
@@ -65,6 +67,7 @@ export default function FactoryGame() {
   const [toastVisible, setToastVisible] = useState(true);
   const [lineageOpen, setLineageOpen] = useState(false);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
+  const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -85,6 +88,7 @@ export default function FactoryGame() {
       onCameraMode: setCameraMode,
       onPointerLock: setPointerLocked,
       onBeltBuildInfo: setBeltBuildInfo,
+      onPower: setPower,
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
@@ -124,6 +128,10 @@ export default function FactoryGame() {
         pointerLocked={pointerLocked}
         credits={credits}
         motors={motors}
+        powerSupply={power.supplyMW}
+        powerDemand={power.demandMW}
+        powerServed={power.servedMW}
+        powerOverloaded={power.overloaded}
         selected={selected}
         beltBuildInfo={beltBuildInfo}
         toast={toast}
