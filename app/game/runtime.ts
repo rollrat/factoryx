@@ -404,7 +404,8 @@ export class FactoryRuntime {
     group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       const role = child.userData.animationRole as string | undefined;
-      child.material = role === "beltFlowArrow" || role === "beltStatusLight"
+      if (role === "beltBuildArrow") child.visible = true;
+      child.material = role === "beltBuildArrow" || role === "beltStatusLight"
         ? valid ? this.ghostDirectionValid : this.ghostDirectionInvalid
         : valid ? this.ghostMaterialValid : this.ghostMaterialInvalid;
     });
@@ -786,25 +787,16 @@ export class FactoryRuntime {
       group.userData.beltTravel = beltTravel;
       group.traverse((part) => {
         const role = part.userData.animationRole as string | undefined;
-        if (role === "beltRoller") part.rotation.x = -beltTravel * 11;
-        if (role === "beltDriveCap") part.rotation.x = -beltTravel * 8;
         if (role === "beltTread") {
           const offset = part.userData.offset as number;
-          part.position.z = ((offset + beltTravel * 0.62 + 0.47) % 0.94) - 0.47;
-        }
-        if (role === "beltFlowArrow" && part instanceof THREE.Mesh) {
-          const material = part.material;
-          if (material instanceof THREE.MeshStandardMaterial) {
-            const phase = (part.userData.phase as number) ?? 0;
-            material.emissiveIntensity = beltJammed ? 0.25 : 1.2 + Math.sin(this.elapsed * 5 + phase * Math.PI * 2) * 0.45;
-          }
+          part.position.z = ((offset + beltTravel * 0.62 + 0.5) % 1) - 0.5;
         }
         if (role === "beltStatusLight" && part instanceof THREE.Mesh) {
           const material = part.material;
           if (material instanceof THREE.MeshStandardMaterial) {
-            material.color.setHex(beltJammed ? 0xff6577 : 0x5de4d1);
-            material.emissive.setHex(beltJammed ? 0xa8172b : 0x1a8f82);
-            material.emissiveIntensity = beltJammed ? 2.4 : 1.5;
+            material.color.setHex(beltJammed ? 0xffa94d : 0x5de4d1);
+            material.emissive.setHex(beltJammed ? 0x9b480c : 0x1a8f82);
+            material.emissiveIntensity = beltJammed ? 1.8 + Math.sin(this.elapsed * 5) * 0.5 : 1.5;
           }
         }
         if (role === "minerDrill") {
