@@ -18,6 +18,18 @@ import {
 
 export type WorldBounds = Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
 
+export type WorldTerrainPlacementIssue = Readonly<{
+  ok: false;
+  reason: "foundation_required" | "terrain_steep" | "terrain_submerged" | "terrain_hazard" | "terrain_clearance";
+  cell?: GridCell;
+}>;
+
+export type WorldTerrainPlacementValidator = (
+  definition: BuildingDefinition,
+  position: GridCell,
+  rotation: 0 | 1 | 2 | 3,
+) => Readonly<{ ok: true }> | WorldTerrainPlacementIssue;
+
 export type WorldSnapshot = Readonly<{
   version: 1;
   bounds: WorldBounds;
@@ -49,7 +61,12 @@ export type WorldPlacementResult =
       | "occupied"
       | "invalid_resource_anchor"
       | "resource_locked"
-      | "insufficient_materials";
+      | "insufficient_materials"
+      | "foundation_required"
+      | "terrain_steep"
+      | "terrain_submerged"
+      | "terrain_hazard"
+      | "terrain_clearance";
     itemId?: ItemId;
     cell?: GridCell;
   }>;
@@ -151,6 +168,7 @@ export class DataDrivenWorld {
   private readonly occupancy = new Map<string, string>();
   private readonly inventory = new Map<ItemId, number>();
   private readonly unlockedIds = new Set<UnlockId>();
+  private readonly terrainPlacement?: WorldTerrainPlacementValidator;
   private nextInstanceId = 1;
 
   constructor(options: Readonly<{
@@ -159,9 +177,11 @@ export class DataDrivenWorld {
     unlockedIds?: readonly UnlockId[];
     constructionInventory?: readonly ItemStack[];
     snapshot?: WorldSnapshot;
+    terrainPlacement?: WorldTerrainPlacementValidator;
   }>) {
     this.registry = options.registry;
     this.bounds = { ...options.bounds };
+    this.terrainPlacement = options.terrainPlacement;
     this.validateBounds(this.bounds);
     if (options.snapshot) {
       this.restore(options.snapshot);
@@ -458,6 +478,8 @@ export class DataDrivenWorld {
       }
       if (this.occupancy.has(cellKey(cell))) return { ok: false, reason: "occupied", cell };
     }
+    const terrainIssue = this.terrainPlacement?.(definition, position, rotation);
+    if (terrainIssue && !terrainIssue.ok) return terrainIssue;
     return null;
   }
 
@@ -492,3 +514,12 @@ export class DataDrivenWorld {
     if (bounds.minX > bounds.maxX || bounds.minZ > bounds.maxZ) throw new RangeError("world bounds are inverted");
   }
 }
+
+/** Expands a saved authored world without rewriting stable instance ids or simulation contents. */
+export const migrateWorldSnapshotBounds = (snapshot: WorldSnapshot, bounds: WorldBounds): WorldSnapshot => {
+  if (bounds.minX > snapshot.bounds.minX || bounds.maxX < snapshot.bounds.maxX
+    || bounds.minZ > snapshot.bounds.minZ || bounds.maxZ < snapshot.bounds.maxZ) {
+    throw new RangeError("world bounds migration may only expand the playable area");
+  }
+  return { ...snapshot, bounds: { ...bounds } };
+};

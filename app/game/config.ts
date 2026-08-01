@@ -43,6 +43,7 @@ export const TYPE_NAME: Record<BuildType, string> = {
 };
 
 export const STORAGE_CAPACITY = 400;
+export const WORLD_BUILD_LIMIT = 48;
 
 export const TYPE_RATE: Record<BuildType, string> = {
   belt: "52 /분",

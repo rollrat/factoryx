@@ -5,4 +5,5 @@ export { TerrainSampler } from "./terrain/TerrainSampler.ts";
 export { TerrainChunkManager } from "./terrain/TerrainChunkManager.ts";
 export { evaluateTerrainPlacement } from "./terrain/TerrainPlacementRules.ts";
 export { EnvironmentRenderer } from "./render/EnvironmentRenderer.ts";
+export { resolveTerrainMovement } from "./collision/TerrainCollision.ts";
 export type * from "./types.ts";

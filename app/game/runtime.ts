@@ -29,7 +29,7 @@ import { animateProjectDockModel, createProjectDockModel } from "./models/projec
 import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
 import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
-import type { DataDrivenWorld } from "./sim/world.ts";
+import { migrateWorldSnapshotBounds, type DataDrivenWorld } from "./sim/world.ts";
 import { CampaignWorldRuntime } from "./sim/campaignWorld.ts";
 import { ProjectDockDeliveryCommitter } from "./sim/projectDockCommitter.ts";
 import {
@@ -57,7 +57,13 @@ import {
 } from "./visualPersistence.ts";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildWorldRuntimeTopology } from "./telemetry/worldTopology.ts";
-import { A17_ENVIRONMENT, EnvironmentRenderer } from "./environment/index.ts";
+import {
+  A17_ENVIRONMENT,
+  EnvironmentRenderer,
+  TerrainSampler,
+  evaluateTerrainPlacement,
+  resolveTerrainMovement,
+} from "./environment/index.ts";
 import type {
   BuildingId,
   BuildType,
@@ -145,6 +151,7 @@ export class FactoryRuntime {
   private readonly projectDockGroup: THREE.Group;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly environment: EnvironmentRenderer;
+  private readonly terrainSampler = new TerrainSampler(A17_ENVIRONMENT);
   private readonly buildGrid: THREE.GridHelper;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
@@ -170,7 +177,6 @@ export class FactoryRuntime {
   private readonly productionMetrics = new ProductionMetricCollector(60, 15);
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
-  private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly hitPoint = new THREE.Vector3();
   private readonly pressed = new Set<string>();
   private readonly hoverTile: THREE.Mesh;
@@ -257,13 +263,27 @@ export class FactoryRuntime {
     this.saveStorage = createFactoryRuntimeSaveStorage(window.localStorage);
     const loaded = this.saveStorage.load();
     const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
+    const gameplayBounds = A17_ENVIRONMENT.constructionBounds;
+    const migratedCampaign = restored?.campaignWorld
+      ? { ...restored.campaignWorld, world: migrateWorldSnapshotBounds(restored.campaignWorld.world, gameplayBounds) }
+      : undefined;
+    const migratedWorld = restored?.world ? migrateWorldSnapshotBounds(restored.world, gameplayBounds) : undefined;
     this.campaignWorld = new CampaignWorldRuntime({
       registry: START_REGISTRY,
-      bounds: { minX: -12, maxX: 12, minZ: -12, maxZ: 12 },
+      bounds: gameplayBounds,
       constructionInventory: CAMPAIGN_START_INVENTORY,
-      ...(restored?.campaignWorld
-        ? { snapshot: restored.campaignWorld }
-        : restored?.world ? { worldSnapshot: restored.world } : {}),
+      terrainPlacement: (definition, position, rotation) => {
+        if (definition.id === "vein_miner" || definition.id === "fluid_extractor") return { ok: true };
+        const verdict = evaluateTerrainPlacement(this.terrainSampler, definition, position, rotation);
+        if (!verdict.allowed) return { ok: false, reason: verdict.reason ?? "terrain_clearance", cell: position };
+        if (verdict.requiresFoundation && definition.footprint.x * definition.footprint.z > 4) {
+          return { ok: false, reason: "foundation_required", cell: position };
+        }
+        return { ok: true };
+      },
+      ...(migratedCampaign
+        ? { snapshot: migratedCampaign }
+        : migratedWorld ? { worldSnapshot: migratedWorld } : {}),
     });
     this.world = this.campaignWorld.world;
     this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
@@ -693,7 +713,7 @@ export class FactoryRuntime {
   }
 
   private setupWorld() {
-    const grid = new THREE.GridHelper(26, 26, 0x4c7a7e, 0x29474d);
+    const grid = new THREE.GridHelper(98, 98, 0x4c7a7e, 0x29474d);
     grid.position.y = 0.012;
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
     gridMaterials.forEach((material) => {
@@ -714,7 +734,11 @@ export class FactoryRuntime {
         model.scale.setScalar(anchor.medium === "fluid" ? 1.7 : 1.35);
         patch.add(model);
       });
-      patch.position.set(anchor.position.x + 0.5, 0.04, anchor.position.z + 0.5);
+      patch.position.set(
+        anchor.position.x + 0.5,
+        this.terrainSampler.constructionHeightAt(anchor.position.x + 0.5, anchor.position.z + 0.5) + 0.04,
+        anchor.position.z + 0.5,
+      );
       patch.visible = anchor.active;
       patch.userData.resourceAnchorId = anchor.id;
       this.resourceGroups.set(anchor.id, patch);
@@ -762,9 +786,11 @@ export class FactoryRuntime {
       ? createBuildingModel(data.buildingId, this.materials)
       : createStructureModel(data.type, this.materials);
     const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
-    group.position.copy(definition
+    const position = definition
       ? new THREE.Vector3(data.x + definition.footprint.x / 2, 0, data.z + definition.footprint.z / 2)
-      : modelPosition(data.type, data.x, data.z));
+      : modelPosition(data.type, data.x, data.z);
+    position.y = this.terrainSampler.constructionHeightAt(position.x, position.z);
+    group.position.copy(position);
     group.rotation.y = data.buildingId
       ? buildingModelRotationY(data.rotation)
       : data.rotation * (Math.PI / 2);
@@ -850,11 +876,15 @@ export class FactoryRuntime {
     const building = START_REGISTRY.buildings.get(instance.definitionId);
     const worldPort = this.world.portsFor(instanceId).find(({ definition }) => definition.id === portId);
     if (!building || !worldPort) return null;
+    const elevation = this.terrainSampler.constructionHeightAt(
+      instance.position.x + building.footprint.x / 2,
+      instance.position.z + building.footprint.z / 2,
+    );
     return {
       buildingId: building.id,
       port: worldPort.definition,
-      position: new THREE.Vector3(worldPort.localPosition.x, worldPort.localPosition.y, worldPort.localPosition.z),
-      connectionAnchor: new THREE.Vector3(worldPort.connectionCell.x + 0.5, worldPort.localPosition.y, worldPort.connectionCell.z + 0.5),
+      position: new THREE.Vector3(worldPort.localPosition.x, worldPort.localPosition.y + elevation, worldPort.localPosition.z),
+      connectionAnchor: new THREE.Vector3(worldPort.connectionCell.x + 0.5, worldPort.localPosition.y + elevation, worldPort.connectionCell.z + 0.5),
       facing: worldPort.localFacing,
       rotation: instance.rotation,
     };
@@ -961,7 +991,8 @@ export class FactoryRuntime {
       18,
       this.cameraTarget.z + Math.cos(this.cameraAngle) * distance,
     );
-    this.camera.lookAt(this.cameraTarget.x, 0, this.cameraTarget.z);
+    this.cameraTarget.y = this.terrainSampler.constructionHeightAt(this.cameraTarget.x, this.cameraTarget.z);
+    this.camera.lookAt(this.cameraTarget);
     this.camera.zoom = this.cameraZoom;
     this.camera.updateProjectionMatrix();
   }
@@ -990,10 +1021,13 @@ export class FactoryRuntime {
       this.playerPosition,
       { x: this.playerVelocity.x * delta, z: this.playerVelocity.z * delta },
     );
-    this.playerPosition.x = resolved.position.x;
-    this.playerPosition.z = resolved.position.z;
+    const terrainResolved = resolveTerrainMovement(this.terrainSampler, this.playerPosition, resolved.position);
+    this.playerPosition.x = terrainResolved.position.x;
+    this.playerPosition.z = terrainResolved.position.z;
+    this.playerPosition.y += ((terrainResolved.elevation + 1.62) - this.playerPosition.y) * (1 - Math.exp(-delta * 15));
     if (resolved.contacts.some(({ normal }) => normal.x !== 0)) this.playerVelocity.x = 0;
     if (resolved.contacts.some(({ normal }) => normal.z !== 0)) this.playerVelocity.z = 0;
+    if (terrainResolved.blocked) this.playerVelocity.multiplyScalar(0.2);
 
     const moving = movement.lengthSq() > 0.01;
     const headBob = moving ? Math.sin(this.elapsed * (this.pressed.has("shift") ? 13 : 9)) * 0.025 : 0;
@@ -1007,10 +1041,13 @@ export class FactoryRuntime {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    if (!this.raycaster.ray.intersectPlane(this.groundPlane, this.hitPoint)) return null;
+    const point = this.raycaster.intersectObject(this.environment.terrain.root, true)[0]?.point;
+    if (!point) return null;
+    this.hitPoint.copy(point);
+    const bounds = this.world.bounds;
     return {
-      x: THREE.MathUtils.clamp(Math.round(this.hitPoint.x), -12, 12),
-      z: THREE.MathUtils.clamp(Math.round(this.hitPoint.z), -12, 12),
+      x: THREE.MathUtils.clamp(Math.round(this.hitPoint.x), bounds.minX, bounds.maxX),
+      z: THREE.MathUtils.clamp(Math.round(this.hitPoint.z), bounds.minZ, bounds.maxZ),
     };
   }
 
@@ -1058,6 +1095,7 @@ export class FactoryRuntime {
     this.ghost.position.copy(definition
       ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
       : modelPosition(type, this.currentCell.x, this.currentCell.z));
+    this.ghost.position.y = this.terrainSampler.constructionHeightAt(this.ghost.position.x, this.ghost.position.z);
     this.ghost.rotation.y = this.selectedBuildingId
       ? buildingModelRotationY(this.rotation)
       : this.rotation * (Math.PI / 2);
@@ -1140,7 +1178,7 @@ export class FactoryRuntime {
       if (!valid) allValid = false;
       reserved.add(cellKey(cell.x, cell.z));
       const model = createStructureModel("belt", this.materials);
-      model.position.set(cell.x, 0, cell.z);
+      model.position.set(cell.x, this.terrainSampler.constructionHeightAt(cell.x, cell.z), cell.z);
       model.rotation.y = cell.rotation * (Math.PI / 2);
       this.recolorGhost(model, valid);
       this.beltPreview?.add(model);
@@ -1240,6 +1278,11 @@ export class FactoryRuntime {
         preplaced_unique: "고정 설비는 건설할 수 없습니다",
         invalid_resource_anchor: "이 채취 설비와 맞는 천연자원 지점이 아닙니다",
         resource_locked: "아직 해금되지 않은 천연자원입니다",
+        foundation_required: "연약하거나 고르지 않은 지반입니다. 기초가 필요합니다",
+        terrain_steep: "경사가 너무 가파릅니다",
+        terrain_submerged: "침수 지면에는 이 설비를 설치할 수 없습니다",
+        terrain_hazard: "위험 지대를 먼저 안정화해야 합니다",
+        terrain_clearance: "설비 바닥의 높이차가 너무 큽니다",
       } as const;
       this.callbacks.onToast(messages[worldPlacement.reason]);
       return;
@@ -1409,15 +1452,15 @@ export class FactoryRuntime {
       const forward = new THREE.Vector3(Math.sin(this.cameraAngle), 0, Math.cos(this.cameraAngle));
       this.desiredTarget.addScaledVector(right, -dx * speed);
       this.desiredTarget.addScaledVector(forward, -dy * speed);
-      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -8, 8);
-      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -8, 8);
+      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, this.world.bounds.minX + 4, this.world.bounds.maxX - 3);
+      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, this.world.bounds.minZ + 4, this.world.bounds.maxZ - 3);
       this.panOrigin = { x: event.clientX, y: event.clientY };
       return;
     }
     const cell = this.pointerToCell(event);
     if (!cell) return;
     this.currentCell = cell;
-    this.hoverTile.position.set(cell.x, 0.035, cell.z);
+    this.hoverTile.position.set(cell.x, this.terrainSampler.constructionHeightAt(cell.x, cell.z) + 0.035, cell.z);
     if (this.beltStart) this.updateBeltPreview(cell, event.shiftKey);
     else this.updateGhost();
   };
@@ -2055,8 +2098,8 @@ export class FactoryRuntime {
       if (this.pressed.has("s")) this.desiredTarget.addScaledVector(forward, moveSpeed);
       if (this.pressed.has("a")) this.desiredTarget.addScaledVector(right, -moveSpeed);
       if (this.pressed.has("d")) this.desiredTarget.addScaledVector(right, moveSpeed);
-      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -8, 8);
-      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -8, 8);
+      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, this.world.bounds.minX + 4, this.world.bounds.maxX - 3);
+      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, this.world.bounds.minZ + 4, this.world.bounds.maxZ - 3);
       this.cameraTarget.lerp(this.desiredTarget, 1 - Math.exp(-delta * 11));
       this.updateCamera();
     } else {

@@ -50,6 +50,10 @@ export class TerrainSampler {
     return (-0.5 + (folded + strata + detail + regional) * padBlend);
   }
 
+  constructionHeightAt(x: number, z: number) {
+    return Math.max(Math.abs(x), Math.abs(z)) <= 13.5 ? 0 : this.heightAt(x, z);
+  }
+
   sample(x: number, z: number, stratumId: string = "surface"): TerrainSample {
     if (stratumId !== "surface") {
       return {

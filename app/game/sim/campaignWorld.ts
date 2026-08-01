@@ -24,6 +24,7 @@ import {
   type WorldPlacementRequest,
   type WorldPlacementResult,
   type WorldSnapshot,
+  type WorldTerrainPlacementValidator,
 } from "./world.ts";
 
 export type PowerInstanceOverride = Readonly<{
@@ -56,6 +57,7 @@ export type CampaignWorldOptions = Readonly<{
   constructionInventory?: readonly ItemStack[];
   worldSnapshot?: WorldSnapshot;
   snapshot?: CampaignWorldSnapshot;
+  terrainPlacement?: WorldTerrainPlacementValidator;
 }>;
 
 export type ConstructionCreditDelta = Readonly<{ id: string; amount: number }>;
@@ -93,6 +95,7 @@ export class CampaignWorldRuntime {
       bounds: options.bounds,
       unlockedIds: options.unlockedIds,
       constructionInventory: options.constructionInventory,
+      terrainPlacement: options.terrainPlacement,
       ...(options.snapshot ? { snapshot: options.snapshot.world } : options.worldSnapshot ? { snapshot: options.worldSnapshot } : {}),
     });
     this.campaign = new CampaignProjectTracker(options.registry, options.snapshot?.campaign);
