@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BuildCatalogDialog } from "./components/BuildCatalog";
 import GameHud, { type ProjectHudState } from "./components/GameHud";
 import ProjectProgressPanel from "./components/ProjectProgressPanel";
@@ -11,7 +11,7 @@ import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.t
 import type { CampaignSnapshot } from "./game/sim/campaign.ts";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import { START_DEFINITIONS } from "./game/data/index.ts";
-import { buildDefinitionLineageGraph } from "./game/telemetry/definitionLineage.ts";
+import { buildDefinitionLineageGraph, highlightLineagePath } from "./game/telemetry/definitionLineage.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
@@ -92,7 +92,7 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
     nodeStates: Object.fromEntries(Object.entries(topology.live.itemMetrics ?? {}).map(([itemId, metric]) => [
       `item:${itemId}`,
       {
-        status: metric.collecting ? "idle" as const : metric.producedPerMinute > 0 ? "working" as const : "idle" as const,
+        status: metric.collecting ? "idle" as const : metric.health,
         actualRatePerMinute: metric.producedPerMinute,
         stock: metric.stock,
       },
@@ -136,6 +136,16 @@ export default function FactoryGame({
   const [campaignSnapshot, setCampaignSnapshot] = useState<CampaignSnapshot | null>(null);
   const [dockSuppliedPowerMW, setDockSuppliedPowerMW] = useState(0);
   const [powerControl, setPowerControl] = useState<RuntimePowerControlSnapshot>(INITIAL_POWER_CONTROL);
+  const activeProjectStageId = useMemo(() => START_DEFINITIONS.projectStages.find((stage) => {
+    const snapshot = campaignSnapshot?.stages.find((candidate) => candidate.stageId === stage.id);
+    return stage.deliveries.some((delivery) => (
+      (snapshot?.delivered.find(({ portId }) => portId === delivery.portId)?.amount ?? 0) < delivery.amount
+    ));
+  })?.id ?? null, [campaignSnapshot]);
+  const definitionLineageGraph = useMemo(
+    () => highlightLineagePath(DEFINITION_LINEAGE_GRAPH, activeProjectStageId),
+    [activeProjectStageId],
+  );
 
   const showToast = (message: string) => {
     setToast(message);
@@ -302,6 +312,11 @@ export default function FactoryGame({
             runtimeRef.current?.sequentialPowerRestart();
             if (runtimeRef.current) setPowerControl(runtimeRef.current.getPowerControlSnapshot());
           }}
+          onFocusInstance={(instanceId) => {
+            runtimeRef.current?.setInputLocked(false);
+            setPowerControlOpen(false);
+            window.requestAnimationFrame(() => runtimeRef.current?.focusWorldInstance(instanceId));
+          }}
         />
       ) : null}
       {projectOpen && campaignSnapshot ? (
@@ -323,7 +338,17 @@ export default function FactoryGame({
       <ProductionLineageOverlay
         open={lineageOpen}
         onClose={() => setLineageOpen(false)}
-        definitionGraph={DEFINITION_LINEAGE_GRAPH}
+        definitionGraph={definitionLineageGraph}
+        onWorldFocus={(nodeId) => {
+          const instanceId = nodeId.replace(/^world:/, "");
+          runtimeRef.current?.setInputLocked(false);
+          setLineageOpen(false);
+          window.requestAnimationFrame(() => runtimeRef.current?.focusWorldInstance(instanceId));
+        }}
+        onCycleRecipe={(nodeId) => {
+          const instanceId = nodeId.replace(/^world:/, "");
+          if (runtimeRef.current?.cycleWorldRecipe(instanceId)) setTopology(runtimeRef.current.getProductionTopology());
+        }}
         {...topologyForOverlay(topology)}
       />
     </main>

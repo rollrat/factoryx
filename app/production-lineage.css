@@ -163,6 +163,7 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
 .factory-node:focus-visible { outline: 2px solid var(--graph-cyan); outline-offset: 2px; }
 .factory-node.is-selected { border-color: var(--graph-cyan); box-shadow: inset 0 0 0 1px rgba(98, 215, 199, 0.18), 0 0 18px rgba(98, 215, 199, 0.09); }
 .factory-node.is-compared::after { content: "PIN"; position: absolute; top: 34px; right: 10px; padding: 3px 5px; background: var(--graph-amber); color: #172022; font: 800 7px/1 var(--font-geist-mono, monospace); }
+.factory-node.is-highlighted { border-color: rgba(244, 171, 61, 0.72); box-shadow: 0 0 18px rgba(244, 171, 61, 0.1); }
 .factory-node-resource { border-left-color: #879394; }
 .factory-node-building { border-left-color: var(--graph-cyan); }
 .factory-node-storage { border-left-color: var(--graph-amber); }
@@ -197,6 +198,7 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
 .factory-node-ports section > p { margin: 0; color: #657274; font-size: 7px; line-height: 1.35; }
 
 .factory-edge { min-width: 0; display: grid; grid-template-columns: 5px minmax(0, 1fr) auto; align-items: center; gap: 5px; min-height: 35px; padding: 4px 5px; border: 1px solid rgba(190, 206, 205, 0.1); background: rgba(255, 255, 255, 0.018); }
+.factory-edge.is-highlighted { border-color: rgba(244, 171, 61, 0.48); background: rgba(244, 171, 61, 0.06); }
 .factory-edge > div { min-width: 0; }
 .factory-edge span, .factory-edge strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .factory-edge span { color: #6f7d7f; font-size: 7px; }
@@ -209,6 +211,7 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
 .factory-edge-disconnected em { color: #ed8c90; }
 
 .factory-status-working > header em i, .factory-status-storing > header em i, .legend-working i { background: var(--graph-cyan); box-shadow: 0 0 6px rgba(98, 215, 199, 0.5); }
+.factory-status-partial > header em i { background: linear-gradient(90deg, var(--graph-cyan) 50%, var(--graph-amber) 50%); box-shadow: 0 0 6px rgba(230, 160, 75, 0.45); }
 .factory-status-starved > header em i, .legend-starved i, .legend-jammed i { background: var(--graph-amber); }
 .factory-status-blocked > header em i, .factory-status-disconnected > header em i, .legend-disconnected i { background: var(--graph-danger); }
 
@@ -223,6 +226,9 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
 .factory-node-detail > p { margin: 7px 0 0; color: #899697; font-size: 9px; line-height: 1.45; }
 .factory-node-detail > dl { margin: 17px 0 0; border-top: 1px solid rgba(190, 206, 205, 0.13); }
 .factory-node-detail > dl div { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(190, 206, 205, 0.1); }
+.factory-node-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.factory-node-actions button { min-height: 36px; border: 1px solid #46605f; background: #172322; color: #d9e5e3; font: inherit; cursor: pointer; }
+.factory-node-actions button:hover, .factory-node-actions button:focus-visible { border-color: #49e3cf; color: #7bffed; }
 .factory-node-detail dt { color: #788587; font-size: 8px; }
 .factory-node-detail dd { margin: 0; color: #cbd5d4; font: 700 9px/1 var(--font-geist-mono, monospace); text-align: right; }
 .factory-node-detail > section { margin-top: 17px; }

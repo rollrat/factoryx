@@ -64,6 +64,9 @@ export type RuntimeTopology = Readonly<{
       consumedPerMinute: number;
       stock: number;
       collecting: boolean;
+      health: "idle" | "working" | "partial" | "starved" | "blocked";
+      producerCount: number;
+      workingProducerCount: number;
     }>>>;
   }>;
 }>;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import "../production-lineage.css";
 
 export type ProductionLineageStatus =
-  | "working" | "storing" | "starved" | "blocked" | "disconnected" | "paused" | "idle";
+  | "working" | "partial" | "storing" | "starved" | "blocked" | "disconnected" | "paused" | "idle";
 
 export type ProductionLineageNode = Readonly<{
   id: string;
@@ -14,6 +14,7 @@ export type ProductionLineageNode = Readonly<{
   column?: number;
   order?: number;
   instanceLabel?: string;
+  highlighted?: boolean;
 }>;
 
 export type ProductionLineageEdge = Readonly<{
@@ -26,6 +27,7 @@ export type ProductionLineageEdge = Readonly<{
   connected?: boolean;
   beltCount?: number;
   jammed?: boolean;
+  highlighted?: boolean;
 }>;
 
 export type ProductionLineageGraph = Readonly<{
@@ -60,10 +62,12 @@ export type ProductionLineageOverlayProps = Readonly<{
   live: ProductionLineageLiveSnapshot;
   definitionLive?: ProductionLineageLiveSnapshot;
   initialMode?: LineageMode;
+  onWorldFocus?: (nodeId: string) => void;
+  onCycleRecipe?: (nodeId: string) => void;
 }>;
 
 const STATUS_LABEL: Record<ProductionLineageStatus, string> = {
-  working: "가동", storing: "저장", starved: "원료 부족", blocked: "출력 막힘",
+  working: "가동", partial: "부분 가동", storing: "저장", starved: "원료 부족", blocked: "출력 막힘",
   disconnected: "연결 끊김", paused: "일시 정지", idle: "대기",
 };
 const KIND_LABEL: Record<ProductionLineageNode["kind"], string> = {
@@ -200,7 +204,7 @@ function EdgeSummary({ edge, peer, direction }: Readonly<{
 }>) {
   const state = edgeState(edge);
   return (
-    <li className={`factory-edge factory-edge-${state.key}`}>
+    <li className={`factory-edge factory-edge-${state.key} ${edge.highlighted ? "is-highlighted" : ""}`}>
       <i aria-hidden="true" />
       <div><span>{direction === "input" ? "←" : "→"} {peer?.instanceLabel ?? peer?.label ?? "알 수 없는 설비"}</span><strong>{edge.itemName}</strong></div>
       <em>{state.label}</em>
@@ -242,7 +246,7 @@ function FactoryNodeCard({ node, live, inputs, outputs, nodeById, bottleneck, di
   return (
     <article
       ref={nodeRef}
-      className={`factory-node factory-node-${node.kind} factory-status-${status} ${bottleneck ? "is-bottleneck" : ""} ${disconnected ? "is-disconnected" : ""} ${selected ? "is-selected" : ""} ${compared ? "is-compared" : ""}`}
+      className={`factory-node factory-node-${node.kind} factory-status-${status} ${node.highlighted ? "is-highlighted" : ""} ${bottleneck ? "is-bottleneck" : ""} ${disconnected ? "is-disconnected" : ""} ${selected ? "is-selected" : ""} ${compared ? "is-compared" : ""}`}
       role="button"
       data-node-id={node.id}
       tabIndex={0}
@@ -274,13 +278,15 @@ function FactoryNodeCard({ node, live, inputs, outputs, nodeById, bottleneck, di
   );
 }
 
-function NodeDetail({ node, live, inputs, outputs, nodeById, onClear }: Readonly<{
+function NodeDetail({ node, live, inputs, outputs, nodeById, onClear, onWorldFocus, onCycleRecipe }: Readonly<{
   node?: ProductionLineageNode;
   live?: ProductionLineageNodeLiveState;
   inputs: readonly ProductionLineageEdge[];
   outputs: readonly ProductionLineageEdge[];
   nodeById: ReadonlyMap<string, ProductionLineageNode>;
   onClear: () => void;
+  onWorldFocus?: (nodeId: string) => void;
+  onCycleRecipe?: (nodeId: string) => void;
 }>) {
   if (!node) return <aside className="factory-node-detail is-empty" aria-label="선택 설비 상세"><span>NODE DETAIL</span><strong>노드를 선택하세요</strong><p>실제 설비의 상태와 연결 정보를 확인할 수 있습니다.</p></aside>;
   return (
@@ -294,6 +300,10 @@ function NodeDetail({ node, live, inputs, outputs, nodeById, onClear }: Readonly
         {live?.stock !== undefined ? <div><dt>재고</dt><dd>{live.stock.toLocaleString("ko-KR")}{live.capacity === undefined ? "" : ` / ${live.capacity.toLocaleString("ko-KR")}`}</dd></div> : null}
         <div><dt>입력 / 출력</dt><dd>{inputs.length} / {outputs.length}</dd></div>
       </dl>
+      {node.id.startsWith("world:") && (onWorldFocus || onCycleRecipe) ? <div className="factory-node-actions">
+        {onWorldFocus ? <button type="button" onClick={() => onWorldFocus(node.id)}>월드에서 보기</button> : null}
+        {onCycleRecipe ? <button type="button" onClick={() => onCycleRecipe(node.id)}>대체 레시피 전환</button> : null}
+      </div> : null}
       <section><h4>연결된 상류</h4>{inputs.length ? <ul>{inputs.map((edge) => <li key={edge.id}>{nodeById.get(edge.from)?.instanceLabel ?? nodeById.get(edge.from)?.label ?? edge.from}<b>{edge.itemName}</b></li>)}</ul> : <p>없음</p>}</section>
       <section><h4>연결된 하류</h4>{outputs.length ? <ul>{outputs.map((edge) => <li key={edge.id}>{nodeById.get(edge.to)?.instanceLabel ?? nodeById.get(edge.to)?.label ?? edge.to}<b>{edge.itemName}</b></li>)}</ul> : <p>없음</p>}</section>
     </aside>
@@ -315,7 +325,7 @@ function ComparisonDetail({ nodes, live, onClear }: Readonly<{
   </section>;
 }
 
-export default function ProductionLineageOverlay({ open, onClose, graph, definitionGraph, live, definitionLive, initialMode = "lineage" }: ProductionLineageOverlayProps) {
+export default function ProductionLineageOverlay({ open, onClose, graph, definitionGraph, live, definitionLive, initialMode = "lineage", onWorldFocus, onCycleRecipe }: ProductionLineageOverlayProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<string, HTMLElement>());
@@ -554,6 +564,8 @@ export default function ProductionLineageOverlay({ open, onClose, graph, definit
               outputs={selectedNode ? outputsByNode.get(selectedNode.id) ?? [] : []}
               nodeById={nodeById}
               onClear={() => setSelectedNodeId(null)}
+              onWorldFocus={mode === "factory" ? onWorldFocus : undefined}
+              onCycleRecipe={mode === "factory" ? onCycleRecipe : undefined}
             />
             <ComparisonDetail nodes={comparedNodes} live={activeLive} onClear={() => setComparedNodeIds([])} />
             </div>

@@ -298,6 +298,10 @@ export class WorldProductionSimulation {
     const node = this.nodes.get(instanceId);
     const inventory = direction === "input" ? node?.inputs.get(portId) : node?.outputs.get(portId);
     const port = node?.definition.ports.find(({ id }) => id === portId);
+    if (port?.medium === "fluid") {
+      const lock = this.fluidNetworkLock(instanceId, portId);
+      if (lock.conflict || (lock.itemId !== null && lock.itemId !== itemId)) return false;
+    }
     return Boolean(inventory && port && accepts(port, itemId) && inventory.deposit(itemId, amount));
   }
 
@@ -378,12 +382,63 @@ export class WorldProductionSimulation {
       if (!sourceNode || !targetNode || !source || !target || !source.itemId || source.availableAmount <= 0) return;
       const targetPort = targetNode.definition.ports.find(({ id }) => id === connection.toPortId)!;
       if (!accepts(targetPort, source.itemId)) return;
+      if (connection.medium === "fluid") {
+        const lock = this.fluidNetworkLock(connection.toInstanceId, connection.toPortId);
+        if (lock.conflict || (lock.itemId !== null && lock.itemId !== source.itemId)) return;
+      }
       const amount = Math.min(1, source.availableAmount, target.availableCapacity);
       if (amount <= 0 || !target.canDeposit(source.itemId, amount)) return;
       const itemId = source.itemId;
       if (!source.withdraw(itemId, amount)) return;
       if (!target.deposit(itemId, amount)) source.deposit(itemId, amount);
     });
+  }
+
+  /**
+   * A pipe/storage component acquires the first fluid that enters it and
+   * releases that type only after every lockable internal volume is empty.
+   */
+  private fluidNetworkLock(instanceId: string, portId: string): Readonly<{ itemId: ItemId | null; conflict: boolean }> {
+    const adjacency = new Map<string, Set<string>>();
+    const lockInventoryByEndpoint = new Map<string, PortInventory>();
+    const ensure = (key: string) => {
+      const neighbors = adjacency.get(key) ?? new Set<string>();
+      adjacency.set(key, neighbors);
+      return neighbors;
+    };
+    const join = (a: string, b: string) => { ensure(a).add(b); ensure(b).add(a); };
+    this.nodes.forEach((node) => {
+      const ports = node.definition.ports.filter(({ medium }) => medium === "fluid");
+      ports.forEach((port) => ensure(endpointKey(node.instanceId, port.id)));
+      if (node.definition.fluidStoragePolicy?.locksFluidType && node.definition.recipeIds.length === 0) {
+        ports.forEach((port) => {
+          const inventory = node.inputs.get(port.id) ?? node.outputs.get(port.id);
+          if (inventory) lockInventoryByEndpoint.set(endpointKey(node.instanceId, port.id), inventory);
+        });
+        ports.slice(1).forEach((port) => join(
+          endpointKey(node.instanceId, ports[0].id),
+          endpointKey(node.instanceId, port.id),
+        ));
+      }
+    });
+    this.connections().filter(({ medium }) => medium === "fluid").forEach((connection) => join(
+      endpointKey(connection.fromInstanceId, connection.fromPortId),
+      endpointKey(connection.toInstanceId, connection.toPortId),
+    ));
+
+    const start = endpointKey(instanceId, portId);
+    const visited = new Set<string>();
+    const queue = [start];
+    const itemIds = new Set<ItemId>();
+    while (queue.length > 0) {
+      const key = queue.shift()!;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      const inventory = lockInventoryByEndpoint.get(key);
+      if (inventory?.itemId && inventory.amount > 0) itemIds.add(inventory.itemId);
+      (adjacency.get(key) ?? []).forEach((neighbor) => { if (!visited.has(neighbor)) queue.push(neighbor); });
+    }
+    return { itemId: itemIds.size === 1 ? [...itemIds][0] : null, conflict: itemIds.size > 1 };
   }
 
   private transferInsideLogisticsNodes(deltaSeconds: number) {

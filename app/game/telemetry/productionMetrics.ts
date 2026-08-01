@@ -15,6 +15,9 @@ export type ProductionMetric = Readonly<{
   starvedSeconds: number;
   blockedSeconds: number;
   collecting: boolean;
+  producerCount: number;
+  workingProducerCount: number;
+  health: "idle" | "working" | "partial" | "starved" | "blocked";
 }>;
 
 type Sample = Readonly<{
@@ -100,6 +103,18 @@ export class ProductionMetricCollector {
         .reduce((sum, { inventory }) => sum + inventory.amount, 0);
       const workInProgress = snapshot.nodes.reduce((sum, node) => sum + (node.process?.workInProgress?.inputs
         .filter(({ itemId }) => itemId === item.id).reduce((total, input) => total + input.amount, 0) ?? 0), 0);
+      const producers = snapshot.nodes.filter((node) => {
+        const recipe = node.selectedRecipeId ? production.world.registry.recipes.get(node.selectedRecipeId) : undefined;
+        return recipe?.outputs.some(({ itemId }) => itemId === item.id);
+      });
+      const workingProducerCount = producers.filter(({ process }) => process?.runtimeState === "working").length;
+      const starvedProducerCount = producers.filter(({ process }) => process?.runtimeState === "starved").length;
+      const blockedProducerCount = producers.filter(({ process }) => process?.runtimeState === "blocked").length;
+      const health = workingProducerCount > 0 && (starvedProducerCount > 0 || blockedProducerCount > 0)
+        ? "partial" as const
+        : workingProducerCount > 0 ? "working" as const
+          : blockedProducerCount > 0 ? "blocked" as const
+            : starvedProducerCount > 0 ? "starved" as const : "idle" as const;
       values.set(item.id, {
         windowSeconds: window,
         producedPerMinute: window > 0 ? produced * 60 / window : 0,
@@ -112,6 +127,9 @@ export class ProductionMetricCollector {
         starvedSeconds: events.reduce((sum, event) => sum + event.starved, 0),
         blockedSeconds: events.reduce((sum, event) => sum + event.blocked, 0),
         collecting: window < this.warmupSeconds,
+        producerCount: producers.length,
+        workingProducerCount,
+        health,
       });
     });
     return new Map([...values].map(([itemId, metric]) => [itemId, { itemId, ...metric }]));

@@ -590,6 +590,42 @@ export class FactoryRuntime {
     return true;
   }
 
+  cycleWorldRecipe(instanceId: string) {
+    const visual = [...this.simulation.structures.values()].find((structure) => structure.worldInstanceId === instanceId);
+    const recipeId = this.worldProduction.cycleRecipe(instanceId);
+    const recipe = recipeId ? START_REGISTRY.recipes.get(recipeId) : null;
+    if (!recipe) {
+      this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
+      return false;
+    }
+    if (visual) this.selectStructure(visual.id);
+    this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
+    return true;
+  }
+
+  focusWorldInstance(instanceId: string) {
+    const visual = [...this.simulation.structures.values()].find((structure) => structure.worldInstanceId === instanceId);
+    if (!visual) {
+      this.callbacks.onToast("월드에서 해당 설비를 찾을 수 없습니다");
+      return false;
+    }
+    if (this.cameraMode === "firstPerson") {
+      this.cameraMode = "overview";
+      if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+      this.callbacks.onCameraMode(this.cameraMode);
+    }
+    this.setTool("inspect");
+    this.selectStructure(visual.id);
+    this.desiredTarget.set(
+      THREE.MathUtils.clamp(visual.x + 0.5, -10, 10),
+      0,
+      THREE.MathUtils.clamp(visual.z + 0.5, -10, 10),
+    );
+    this.cameraZoom = Math.max(this.cameraZoom, 1.25);
+    this.callbacks.onToast(`${START_REGISTRY.buildings.get(visual.buildingId ?? "")?.name ?? "설비"} 위치로 이동`);
+    return true;
+  }
+
   toggleCameraMode() {
     if (this.inputLocked) return;
     if (this.cameraMode === "overview") {

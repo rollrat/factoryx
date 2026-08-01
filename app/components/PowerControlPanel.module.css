@@ -17,9 +17,14 @@
 .zones i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #69787b; }
 .zones li[data-connected="true"] i { background: #55d6c2; box-shadow: 0 0 10px #55d6c2; }
 .zones small { grid-column: 1 / -1; color: #839699; }
-.controlRow { display: flex; width: 100%; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 11px 12px; border: 1px solid #43565a; color: #d9eeeb; background: #172326; cursor: pointer; }
+.controlGroup { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-bottom: 8px; }
+.controlRow { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 11px 12px; border: 1px solid #43565a; color: #d9eeeb; background: #172326; cursor: pointer; }
 .controlRow strong { color: #ff9860; }
 .controlRow[data-enabled="true"] strong { color: #55d6c2; }
+.focusButton, .inlineFocus { border: 1px solid #43565a; color: #9cb0b2; background: #172326; cursor: pointer; }
+.focusButton { padding: 0 10px; }
+.inlineFocus { margin-left: 10px; padding: 4px 7px; font: inherit; font-size: 9px; }
+.focusButton:hover, .focusButton:focus-visible, .inlineFocus:hover, .inlineFocus:focus-visible { border-color: #55d6c2; color: #71e8d4; }
 .switchboards { grid-column: 1 / -1; }
 .board { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 0; border-top: 1px solid #293d40; }
 .board > div { display: flex; gap: 7px; }

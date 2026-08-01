@@ -10,6 +10,7 @@ type Props = Readonly<{
   onToggleBreaker: (instanceId: string) => void;
   onTogglePriority: (instanceId: string, priority: LoadPriority) => void;
   onRestart: () => void;
+  onFocusInstance: (instanceId: string) => void;
 }>;
 
 const number = (value: number) => value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
@@ -20,6 +21,7 @@ export default function PowerControlPanel({
   onToggleBreaker,
   onTogglePriority,
   onRestart,
+  onFocusInstance,
 }: Props) {
   const satisfaction = snapshot.requestedMW > 0 ? snapshot.servedMW / snapshot.requestedMW : 1;
   return (
@@ -67,16 +69,12 @@ export default function PowerControlPanel({
         <section>
           <h3>차단기</h3>
           {snapshot.breakers.length ? snapshot.breakers.map((breaker) => (
-            <button
-              className={styles.controlRow}
-              type="button"
-              key={breaker.instanceId}
-              data-enabled={breaker.state === "closed"}
-              aria-pressed={breaker.state === "closed"}
-              onClick={() => onToggleBreaker(breaker.instanceId)}
-            >
-              <span>{breaker.name}</span><strong>{breaker.state === "closed" ? "투입" : breaker.state === "tripped" ? "트립" : "차단"}</strong>
-            </button>
+            <div className={styles.controlGroup} key={breaker.instanceId}>
+              <button className={styles.controlRow} type="button" data-enabled={breaker.state === "closed"} aria-pressed={breaker.state === "closed"} onClick={() => onToggleBreaker(breaker.instanceId)}>
+                <span>{breaker.name}</span><strong>{breaker.state === "closed" ? "투입" : breaker.state === "tripped" ? "트립" : "차단"}</strong>
+              </button>
+              <button className={styles.focusButton} type="button" onClick={() => onFocusInstance(breaker.instanceId)}>찾기</button>
+            </div>
           )) : <p className={styles.empty}>설치된 전력 차단기가 없습니다.</p>}
         </section>
 
@@ -84,7 +82,7 @@ export default function PowerControlPanel({
           <h3>우선순위 구역</h3>
           {snapshot.switchboards.length ? snapshot.switchboards.map((board) => (
             <div className={styles.board} key={board.instanceId}>
-              <strong>{board.name}</strong>
+              <strong>{board.name}<button className={styles.inlineFocus} type="button" onClick={() => onFocusInstance(board.instanceId)}>월드에서 보기</button></strong>
               <div>{([1, 2, 3, 4] as const).map((priority) => (
                 <button
                   type="button"
