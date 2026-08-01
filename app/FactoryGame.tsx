@@ -118,6 +118,8 @@ export default function FactoryGame() {
 
     const camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
     let cameraAngle = Math.PI * 0.25;
+    let desiredCameraAngle = cameraAngle;
+    let cameraAngularVelocity = 0;
     let cameraZoom = 1;
     const cameraTarget = new THREE.Vector3(0, 0, 0);
     const desiredTarget = cameraTarget.clone();
@@ -784,7 +786,7 @@ export default function FactoryGame() {
         showToast("설비 방향을 회전했습니다");
       }
       if (key === "q" || key === "e") {
-        cameraAngle += key === "q" ? -Math.PI / 2 : Math.PI / 2;
+        desiredCameraAngle += key === "q" ? -Math.PI / 2 : Math.PI / 2;
         showToast(key === "q" ? "카메라를 왼쪽으로 회전" : "카메라를 오른쪽으로 회전");
       }
       if (key === "escape") {
@@ -816,6 +818,10 @@ export default function FactoryGame() {
       animationId = requestAnimationFrame(animate);
       const delta = Math.min((time - lastTime) / 1000, 0.05);
       lastTime = time;
+      const angularDistance = desiredCameraAngle - cameraAngle;
+      cameraAngularVelocity += angularDistance * 90 * delta;
+      cameraAngularVelocity *= Math.exp(-18 * delta);
+      cameraAngle += cameraAngularVelocity * delta;
       const moveSpeed = 7.5 * delta / cameraZoom;
       const right = new THREE.Vector3(Math.cos(cameraAngle), 0, -Math.sin(cameraAngle));
       const forward = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
