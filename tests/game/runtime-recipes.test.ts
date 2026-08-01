@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   getRuntimeRecipe,
+  getRuntimeRecipeForBuilding,
   resolveRuntimeRecipe,
 } from "../../app/game/recipes/runtimeRecipes.ts";
+import { START_REGISTRY } from "../../app/game/data/index.ts";
 
 test("selects iron and copper mining recipes from the live ore anchors", () => {
   const iron = resolveRuntimeRecipe({ type: "miner", x: -8, z: -3 });
@@ -55,9 +57,49 @@ test("maps the visual assembler to the hydraulic iron plate recipe", () => {
   assert.equal(resolveRuntimeRecipe({ type: "assembler", inputItemId: "copper_ingot" }), null);
 });
 
-test("direct lookup exposes the visual start-tier recipe subset", () => {
+test("direct lookup exposes every validated campaign recipe", () => {
   assert.equal(getRuntimeRecipe("form_iron_plate")?.outputs[0]?.amount, 2);
   assert.equal(getRuntimeRecipe("form_iron_rod")?.outputs[0]?.itemId, "iron_rod");
   assert.equal(getRuntimeRecipe("form_fastener_pack")?.inputs[0]?.itemId, "iron_rod");
+  for (const recipeId of START_REGISTRY.recipes.keys()) {
+    assert.equal(getRuntimeRecipe(recipeId)?.id, recipeId);
+  }
   assert.equal(getRuntimeRecipe("missing_recipe"), null);
+});
+
+test("converts a mid-game four-input manufacturing recipe", () => {
+  const recipe = getRuntimeRecipe("manufacture_precision_actuator");
+
+  assert.equal(recipe?.buildingId, "heavy_manufacturer");
+  assert.deepEqual(recipe?.inputs, [
+    { itemId: "industrial_motor", amount: 1 },
+    { itemId: "advanced_control_board", amount: 1 },
+    { itemId: "lightweight_case", amount: 1 },
+    { itemId: "optical_sensor", amount: 1 },
+  ]);
+  assert.deepEqual(recipe?.outputs, [{ itemId: "precision_actuator", amount: 1 }]);
+  assert.equal(recipe?.durationSeconds, 14);
+});
+
+test("converts the refinery multi-output recipe without dropping its byproduct", () => {
+  const recipe = getRuntimeRecipe("refine_crude_oil");
+
+  assert.equal(recipe?.buildingId, "fractionation_refinery");
+  assert.deepEqual(recipe?.inputs, [{ itemId: "crude_oil", amount: 3 }]);
+  assert.deepEqual(recipe?.outputs, [
+    { itemId: "polymer_resin", amount: 1 },
+    { itemId: "fuel_gas", amount: 2 },
+  ]);
+  assert.equal(recipe?.durationSeconds, 6);
+});
+
+test("resolves a selected recipe only for its owning building", () => {
+  assert.equal(
+    getRuntimeRecipeForBuilding("precision_assembler", "assemble_industrial_motor")?.id,
+    "assemble_industrial_motor",
+  );
+  assert.equal(getRuntimeRecipeForBuilding("hydraulic_former", "assemble_industrial_motor"), null);
+  assert.equal(getRuntimeRecipeForBuilding("missing_building", "assemble_industrial_motor"), null);
+  assert.equal(getRuntimeRecipeForBuilding("precision_assembler", "missing_recipe"), null);
+  assert.equal(getRuntimeRecipeForBuilding("precision_assembler", null), null);
 });

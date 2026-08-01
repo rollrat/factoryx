@@ -1,16 +1,7 @@
 import { START_REGISTRY } from "../data/index.ts";
-import type { BuildingId, RecipeDefinition, RecipeId } from "../domain/types.ts";
+import type { BuildingId, ItemId, RecipeDefinition, RecipeId } from "../domain/types.ts";
 
-export type RuntimeItemId =
-  | "iron_ore"
-  | "copper_ore"
-  | "iron_ingot"
-  | "copper_ingot"
-  | "iron_plate"
-  | "iron_rod"
-  | "fastener_pack"
-  | "limestone"
-  | "construction_block";
+export type RuntimeItemId = ItemId;
 
 export type RuntimeRecipeAmount = Readonly<{
   itemId: RuntimeItemId;
@@ -45,50 +36,34 @@ export const RUNTIME_BUILDING_IDS = {
   crusher: "crusher",
 } as const satisfies Record<RuntimeRecipeRequest["type"], BuildingId>;
 
-const RUNTIME_RECIPE_IDS = new Set<RecipeId>([
-  "mine_iron_ore",
-  "mine_copper_ore",
-  "mine_limestone",
-  "smelt_iron_ingot",
-  "smelt_copper_ingot",
-  "form_iron_plate",
-  "form_iron_rod",
-  "form_fastener_pack",
-  "crush_construction_block",
-]);
-
-const RUNTIME_ITEM_IDS = new Set<RuntimeItemId>([
-  "iron_ore",
-  "copper_ore",
-  "iron_ingot",
-  "copper_ingot",
-  "iron_plate",
-  "iron_rod",
-  "fastener_pack",
-  "limestone",
-  "construction_block",
-]);
-
 const toRuntimeRecipe = (recipe: RecipeDefinition): RuntimeRecipe => {
-  const amounts = [...recipe.inputs, ...recipe.outputs];
-  if (amounts.some(({ itemId }) => !RUNTIME_ITEM_IDS.has(itemId as RuntimeItemId))) {
-    throw new Error(`recipe ${recipe.id} contains an unsupported runtime item`);
-  }
   return {
     id: recipe.id,
     name: recipe.name,
     buildingId: recipe.buildingId,
-    inputs: recipe.inputs.map(({ itemId, amount }) => ({ itemId: itemId as RuntimeItemId, amount })),
-    outputs: recipe.outputs.map(({ itemId, amount }) => ({ itemId: itemId as RuntimeItemId, amount })),
+    inputs: recipe.inputs.map(({ itemId, amount }) => ({ itemId, amount })),
+    outputs: recipe.outputs.map(({ itemId, amount }) => ({ itemId, amount })),
     durationSeconds: recipe.durationSeconds,
   };
 };
 
-/** Looks up only recipes supported by the current visual runtime. */
+/** Converts any validated campaign recipe into the compact legacy runtime shape. */
 export const getRuntimeRecipe = (recipeId: RecipeId): RuntimeRecipe | null => {
-  if (!RUNTIME_RECIPE_IDS.has(recipeId)) return null;
   const recipe = START_REGISTRY.recipes.get(recipeId);
   return recipe ? toRuntimeRecipe(recipe) : null;
+};
+
+/** Resolves a player's selected recipe only when it belongs to the requested building. */
+export const getRuntimeRecipeForBuilding = (
+  buildingId: BuildingId,
+  selectedRecipeId: RecipeId | null | undefined,
+): RuntimeRecipe | null => {
+  if (!selectedRecipeId) return null;
+  const building = START_REGISTRY.buildings.get(buildingId);
+  if (!building || !building.recipeIds.includes(selectedRecipeId)) return null;
+  const recipe = START_REGISTRY.recipes.get(selectedRecipeId);
+  if (!recipe || recipe.buildingId !== buildingId) return null;
+  return toRuntimeRecipe(recipe);
 };
 
 /** Selects a registry recipe from the legacy runtime machine and live input. */
@@ -108,7 +83,5 @@ export const resolveRuntimeRecipe = (request: RuntimeRecipeRequest): RuntimeReci
   }
 
   if (!recipeId) return null;
-  const recipe = getRuntimeRecipe(recipeId);
-  if (!recipe || recipe.buildingId !== RUNTIME_BUILDING_IDS[request.type]) return null;
-  return recipe;
+  return getRuntimeRecipeForBuilding(RUNTIME_BUILDING_IDS[request.type], recipeId);
 };

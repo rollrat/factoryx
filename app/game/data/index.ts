@@ -9,6 +9,7 @@ export { START_BUILDINGS } from "./buildings.ts";
 export { START_ITEMS } from "./items.ts";
 export { START_PROJECT_STAGES } from "./projectStages.ts";
 export { START_RECIPES } from "./recipes.ts";
+export { CAMPAIGN_START_INVENTORY, CAMPAIGN_UNLOCK_STAGE, SANDBOX_PROJECT_TARGET } from "./campaign.ts";
 
 export const START_DEFINITIONS = {
   items: START_ITEMS,
