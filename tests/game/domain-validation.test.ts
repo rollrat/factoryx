@@ -8,8 +8,8 @@ import { assertValidDefinitions, validateDefinitions } from "../../app/game/doma
 
 const validDefinitions = (): DefinitionSource => ({
   items: [
-    { id: "ore", name: "Ore", category: "resource", medium: "solid", unlockId: "start", stackSize: 100, modelKey: "ore" },
-    { id: "plate", name: "Plate", category: "material", medium: "solid", unlockId: "start", stackSize: 100, modelKey: "plate" },
+    { id: "ore", name: "Ore", category: "resource", medium: "solid", unit: "item", unlockId: "start", defaultColor: 0x777777, geometryType: "ore_chunk", stackSize: 100, modelKey: "ore" },
+    { id: "plate", name: "Plate", category: "material", medium: "solid", unit: "item", unlockId: "start", defaultColor: 0xaaaaaa, geometryType: "plate", stackSize: 100, modelKey: "plate" },
   ],
   buildings: [{
     id: "smelter",
@@ -97,4 +97,42 @@ test("validator rejects missing references and a wrong port direction", () => {
 
   assert.ok(issueCodes.has("missing_item"));
   assert.ok(issueCodes.has("port_direction_mismatch"));
+});
+
+test("validator enforces item units and preplaced world policies", () => {
+  const source = validDefinitions();
+  const invalid: DefinitionSource = {
+    ...source,
+    items: [{ ...source.items[0], unit: "m3" }, source.items[1]],
+    buildings: [{
+      ...source.buildings[0],
+      placementMode: "preplaced_unique",
+      buildCost: [],
+      allowedRotations: [0],
+    }],
+  };
+  const issueCodes = new Set(validateDefinitions(invalid).map((issue) => issue.code));
+
+  assert.ok(issueCodes.has("item_unit_mismatch"));
+  assert.ok(issueCodes.has("missing_preplaced_policy"));
+});
+
+test("validator rejects cyclic project prerequisites and unpowered powered stages", () => {
+  const source = validDefinitions();
+  const projectStage = (id: string, prerequisiteIds: readonly string[]) => ({
+    id,
+    prerequisiteIds,
+    deliveries: [],
+    rewards: { resourceIds: [], recipeIds: [], buildingIds: [] },
+    dockPowerMode: "powered" as const,
+    completionSequence: "test",
+  });
+  const invalid: DefinitionSource = {
+    ...source,
+    projectStages: [projectStage("alpha", ["beta"]), projectStage("beta", ["alpha"])],
+  };
+  const issueCodes = new Set(validateDefinitions(invalid).map((issue) => issue.code));
+
+  assert.ok(issueCodes.has("project_stage_cycle"));
+  assert.ok(issueCodes.has("missing_project_power"));
 });

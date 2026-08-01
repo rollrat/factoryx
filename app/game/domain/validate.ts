@@ -78,6 +78,13 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
 
   source.items.forEach((item, itemIndex) => {
     checkUnlock(item.unlockId, `items[${itemIndex}].unlockId`);
+    const expectedUnit = item.medium === "fluid" ? "m3" : "item";
+    if (item.unit !== undefined && item.unit !== expectedUnit) {
+      issues.push({ code: "item_unit_mismatch", path: `items[${itemIndex}].unit`, message: `${item.id} must use ${expectedUnit}` });
+    }
+    if (item.geometryType === "fluid" && item.medium !== "fluid") {
+      issues.push({ code: "item_geometry_mismatch", path: `items[${itemIndex}].geometryType`, message: `${item.id} is not a fluid` });
+    }
     if (item.stackSize <= 0) {
       issues.push({ code: "invalid_amount", path: `items[${itemIndex}].stackSize`, message: "Stack size must be positive" });
     }
@@ -91,6 +98,54 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     }
     if (building.placementMode === "preplaced_unique" && building.buildCost.length > 0) {
       issues.push({ code: "unexpected_build_cost", path: `${basePath}.buildCost`, message: "Preplaced unique buildings cannot have a build cost" });
+    }
+    if (building.placementMode === "preplaced_unique" && !building.preplacedPolicy) {
+      issues.push({ code: "missing_preplaced_policy", path: `${basePath}.preplacedPolicy`, message: "Preplaced unique buildings require a fixed world anchor and immutable flags" });
+    }
+    if (building.placementMode === "buildable" && building.preplacedPolicy) {
+      issues.push({ code: "unexpected_preplaced_policy", path: `${basePath}.preplacedPolicy`, message: "Buildable buildings cannot have a preplaced policy" });
+    }
+    if (building.preplacedPolicy && !building.allowedRotations.includes(building.preplacedPolicy.fixedRotation)) {
+      issues.push({ code: "invalid_fixed_rotation", path: `${basePath}.preplacedPolicy.fixedRotation`, message: "Fixed rotation must be allowed by the building" });
+    }
+    if (building.processingSpeed !== undefined && building.processingSpeed <= 0) {
+      issues.push({ code: "invalid_processing_speed", path: `${basePath}.processingSpeed`, message: "Processing speed must be positive" });
+    }
+    if ((building.activeMW ?? 0) < 0 || (building.idleMW ?? 0) < 0) {
+      issues.push({ code: "invalid_power_demand", path: basePath, message: "Power demand cannot be negative" });
+    }
+    if (building.storagePolicy && building.storagePolicy.slotCount <= 0) {
+      issues.push({ code: "invalid_storage_slots", path: `${basePath}.storagePolicy.slotCount`, message: "Storage slot count must be positive" });
+    }
+    if (building.transportPolicy && building.transportPolicy.throughputPerMinute <= 0) {
+      issues.push({ code: "invalid_transport_rate", path: `${basePath}.transportPolicy.throughputPerMinute`, message: "Transport throughput must be positive" });
+    }
+    if (building.generatorPolicy) {
+      const generator = building.generatorPolicy;
+      if (generator.capacityMW <= 0 || generator.minimumLoadRatio < 0 || generator.minimumLoadRatio > 1) {
+        issues.push({ code: "invalid_generator", path: `${basePath}.generatorPolicy`, message: "Generator capacity and minimum load ratio are invalid" });
+      }
+      if (generator.fuelItemId) {
+        const fuel = items.get(generator.fuelItemId);
+        if (!fuel) issues.push({ code: "missing_item", path: `${basePath}.generatorPolicy.fuelItemId`, message: `Unknown fuel: ${generator.fuelItemId}` });
+        if ((generator.fuelRatePerMinute ?? 0) <= 0) issues.push({ code: "invalid_fuel_rate", path: `${basePath}.generatorPolicy.fuelRatePerMinute`, message: "Fueled generators require a positive fuel rate" });
+        const acceptsFuel = building.ports.some((port) => isInput(port.direction) && port.acceptedItemIds.includes(generator.fuelItemId!));
+        if (!acceptsFuel) issues.push({ code: "missing_fuel_port", path: `${basePath}.ports`, message: `${building.id} has no input for ${generator.fuelItemId}` });
+      }
+    }
+    if (building.powerStoragePolicy && (
+      building.powerStoragePolicy.capacityMWh <= 0
+      || building.powerStoragePolicy.maxChargeMW <= 0
+      || building.powerStoragePolicy.maxDischargeMW <= 0
+    )) {
+      issues.push({ code: "invalid_power_storage", path: `${basePath}.powerStoragePolicy`, message: "Power storage values must be positive" });
+    }
+    if (building.distributionPolicy && (
+      building.distributionPolicy.maxCableConnections <= 0
+      || (building.distributionPolicy.radiusTiles !== undefined && building.distributionPolicy.radiusTiles <= 0)
+      || (building.distributionPolicy.maxConsumers !== undefined && building.distributionPolicy.maxConsumers <= 0)
+    )) {
+      issues.push({ code: "invalid_distribution", path: `${basePath}.distributionPolicy`, message: "Distribution limits must be positive" });
     }
     if (building.allowedRotations.length === 0) {
       issues.push({ code: "missing_rotation", path: `${basePath}.allowedRotations`, message: "At least one rotation is required" });
@@ -178,6 +233,14 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     };
     recipe.inputs.forEach((amount, index) => validateAmount(amount, index, false));
     recipe.outputs.forEach((amount, index) => validateAmount(amount, index, true));
+    const inputPortIds = recipe.inputs.map(({ portId }) => portId);
+    const outputPortIds = recipe.outputs.map(({ portId }) => portId);
+    if (new Set(inputPortIds).size !== inputPortIds.length) {
+      issues.push({ code: "duplicate_recipe_port", path: `${basePath}.inputs`, message: "Each recipe input must bind to a distinct port" });
+    }
+    if (new Set(outputPortIds).size !== outputPortIds.length) {
+      issues.push({ code: "duplicate_recipe_port", path: `${basePath}.outputs`, message: "Each recipe output must bind to a distinct port" });
+    }
     if (recipe.durationSeconds <= 0) {
       issues.push({ code: "invalid_duration", path: `${basePath}.durationSeconds`, message: "Recipe duration must be positive" });
     }
@@ -204,13 +267,36 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
       if (delivery.commitPolicy !== expectedCommit) issues.push({ code: "commit_policy_mismatch", path: `${deliveryPath}.commitPolicy`, message: `${delivery.medium} deliveries require ${expectedCommit}` });
       if (stage.dockPowerMode === "manual" && delivery.medium === "fluid") issues.push({ code: "manual_fluid_delivery", path: deliveryPath, message: "Manual dock stages cannot accept fluid" });
     });
-    (["itemIds", "recipeIds", "buildingIds"] as const).forEach((key) => {
-      const lookup = key === "itemIds" ? items : key === "recipeIds" ? recipes : buildings;
-      stage.rewards[key].forEach((id, rewardIndex) => {
+    (["resourceIds", "itemIds", "recipeIds", "buildingIds"] as const).forEach((key) => {
+      const lookup = key === "resourceIds" || key === "itemIds" ? items : key === "recipeIds" ? recipes : buildings;
+      (stage.rewards[key] ?? []).forEach((id, rewardIndex) => {
         if (!lookup.has(id)) issues.push({ code: "missing_reward", path: `${basePath}.rewards.${key}[${rewardIndex}]`, message: `Unknown reward: ${id}` });
       });
     });
+    if (stage.dockPowerMode === "powered" && (stage.requiredPowerMW ?? 0) <= 0) {
+      issues.push({ code: "missing_project_power", path: `${basePath}.requiredPowerMW`, message: "Powered project stages require a positive power demand" });
+    }
+    Object.entries(stage.rewards.constructionCredits ?? {}).forEach(([creditId, amount]) => {
+      if (!Number.isFinite(amount) || amount <= 0) {
+        issues.push({ code: "invalid_construction_credit", path: `${basePath}.rewards.constructionCredits.${creditId}`, message: "Construction credits must be positive" });
+      }
+    });
   });
+
+  const stageVisiting = new Set<string>();
+  const stageVisited = new Set<string>();
+  const visitStage = (id: string): boolean => {
+    if (stageVisiting.has(id)) return true;
+    if (stageVisited.has(id)) return false;
+    stageVisiting.add(id);
+    const cyclic = (stages.get(id)?.prerequisiteIds ?? []).some(visitStage);
+    stageVisiting.delete(id);
+    stageVisited.add(id);
+    return cyclic;
+  };
+  if (source.projectStages.some((stage) => visitStage(stage.id))) {
+    issues.push({ code: "project_stage_cycle", path: "projectStages", message: "Project stage prerequisite cycle detected" });
+  }
 
   const recipesByUnlock = new Map<UnlockId, RecipeDefinition[]>();
   source.recipes.forEach((recipe) => {
@@ -236,6 +322,19 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     };
     if (group.some((recipe) => visit(recipe.id))) {
       issues.push({ code: "recipe_cycle", path: `recipes@${unlockId}`, message: `Recipe cycle detected within ${unlockId}` });
+    }
+  });
+
+  const producedItemIds = new Set<string>();
+  source.recipes.forEach((recipe) => recipe.outputs.forEach((output) => producedItemIds.add(output.itemId)));
+  source.projectStages.forEach((stage) => (stage.rewards.itemIds ?? []).forEach((itemId) => producedItemIds.add(itemId)));
+  source.items.forEach((item, itemIndex) => {
+    if (item.category !== "resource" && !producedItemIds.has(item.id)) {
+      issues.push({
+        code: "missing_production_source",
+        path: `items[${itemIndex}]`,
+        message: `${item.id} has no recipe or project assembly source`,
+      });
     }
   });
 

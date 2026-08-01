@@ -22,6 +22,19 @@ export type ConnectorProfile =
 
 export type GridCell = Readonly<{ x: number; z: number }>;
 export type LocalPosition = Readonly<{ x: number; y: number; z: number }>;
+export type ItemUnit = "item" | "m3";
+export type ItemGeometryType =
+  | "ore_chunk"
+  | "ingot"
+  | "plate"
+  | "rod"
+  | "block"
+  | "wire_coil"
+  | "mechanical_part"
+  | "electronic_part"
+  | "container"
+  | "project_part"
+  | "fluid";
 
 export type PortDefinition = Readonly<{
   id: PortId;
@@ -41,7 +54,11 @@ export type ItemDefinition = Readonly<{
   name: string;
   category: "resource" | "material" | "part" | "project" | "fluid";
   medium: "solid" | "fluid";
+  unit: ItemUnit;
   unlockId: UnlockId;
+  milestoneId?: string;
+  defaultColor: number;
+  geometryType: ItemGeometryType;
   stackSize: number;
   modelKey: string;
   hubItem?: boolean;
@@ -69,6 +86,60 @@ export type RecipeDefinition = Readonly<{
 
 export type BuildCost = Readonly<{ itemId: ItemId; amount: number }>;
 
+export type StoragePolicy = Readonly<{
+  slotCount: number;
+  lockToSingleItem: boolean;
+  supportsInputFilter: boolean;
+  supportsOutputFilter: boolean;
+  defaultRoutingPolicy: "pass_through" | "fill_then_output" | "output_disabled";
+}>;
+
+export type BufferPolicy = Readonly<{
+  reserveInputsAtomically: boolean;
+  reserveAllOutputsBeforeStart: boolean;
+  returnContentsOnRecipeChange: boolean;
+  returnContentsOnDemolish: boolean;
+}>;
+
+export type PreplacedPolicy = Readonly<{
+  worldAnchor: GridCell;
+  fixedRotation: 0 | 1 | 2 | 3;
+  canBuild: false;
+  canClone: false;
+  canDemolish: false;
+}>;
+
+export type TransportPolicy = Readonly<{
+  throughputPerMinute: number;
+  maxSegmentLengthTiles?: number;
+}>;
+
+export type GeneratorPolicy = Readonly<{
+  capacityMW: number;
+  fuelItemId?: ItemId;
+  fuelRatePerMinute?: number;
+  minimumLoadRatio: number;
+  dispatchPriority: number;
+}>;
+
+export type PowerStoragePolicy = Readonly<{
+  capacityMWh: number;
+  maxChargeMW: number;
+  maxDischargeMW: number;
+}>;
+
+export type DistributionPolicy = Readonly<{
+  radiusTiles?: number;
+  maxConsumers?: number;
+  maxCableConnections: number;
+}>;
+
+export type FluidStoragePolicy = Readonly<{
+  capacityM3: number;
+  throughputM3PerMinute: number;
+  locksFluidType: boolean;
+}>;
+
 export type BuildingDefinition = Readonly<{
   id: BuildingId;
   name: string;
@@ -78,8 +149,21 @@ export type BuildingDefinition = Readonly<{
   allowedRotations: readonly (0 | 1 | 2 | 3)[];
   ports: readonly PortDefinition[];
   recipeIds: readonly RecipeId[];
+  processingSpeed?: number;
+  activeMW?: number;
+  idleMW?: number;
   buildCost: readonly BuildCost[];
   storageSlots?: number;
+  storagePolicy?: StoragePolicy;
+  bufferPolicy?: BufferPolicy;
+  modelKey?: string;
+  animationKey?: string;
+  preplacedPolicy?: PreplacedPolicy;
+  transportPolicy?: TransportPolicy;
+  generatorPolicy?: GeneratorPolicy;
+  powerStoragePolicy?: PowerStoragePolicy;
+  distributionPolicy?: DistributionPolicy;
+  fluidStoragePolicy?: FluidStoragePolicy;
 }>;
 
 export type ProjectDeliveryDefinition = Readonly<{
@@ -95,11 +179,45 @@ export type ProjectStageDefinition = Readonly<{
   prerequisiteIds: readonly ProjectStageId[];
   deliveries: readonly ProjectDeliveryDefinition[];
   rewards: Readonly<{
-    itemIds: readonly ItemId[];
+    resourceIds?: readonly ItemId[];
+    itemIds?: readonly ItemId[];
     recipeIds: readonly RecipeId[];
     buildingIds: readonly BuildingId[];
+    constructionCredits?: Readonly<Record<string, number>>;
   }>;
   dockPowerMode: "manual" | "powered";
+  requiredPowerMW?: number;
+  completionSequence?: string;
+}>;
+
+export type ItemStack = Readonly<{ itemId: ItemId; amount: number }>;
+
+export type BuildingInstance = Readonly<{
+  id: string;
+  definitionId: BuildingId;
+  position: GridCell;
+  rotation: 0 | 1 | 2 | 3;
+  selectedRecipeId?: RecipeId;
+  runtimeState: string;
+  progress: number;
+  inputBuffersByPortId: Readonly<Record<PortId, readonly ItemStack[]>>;
+  outputBuffersByPortId: Readonly<Record<PortId, readonly ItemStack[]>>;
+  workInProgress: readonly ItemStack[];
+  powerGridId?: string;
+}>;
+
+export type StorageState = Readonly<{
+  structureId: string;
+  lockedItemId?: ItemId;
+  inventory: number;
+  reservedIncoming: number;
+  reservedOutgoing: number;
+  inputTransferItemId?: ItemId;
+  inputEnabled: boolean;
+  outputEnabled: boolean;
+  outputFilterItemId?: ItemId;
+  minimumReserve: number;
+  routingPolicy: "pass_through" | "fill_then_output" | "output_disabled";
 }>;
 
 export type DefinitionRegistry = Readonly<{
