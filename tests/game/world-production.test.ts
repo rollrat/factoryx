@@ -194,3 +194,152 @@ test("ports sharing a cell do not connect unless their facings oppose", () => {
   assert.equal(source.ok && target.ok, true);
   assert.deepEqual(new WorldProductionSimulation(world).connections(), []);
 });
+
+const junctionRegistry = (): DefinitionRegistry => {
+  const junctionPort = (
+    id: string,
+    direction: "input" | "output",
+    x: number,
+    z: number,
+  ) => ({
+    id, direction, medium: "solid" as const, connectorProfile: "belt_standard" as const,
+    connectionCell: { x, z }, localPosition: { x, y: 0.5, z },
+    localFacing: { x: Math.sign(x), z: Math.sign(z) }, bufferSlots: 1, acceptedItemIds: ["ore"],
+  });
+  const make = (id: string, ports: ReturnType<typeof junctionPort>[]): BuildingDefinition => ({
+    id, name: id, unlockId: "start", placementMode: "buildable", footprint: { x: 1, z: 1 },
+    allowedRotations: [0, 1, 2, 3], ports, recipeIds: [], buildCost: [{ itemId: "ore", amount: 1 }],
+  });
+  const definitions = [
+    make("source_x", [junctionPort("out", "output", 1, 0)]),
+    make("source_z", [junctionPort("out", "output", 0, 1)]),
+    make("sink_x", [junctionPort("in", "input", -1, 0)]),
+    make("sink_z", [junctionPort("in", "input", 0, -1)]),
+    make("sink_from_right", [junctionPort("in", "input", 1, 0)]),
+    make("splitter", [
+      junctionPort("in", "input", -1, 0),
+      junctionPort("out_a", "output", 1, 0),
+      junctionPort("out_b", "output", 0, 1),
+    ]),
+    make("merger", [
+      junctionPort("in_a", "input", -1, 0),
+      junctionPort("in_b", "input", 0, -1),
+      junctionPort("out", "output", 1, 0),
+    ]),
+  ];
+  const ore = items.find(({ id }) => id === "ore")!;
+  return {
+    items: new Map([[ore.id, ore]]), recipes: new Map(),
+    buildings: new Map(definitions.map((definition) => [definition.id, definition])), projectStages: new Map(),
+  };
+};
+
+const placeJunction = (
+  world: DataDrivenWorld,
+  buildingId: string,
+  x: number,
+  z: number,
+  rotation: 0 | 1 | 2 | 3 = 0,
+) => {
+  const result = world.place({ buildingId, position: { x, z }, rotation });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error(`junction placement failed: ${buildingId}`);
+  return result.instance.id;
+};
+
+const splitterSetup = () => {
+  const junction = junctionRegistry();
+  const world = new DataDrivenWorld({
+    registry: junction, bounds: { minX: -4, maxX: 8, minZ: -4, maxZ: 8 },
+    constructionInventory: [{ itemId: "ore", amount: 100 }],
+  });
+  const source = placeJunction(world, "source_x", 0, 0);
+  const splitter = placeJunction(world, "splitter", 2, 0);
+  const sinkA = placeJunction(world, "sink_x", 4, 0);
+  const sinkB = placeJunction(world, "sink_z", 2, 2);
+  return { world, source, splitter, sinkA, sinkB };
+};
+
+test("splitter routes round-robin over the connected port graph and skips blocked outputs", () => {
+  const { world, source, splitter, sinkA, sinkB } = splitterSetup();
+  const simulation = new WorldProductionSimulation(world);
+  assert.equal(simulation.connections().length, 3);
+
+  for (let index = 0; index < 4; index += 1) {
+    assert.equal(simulation.deposit(source, "out", "output", "ore", 1), true);
+    simulation.advance(1.1);
+  }
+  assert.equal(simulation.inventory(sinkA, "in", "input").amount, 2);
+  assert.equal(simulation.inventory(sinkB, "in", "input").amount, 2);
+
+  assert.equal(simulation.deposit(sinkA, "in", "input", "ore", 18), true);
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(simulation.deposit(source, "out", "output", "ore", 1), true);
+    simulation.advance(1.1);
+  }
+  assert.equal(simulation.inventory(sinkA, "in", "input").amount, 20);
+  assert.equal(simulation.inventory(sinkB, "in", "input").amount, 4);
+  assert.equal(simulation.inventory(splitter, "in", "input").amount, 0);
+});
+
+test("merger grants inputs fairly and preserves backpressure", () => {
+  const junction = junctionRegistry();
+  const world = new DataDrivenWorld({
+    registry: junction, bounds: { minX: -4, maxX: 8, minZ: -4, maxZ: 8 },
+    constructionInventory: [{ itemId: "ore", amount: 100 }],
+  });
+  const sourceA = placeJunction(world, "source_x", 0, 0);
+  const sourceB = placeJunction(world, "source_z", 2, -2);
+  const merger = placeJunction(world, "merger", 2, 0);
+  const sink = placeJunction(world, "sink_x", 4, 0);
+  const simulation = new WorldProductionSimulation(world);
+
+  assert.equal(simulation.deposit(sourceA, "out", "output", "ore", 1), true);
+  assert.equal(simulation.deposit(sourceB, "out", "output", "ore", 1), true);
+  simulation.advance(1.1);
+  assert.equal(simulation.inventory(merger, "in_a", "input").amount, 0);
+  assert.equal(simulation.inventory(merger, "in_b", "input").amount, 1);
+  assert.equal(simulation.withdraw(sink, "in", "input", "ore", 1), true);
+
+  simulation.advance(1.1);
+  assert.equal(simulation.inventory(merger, "in_b", "input").amount, 0);
+  assert.equal(simulation.inventory(sink, "in", "input").amount, 1);
+
+  assert.equal(simulation.deposit(sink, "in", "input", "ore", 19), true);
+  assert.equal(simulation.deposit(sourceA, "out", "output", "ore", 1), true);
+  simulation.advance(1.1);
+  assert.equal(simulation.inventory(merger, "in_a", "input").amount, 1);
+});
+
+test("junction router cursors survive snapshots deterministically", () => {
+  const { world, source, sinkA } = splitterSetup();
+  const simulation = new WorldProductionSimulation(world);
+  assert.equal(simulation.deposit(source, "out", "output", "ore", 1), true);
+  simulation.advance(1.1);
+  assert.equal(simulation.inventory(sinkA, "in", "input").amount, 1);
+
+  const restored = new WorldProductionSimulation(world, structuredClone(simulation.snapshot()));
+  assert.equal(simulation.deposit(source, "out", "output", "ore", 1), true);
+  assert.equal(restored.deposit(source, "out", "output", "ore", 1), true);
+  simulation.advance(1.1);
+  restored.advance(1.1);
+  assert.deepEqual(restored.snapshot(), simulation.snapshot());
+});
+
+test("rotated junction ports connect using their world-space facing and cell", () => {
+  const junction = junctionRegistry();
+  const world = new DataDrivenWorld({
+    registry: junction, bounds: { minX: -4, maxX: 8, minZ: -4, maxZ: 8 },
+    constructionInventory: [{ itemId: "ore", amount: 100 }],
+  });
+  const splitter = placeJunction(world, "splitter", 2, 2, 1);
+  placeJunction(world, "source_z", 2, 0);
+  placeJunction(world, "sink_z", 2, 4);
+  placeJunction(world, "sink_from_right", 0, 2);
+  const connections = new WorldProductionSimulation(world).connections();
+  assert.deepEqual(connections.filter((connection) => (
+    connection.fromInstanceId === splitter || connection.toInstanceId === splitter
+  )).map(({ fromPortId, toPortId }) => [fromPortId, toPortId]), [
+    ["out_a", "in"], ["out_b", "in"], ["out", "in"],
+  ]);
+});

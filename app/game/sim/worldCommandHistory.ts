@@ -19,12 +19,20 @@ export type WorldCommandSummary = Readonly<{
 
 export type WorldHistoryResult =
   | Readonly<{ ok: true; command: WorldCommandSummary }>
-  | Readonly<{ ok: false; reason: "empty" | "world_changed" | "insufficient_inventory"; itemId?: ItemId }>;
+  | Readonly<{ ok: false; reason: "empty" | "world_changed" | "insufficient_inventory" | "insufficient_credit"; itemId?: ItemId; creditId?: string }>;
+
+export type WorldCommandResourceLedger = Readonly<{
+  balances: () => Readonly<Record<string, number>>;
+  applyDeltas: (deltas: readonly Readonly<{ id: string; amount: number }>[]) => boolean;
+}>;
 
 type RecordedWorldCommand = Readonly<{
   summary: WorldCommandSummary;
   before: WorldSnapshot;
   after: WorldSnapshot;
+  ledger?: WorldCommandResourceLedger;
+  ledgerBefore?: Readonly<Record<string, number>>;
+  ledgerAfter?: Readonly<Record<string, number>>;
 }>;
 
 const snapshotInstances = (snapshot: WorldSnapshot) => new Map(snapshot.instances.map((instance) => [instance.id, instance]));
@@ -50,6 +58,13 @@ const inventoryDelta = (source: WorldSnapshot, target: WorldSnapshot) => {
     .filter(({ amount }) => amount !== 0)
     .sort((a, b) => a.itemId.localeCompare(b.itemId));
 };
+
+const resourceDelta = (source: Readonly<Record<string, number>>, target: Readonly<Record<string, number>>) => (
+  [...new Set([...Object.keys(source), ...Object.keys(target)])]
+    .map((id) => ({ id, amount: (target[id] ?? 0) - (source[id] ?? 0) }))
+    .filter(({ amount }) => amount !== 0)
+    .sort((a, b) => a.id.localeCompare(b.id))
+);
 
 const nextInstanceId = (current: WorldSnapshot, target: WorldSnapshot, instances: readonly BuildingInstance[]) => {
   const largestBuildingId = instances.reduce((largest, instance) => {
@@ -142,25 +157,37 @@ export class WorldCommandHistory {
     kind: WorldCommandKind,
     label: string,
     operation: () => T,
+    ledger?: WorldCommandResourceLedger,
   ): T {
     const before = world.snapshot();
+    const ledgerBefore = ledger?.balances();
     let result: T;
     try {
       result = operation();
     } catch (error) {
       world.restore(before);
+      if (ledger && ledgerBefore) {
+        const rollback = resourceDelta(ledger.balances(), ledgerBefore);
+        if (rollback.length > 0 && !ledger.applyDeltas(rollback)) throw new Error("failed to roll back command resource ledger", { cause: error });
+      }
       throw error;
     }
     if (!result.ok) {
       // Keep the command boundary atomic even for a future mutator that reports
       // failure after changing part of the world.
       if (JSON.stringify(world.snapshot()) !== JSON.stringify(before)) world.restore(before);
+      if (ledger && ledgerBefore) {
+        const rollback = resourceDelta(ledger.balances(), ledgerBefore);
+        if (rollback.length > 0 && !ledger.applyDeltas(rollback)) throw new Error("failed to roll back command resource ledger");
+      }
       return result;
     }
     const after = world.snapshot();
+    const ledgerAfter = ledger?.balances();
     const affectedInstanceIds = changedInstanceIds(before, after);
     const changedInventory = inventoryDelta(before, after).length > 0;
-    if (affectedInstanceIds.length === 0 && !changedInventory) return result;
+    const changedLedger = ledgerBefore && ledgerAfter && resourceDelta(ledgerBefore, ledgerAfter).length > 0;
+    if (affectedInstanceIds.length === 0 && !changedInventory && !changedLedger) return result;
     const summary = {
       id: this.nextCommandId,
       kind,
@@ -168,7 +195,7 @@ export class WorldCommandHistory {
       affectedInstanceIds,
     } as const;
     this.nextCommandId += 1;
-    this.undoStack.push({ summary, before, after });
+    this.undoStack.push({ summary, before, after, ...(ledger && ledgerBefore && ledgerAfter ? { ledger, ledgerBefore, ledgerAfter } : {}) });
     if (this.undoStack.length > this.limit) this.undoStack.shift();
     this.redoStack.length = 0;
     return result;
@@ -177,7 +204,7 @@ export class WorldCommandHistory {
   undo(world: DataDrivenWorld): WorldHistoryResult {
     const command = this.undoStack.at(-1);
     if (!command) return { ok: false, reason: "empty" };
-    const result = this.apply(world, command.after, command.before, command.summary.affectedInstanceIds);
+    const result = this.apply(world, command.after, command.before, command.summary.affectedInstanceIds, command);
     if (!result.ok) return result;
     this.undoStack.pop();
     this.redoStack.push(command);
@@ -187,7 +214,7 @@ export class WorldCommandHistory {
   redo(world: DataDrivenWorld): WorldHistoryResult {
     const command = this.redoStack.at(-1);
     if (!command) return { ok: false, reason: "empty" };
-    const result = this.apply(world, command.before, command.after, command.summary.affectedInstanceIds);
+    const result = this.apply(world, command.before, command.after, command.summary.affectedInstanceIds, command);
     if (!result.ok) return result;
     this.redoStack.pop();
     this.undoStack.push(command);
@@ -204,6 +231,7 @@ export class WorldCommandHistory {
     source: WorldSnapshot,
     target: WorldSnapshot,
     affectedInstanceIds: readonly string[],
+    command: RecordedWorldCommand,
   ): Exclude<WorldHistoryResult, { ok: true }> | Readonly<{ ok: true }> {
     const candidate = candidateSnapshot(world.snapshot(), source, target, affectedInstanceIds);
     if ("error" in candidate) return { ok: false, reason: candidate.error, ...(candidate.itemId ? { itemId: candidate.itemId } : {}) };
@@ -213,7 +241,23 @@ export class WorldCommandHistory {
     } catch {
       return { ok: false, reason: "world_changed" };
     }
-    world.restore(candidate);
+    const ledgerDeltas = command.ledger && command.ledgerBefore && command.ledgerAfter
+      ? resourceDelta(
+        source === command.before ? command.ledgerBefore : command.ledgerAfter,
+        target === command.after ? command.ledgerAfter : command.ledgerBefore,
+      )
+      : [];
+    if (command.ledger && ledgerDeltas.length > 0 && !command.ledger.applyDeltas(ledgerDeltas)) {
+      return { ok: false, reason: "insufficient_credit", creditId: ledgerDeltas.find(({ amount }) => amount < 0)?.id };
+    }
+    try {
+      world.restore(candidate);
+    } catch {
+      if (command.ledger && ledgerDeltas.length > 0) {
+        command.ledger.applyDeltas(ledgerDeltas.map(({ id, amount }) => ({ id, amount: -amount })));
+      }
+      return { ok: false, reason: "world_changed" };
+    }
     return { ok: true };
   }
 }

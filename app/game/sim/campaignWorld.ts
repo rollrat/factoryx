@@ -19,7 +19,10 @@ import {
 } from "./powerGrid.ts";
 import {
   DataDrivenWorld,
+  type WorldBatchPlacementResult,
   type WorldBounds,
+  type WorldPlacementRequest,
+  type WorldPlacementResult,
   type WorldSnapshot,
 } from "./world.ts";
 
@@ -54,6 +57,16 @@ export type CampaignWorldOptions = Readonly<{
   worldSnapshot?: WorldSnapshot;
   snapshot?: CampaignWorldSnapshot;
 }>;
+
+export type ConstructionCreditDelta = Readonly<{ id: string; amount: number }>;
+
+const constructionCredit = (buildingId: string) => {
+  if (buildingId === "pipe_mk1") return { id: "pipe_mk1_length_m", amount: 1 } as const;
+  if (["pipe_t_junction", "fluid_tank", "pipe_pump"].includes(buildingId)) {
+    return { id: buildingId, amount: 1 } as const;
+  }
+  return null;
+};
 
 /** Joins campaign rewards, the definition-driven world, and one independent power grid. */
 export class CampaignWorldRuntime {
@@ -196,6 +209,11 @@ export class CampaignWorldRuntime {
     return this.lastPowerResult;
   }
 
+  setDockSuppliedPowerMW(suppliedMW: number): void {
+    if (!Number.isFinite(suppliedMW) || suppliedMW < 0) throw new RangeError("dock supplied power must be finite and non-negative");
+    this.dockSuppliedPowerMW = suppliedMW;
+  }
+
   isItemUnlocked(itemId: ItemId): boolean {
     return this.unlockedItemIds.has(itemId);
   }
@@ -204,12 +222,79 @@ export class CampaignWorldRuntime {
     return this.constructionCredits.get(id) ?? 0;
   }
 
+  constructionCreditBalances(): Readonly<Record<string, number>> {
+    return Object.fromEntries([...this.constructionCredits].sort(([a], [b]) => a.localeCompare(b)));
+  }
+
+  /** Applies a complete credit delta atomically, preserving unrelated later campaign rewards. */
+  applyConstructionCreditDeltas(deltas: readonly ConstructionCreditDelta[]): boolean {
+    const next = new Map(this.constructionCredits);
+    for (const { id, amount } of deltas) {
+      if (!id || !Number.isFinite(amount)) return false;
+      const value = (next.get(id) ?? 0) + amount;
+      if (value < 0) return false;
+      next.set(id, value);
+    }
+    this.constructionCredits.clear();
+    next.forEach((amount, id) => this.constructionCredits.set(id, amount));
+    return true;
+  }
+
+  previewConstruction(request: WorldPlacementRequest) {
+    const credit = constructionCredit(request.buildingId);
+    const sponsored = credit !== null && this.constructionCreditAmount(credit.id) >= credit.amount;
+    return this.world.previewPlace({ ...request, ...(sponsored ? { waiveBuildCost: true, constructionCredit: credit } : {}) });
+  }
+
+  placeConstruction(request: WorldPlacementRequest): WorldPlacementResult {
+    const credit = constructionCredit(request.buildingId);
+    const sponsored = credit !== null && this.constructionCreditAmount(credit.id) >= credit.amount;
+    const result = this.world.place({ ...request, ...(sponsored ? { waiveBuildCost: true, constructionCredit: credit } : {}) });
+    if (result.ok && sponsored && credit) {
+      if (!this.spendConstructionCredit(credit.id, credit.amount)) {
+        throw new Error(`construction credit disappeared during placement: ${credit.id}`);
+      }
+    }
+    return result;
+  }
+
+  placeConstructionBatch(requests: readonly WorldPlacementRequest[]): WorldBatchPlacementResult {
+    const remaining = new Map<string, number>();
+    const sponsored: ConstructionCreditDelta[] = [];
+    const fundedRequests = requests.map((request) => {
+      const credit = constructionCredit(request.buildingId);
+      if (!credit) return request;
+      const available = remaining.get(credit.id) ?? this.constructionCreditAmount(credit.id);
+      if (available < credit.amount) return request;
+      remaining.set(credit.id, available - credit.amount);
+      sponsored.push({ id: credit.id, amount: credit.amount });
+      return { ...request, waiveBuildCost: true, constructionCredit: credit };
+    });
+    const result = this.world.placeBatch(fundedRequests);
+    if (!result.ok) return result;
+    const totals = new Map<string, number>();
+    sponsored.forEach(({ id, amount }) => totals.set(id, (totals.get(id) ?? 0) + amount));
+    const spent = [...totals].map(([id, amount]) => ({ id, amount: -amount }));
+    if (!this.applyConstructionCreditDeltas(spent)) {
+      throw new Error("construction credits disappeared during batch placement");
+    }
+    return result;
+  }
+
   spendConstructionCredit(id: string, amount: number): boolean {
     if (!Number.isFinite(amount) || amount <= 0) return false;
     const available = this.constructionCreditAmount(id);
     if (amount > available) return false;
     this.constructionCredits.set(id, available - amount);
     return true;
+  }
+
+  refundConstructionCreditFor(instance: Readonly<{ constructionCreditPaid?: Readonly<{ id: string; amount: number }> }>): void {
+    const paid = instance.constructionCreditPaid;
+    if (!paid) return;
+    if (!this.applyConstructionCreditDeltas([{ id: paid.id, amount: paid.amount }])) {
+      throw new Error(`failed to refund construction credit: ${paid.id}`);
+    }
   }
 
   snapshot(): CampaignWorldSnapshot {

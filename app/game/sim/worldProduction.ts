@@ -7,6 +7,7 @@ import type {
 import { FixedStepClock, type FixedStepClockSnapshot } from "./clock.ts";
 import { SIMULATION_TICK_SECONDS } from "./contracts.ts";
 import { PortInventory, type PortInventoryState } from "./inventory.ts";
+import { MergerRouter, SplitterRouter, type RouterSnapshot } from "./junction.ts";
 import { RecipeProcess, type RecipeProcessSnapshot } from "./process.ts";
 import type { PowerGridResult } from "./powerGrid.ts";
 import type { MachineRuntimeState } from "./contracts.ts";
@@ -29,6 +30,9 @@ export type WorldProductionNodeSnapshot = Readonly<{
   outputs: readonly PortInventoryState[];
   process: RecipeProcessSnapshot | null;
   internalTransferCredit: number;
+  /** Optional for backward compatibility with snapshots created before junction routing. */
+  splitterRouter?: RouterSnapshot | null;
+  mergerRouter?: RouterSnapshot | null;
 }>;
 
 export type WorldProductionSnapshot = Readonly<{
@@ -74,6 +78,8 @@ type RuntimeNode = {
   selectedRecipeId: RecipeId | null;
   process: RecipeProcess | null;
   internalTransferCredit: number;
+  splitterRouter: SplitterRouter<ItemId> | null;
+  mergerRouter: MergerRouter<ItemId> | null;
 };
 
 const accepts = (port: PortDefinition, itemId: ItemId) => (
@@ -136,6 +142,8 @@ export class WorldProductionSimulation {
         selectedRecipeId,
         process: recipe ? new RecipeProcess(recipe) : null,
         internalTransferCredit: 0,
+        splitterRouter: definition.id === "splitter" ? new SplitterRouter<ItemId>() : null,
+        mergerRouter: definition.id === "merger" ? new MergerRouter<ItemId>() : null,
       });
     });
   }
@@ -325,6 +333,8 @@ export class WorldProductionSimulation {
           outputs: [...node.outputs.values()].map((inventory) => inventory.state()),
           process: node.process?.snapshot() ?? null,
           internalTransferCredit: node.internalTransferCredit,
+          splitterRouter: node.splitterRouter?.snapshot() ?? null,
+          mergerRouter: node.mergerRouter?.snapshot() ?? null,
         }))
         .sort((a, b) => a.instanceId.localeCompare(b.instanceId)),
     };
@@ -380,7 +390,8 @@ export class WorldProductionSimulation {
       const storageRouting = node.definition.storagePolicy?.defaultRoutingPolicy;
       const isPassThroughStorage = storageRouting === "pass_through";
       const isFillThenOutput = storageRouting === "fill_then_output";
-      if (transportRate === undefined && !isPassThroughStorage && !isFillThenOutput) return;
+      const isJunction = Boolean(node.splitterRouter || node.mergerRouter);
+      if (transportRate === undefined && !isPassThroughStorage && !isFillThenOutput && !isJunction) return;
 
       const throughputPerMinute = transportRate ?? 60;
       const generatedCredit = throughputPerMinute * deltaSeconds / 60;
@@ -391,12 +402,19 @@ export class WorldProductionSimulation {
       const allowedAmount = Math.floor(node.internalTransferCredit + Number.EPSILON);
       if (allowedAmount < 1) return;
 
-      const incomingIds = new Set(connections
-        .filter(({ toInstanceId }) => toInstanceId === node.instanceId)
-        .map(({ toPortId }) => toPortId));
-      const outgoingIds = new Set(connections
-        .filter(({ fromInstanceId }) => fromInstanceId === node.instanceId)
-        .map(({ fromPortId }) => fromPortId));
+      const incoming = connections.filter(({ toInstanceId }) => toInstanceId === node.instanceId);
+      const outgoing = connections.filter(({ fromInstanceId }) => fromInstanceId === node.instanceId);
+      const incomingIds = new Set(incoming.map(({ toPortId }) => toPortId));
+      const outgoingIds = new Set(outgoing.map(({ fromPortId }) => fromPortId));
+
+      if (node.splitterRouter) {
+        this.transferSplitter(node, incomingIds, outgoing, allowedAmount);
+        return;
+      }
+      if (node.mergerRouter) {
+        this.transferMerger(node, incomingIds, outgoing, allowedAmount);
+        return;
+      }
       const inputEntry = [...node.inputs]
         .filter(([portId, inventory]) => incomingIds.has(portId) && inventory.itemId && inventory.availableAmount > 0)
         .sort(([a], [b]) => a.localeCompare(b))[0];
@@ -412,6 +430,7 @@ export class WorldProductionSimulation {
             && outputPort.connectorProfile === inputPort.connectorProfile
             && Boolean(inputInventory.itemId && accepts(outputPort, inputInventory.itemId));
         })
+        .filter(([portId]) => Boolean(inputInventory.itemId && this.canDrainToDownstream(portId, inputInventory.itemId, outgoing)))
         .sort(([a], [b]) => a.localeCompare(b))[0];
       if (!outputEntry || !inputInventory.itemId) return;
       const [, outputInventory] = outputEntry;
@@ -426,6 +445,105 @@ export class WorldProductionSimulation {
       node.internalTransferCredit = Math.max(0, node.internalTransferCredit - amount);
       this.syncRuntimeContents(node);
     });
+  }
+
+  private transferSplitter(
+    node: RuntimeNode,
+    incomingIds: ReadonlySet<string>,
+    outgoing: readonly ProductionConnection[],
+    allowedAmount: number,
+  ) {
+    const inputEntry = [...node.inputs]
+      .filter(([portId, inventory]) => incomingIds.has(portId) && inventory.itemId && inventory.availableAmount > 0)
+      .sort(([a], [b]) => a.localeCompare(b))[0];
+    if (!inputEntry || !node.splitterRouter) return;
+    const [, inputInventory] = inputEntry;
+
+    let moved = 0;
+    while (moved < allowedAmount && inputInventory.itemId && inputInventory.availableAmount > 0) {
+      const itemId = inputInventory.itemId;
+      const outputs = [...node.outputs]
+        .filter(([portId]) => portId !== inputEntry[0])
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([portId, inventory]) => {
+          const outputPort = node.definition.ports.find(({ id }) => id === portId)!;
+          const connected = outgoing.some(({ fromPortId }) => fromPortId === portId);
+          return {
+            portId,
+            connected,
+            blocked: !inventory.canDeposit(itemId, 1) || !this.canDrainToDownstream(portId, itemId, outgoing),
+            accepts: (candidate: ItemId) => accepts(outputPort, candidate),
+          };
+        });
+      const decision = node.splitterRouter.selectOutput(itemId, outputs);
+      if (!decision) break;
+      const output = node.outputs.get(decision.portId)!;
+      if (!inputInventory.withdraw(itemId, 1)) break;
+      if (!output.deposit(itemId, 1)) {
+        inputInventory.deposit(itemId, 1);
+        break;
+      }
+      moved += 1;
+    }
+    node.internalTransferCredit = Math.max(0, node.internalTransferCredit - moved);
+    if (moved > 0) this.syncRuntimeContents(node);
+  }
+
+  private transferMerger(
+    node: RuntimeNode,
+    incomingIds: ReadonlySet<string>,
+    outgoing: readonly ProductionConnection[],
+    allowedAmount: number,
+  ) {
+    if (!node.mergerRouter) return;
+    const outputEntry = [...node.outputs]
+      .filter(([portId]) => outgoing.some(({ fromPortId }) => fromPortId === portId))
+      .sort(([a], [b]) => a.localeCompare(b))[0];
+    if (!outputEntry) return;
+    const [outputPortId, outputInventory] = outputEntry;
+    const outputPort = node.definition.ports.find(({ id }) => id === outputPortId)!;
+
+    let moved = 0;
+    while (moved < allowedAmount) {
+      const inputs = [...node.inputs]
+        .filter(([portId]) => portId !== outputPortId)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([portId, inventory]) => {
+          const item = inventory.availableAmount > 0 ? inventory.itemId : null;
+          return {
+            portId,
+            connected: incomingIds.has(portId) && Boolean(item
+              && accepts(outputPort, item)
+              && outputInventory.canDeposit(item, 1)
+              && this.canDrainToDownstream(outputPortId, item, outgoing)),
+            item,
+          };
+        });
+      const decision = node.mergerRouter.selectInput(inputs);
+      if (!decision) break;
+      const input = node.inputs.get(decision.portId)!;
+      if (!input.withdraw(decision.item, 1)) break;
+      if (!outputInventory.deposit(decision.item, 1)) {
+        input.deposit(decision.item, 1);
+        break;
+      }
+      moved += 1;
+    }
+    node.internalTransferCredit = Math.max(0, node.internalTransferCredit - moved);
+    if (moved > 0) this.syncRuntimeContents(node);
+  }
+
+  private canDrainToDownstream(
+    outputPortId: string,
+    itemId: ItemId,
+    outgoing: readonly ProductionConnection[],
+  ) {
+    const connection = outgoing.find(({ fromPortId }) => fromPortId === outputPortId);
+    if (!connection) return false;
+    const targetNode = this.nodes.get(connection.toInstanceId);
+    const target = targetNode?.inputs.get(connection.toPortId);
+    const targetPort = targetNode?.definition.ports.find(({ id }) => id === connection.toPortId);
+    return Boolean(target && targetPort && accepts(targetPort, itemId) && target.canDeposit(itemId, 1));
   }
 
   private compatiblePorts(source: WorldPort, target: WorldPort) {
@@ -483,6 +601,18 @@ export class WorldProductionSimulation {
         throw new RangeError(`invalid internal transfer credit: ${saved.instanceId}`);
       }
       node.internalTransferCredit = saved.internalTransferCredit;
+      if (node.splitterRouter) {
+        if (saved.splitterRouter) node.splitterRouter.restore(saved.splitterRouter);
+        else if (saved.splitterRouter === null) throw new Error(`missing splitter router snapshot: ${saved.instanceId}`);
+      } else if (saved.splitterRouter) {
+        throw new Error(`unexpected splitter router snapshot: ${saved.instanceId}`);
+      }
+      if (node.mergerRouter) {
+        if (saved.mergerRouter) node.mergerRouter.restore(saved.mergerRouter);
+        else if (saved.mergerRouter === null) throw new Error(`missing merger router snapshot: ${saved.instanceId}`);
+      } else if (saved.mergerRouter) {
+        throw new Error(`unexpected merger router snapshot: ${saved.instanceId}`);
+      }
     });
   }
 }

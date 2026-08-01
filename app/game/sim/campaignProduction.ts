@@ -8,12 +8,17 @@ import {
   WorldProductionSimulation,
   type WorldProductionSnapshot,
 } from "./worldProduction.ts";
+import {
+  ProjectDockDeliveryCommitter,
+  type ProjectDockDeliveryCommitterSnapshot,
+} from "./projectDockCommitter.ts";
 
 export type CampaignProductionSnapshot = Readonly<{
   version: 1;
   campaignWorld: CampaignWorldSnapshot;
   production: WorldProductionSnapshot;
   dockFluidTransferCredit: number;
+  dockCommitter?: ProjectDockDeliveryCommitterSnapshot;
 }>;
 
 export type CampaignProductionOptions = Omit<CampaignWorldOptions, "snapshot"> & Readonly<{
@@ -21,12 +26,10 @@ export type CampaignProductionOptions = Omit<CampaignWorldOptions, "snapshot"> &
   snapshot?: CampaignProductionSnapshot;
 }>;
 
-/** Commits fluid already transported into the preplaced project dock. */
+/** @deprecated Compatibility adapter for the original single-fluid runtime save. */
 export class ProjectDockFluidCommitter {
   readonly throughputM3PerMinute: number;
-  private readonly campaignWorld: CampaignWorldRuntime;
-  private readonly production: WorldProductionSimulation;
-  private transferCredit: number;
+  private readonly committer: ProjectDockDeliveryCommitter;
 
   constructor(
     campaignWorld: CampaignWorldRuntime,
@@ -37,54 +40,21 @@ export class ProjectDockFluidCommitter {
     if (!Number.isFinite(throughputM3PerMinute) || throughputM3PerMinute <= 0) {
       throw new RangeError("dock fluid throughput must be finite and greater than zero");
     }
-    this.campaignWorld = campaignWorld;
-    this.production = production;
     if (!Number.isFinite(transferCredit) || transferCredit < 0 || transferCredit > 1 + Number.EPSILON) {
       throw new RangeError("invalid dock fluid transfer credit snapshot");
     }
     this.throughputM3PerMinute = throughputM3PerMinute;
-    this.transferCredit = transferCredit;
+    this.committer = new ProjectDockDeliveryCommitter(campaignWorld, production, throughputM3PerMinute, {
+      version: 1,
+      fluidTransferCredits: [],
+      unassignedFluidCredit: transferCredit,
+    });
   }
 
-  snapshot(): number { return this.transferCredit; }
+  snapshot(): number { return this.committer.legacyFluidCredit(); }
 
   advanceFixedTick(deltaSeconds: number) {
-    const generatedCredit = this.throughputM3PerMinute * deltaSeconds / 60;
-    this.transferCredit = Math.min(this.transferCredit + generatedCredit, Math.max(1, generatedCredit));
-    const acceptedLimit = Math.floor(this.transferCredit + Number.EPSILON);
-    if (acceptedLimit < 1) return 0;
-    const stage = [...this.campaignWorld.registry.projectStages.values()].find((candidate) => (
-      this.campaignWorld.campaign.isUnlocked(candidate.id)
-      && this.campaignWorld.campaign.progress(candidate.id)?.completed === false
-    ));
-    const delivery = stage?.deliveries.find(({ medium, commitPolicy }) => (
-      medium === "fluid" && commitPolicy === "fluid_accepted_per_tick"
-    ));
-    if (!stage || !delivery) return 0;
-    const dock = this.campaignWorld.world.allInstances().find(({ definitionId }) => definitionId === "project_dock");
-    if (!dock) return 0;
-    const inventory = this.production.inventory(dock.id, delivery.portId, "input");
-    if (inventory.itemId !== delivery.itemId || inventory.amount <= 0) return 0;
-    const progress = this.campaignWorld.campaign.progress(stage.id)?.deliveries.find(({ portId, itemId }) => (
-      portId === delivery.portId && itemId === delivery.itemId
-    ));
-    if (!progress || progress.remaining <= 0) return 0;
-    const amount = Math.min(acceptedLimit, inventory.amount, progress.remaining);
-    if (amount <= 0) return 0;
-    if (!this.production.withdraw(dock.id, delivery.portId, "input", delivery.itemId, amount)) return 0;
-    const result = this.campaignWorld.deliverProject(stage.id, {
-      portId: delivery.portId,
-      itemId: delivery.itemId,
-      amount,
-    });
-    if (!result.accepted) {
-      if (!this.production.deposit(dock.id, delivery.portId, "input", delivery.itemId, amount)) {
-        throw new Error("failed to roll back rejected dock fluid delivery");
-      }
-      return 0;
-    }
-    this.transferCredit = Math.max(0, this.transferCredit - amount);
-    return amount;
+    return this.committer.advanceFixedTick(deltaSeconds).acceptedAmount;
   }
 }
 
@@ -94,7 +64,7 @@ export class CampaignProductionRuntime {
   readonly production: WorldProductionSimulation;
   readonly dockFluidThroughputM3PerMinute: number;
   private dockFluidTransferCredit = 0;
-  private readonly dockFluidCommitter: ProjectDockFluidCommitter;
+  private readonly dockCommitter: ProjectDockDeliveryCommitter;
 
   constructor(options: CampaignProductionOptions) {
     const throughput = options.dockFluidThroughputM3PerMinute ?? 60;
@@ -125,11 +95,15 @@ export class CampaignProductionRuntime {
       }
       this.dockFluidTransferCredit = options.snapshot.dockFluidTransferCredit;
     }
-    this.dockFluidCommitter = new ProjectDockFluidCommitter(
+    this.dockCommitter = new ProjectDockDeliveryCommitter(
       this.campaignWorld,
       this.production,
       throughput,
-      this.dockFluidTransferCredit,
+      options.snapshot?.dockCommitter ?? {
+        version: 1,
+        fluidTransferCredits: [],
+        unassignedFluidCredit: this.dockFluidTransferCredit,
+      },
     );
   }
 
@@ -143,8 +117,8 @@ export class CampaignProductionRuntime {
         this.production.applyPowerResult(power);
       },
       afterTick: (_tick, fixedDelta) => {
-        this.dockFluidCommitter.advanceFixedTick(fixedDelta);
-        this.dockFluidTransferCredit = this.dockFluidCommitter.snapshot();
+        this.dockCommitter.advanceFixedTick(fixedDelta);
+        this.dockFluidTransferCredit = this.dockCommitter.legacyFluidCredit();
       },
     });
   }
@@ -156,6 +130,7 @@ export class CampaignProductionRuntime {
       campaignWorld: this.campaignWorld.snapshot(),
       production,
       dockFluidTransferCredit: this.dockFluidTransferCredit,
+      dockCommitter: this.dockCommitter.snapshot(),
     };
   }
 

@@ -128,6 +128,7 @@ export type GameCallbacks = {
 export type ConstructionUiState = Readonly<{
   unlockedIds: readonly UnlockId[];
   inventoryByItemId: Readonly<Record<string, number>>;
+  constructionCredits: Readonly<Record<string, number>>;
 }>;
 
 // New data-driven contracts live beside the legacy prototype types so the

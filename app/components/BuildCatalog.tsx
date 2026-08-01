@@ -10,6 +10,7 @@ export type BuildCategory = "production" | "logistics" | "fluid" | "power";
 export type BuildCatalogProps = Readonly<{
   unlockedIds?: readonly UnlockId[];
   inventoryByItemId?: Readonly<Partial<Record<string, number>>>;
+  constructionCredits?: Readonly<Record<string, number>>;
   credits?: number;
   selectedBuildingId?: string | null;
   onSelect: (building: BuildingDefinition) => void;
@@ -94,6 +95,7 @@ const categoryCount = (category: BuildCategory) =>
 export default function BuildCatalog({
   unlockedIds = ["start"],
   inventoryByItemId,
+  constructionCredits = {},
   credits,
   selectedBuildingId = null,
   onSelect,
@@ -178,7 +180,10 @@ export default function BuildCatalog({
         ) : entries.map(({ building, category: entryCategory, unlocked }) => {
           const selected = selectedBuildingId === building.id;
           const powerLabel = building.activeMW === undefined ? null : `${building.activeMW} MW`;
-          const affordable = inventoryByItemId === undefined || building.buildCost.every(
+          const creditId = building.id === "pipe_mk1" ? "pipe_mk1_length_m" : building.id;
+          const availableCredit = constructionCredits[creditId] ?? 0;
+          const sponsored = availableCredit >= 1;
+          const affordable = sponsored || inventoryByItemId === undefined || building.buildCost.every(
             ({ itemId, amount }) => (inventoryByItemId[itemId] ?? 0) >= amount,
           );
           const selectable = unlocked && affordable;
@@ -201,6 +206,7 @@ export default function BuildCatalog({
                 <span>{building.recipeIds.length > 0 ? `${building.recipeIds.length} 공정` : "기반 설비"}</span>
               </span>
               <span className={styles.costTitle}>건설 비용</span>
+              {sponsored ? <span className={styles.credit}>스타터 크레딧 · {availableCredit}회 남음</span> : null}
               <span className={styles.costs}>
                 {building.buildCost.map(({ itemId, amount }) => (
                   <span key={itemId}>

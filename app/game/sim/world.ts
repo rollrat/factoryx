@@ -31,6 +31,9 @@ export type WorldPlacementRequest = Readonly<{
   buildingId: BuildingId;
   position: GridCell;
   rotation: 0 | 1 | 2 | 3;
+  /** Campaign construction credits may sponsor one placement without consuming item build costs. */
+  waiveBuildCost?: boolean;
+  constructionCredit?: Readonly<{ id: string; amount: number }>;
 }>;
 
 export type WorldPlacementResult =
@@ -86,6 +89,8 @@ const cloneInstance = (instance: BuildingInstance): BuildingInstance => ({
   inputBuffersByPortId: cloneBufferRecord(instance.inputBuffersByPortId),
   outputBuffersByPortId: cloneBufferRecord(instance.outputBuffersByPortId),
   workInProgress: cloneStacks(instance.workInProgress),
+  ...(instance.paidBuildCost ? { paidBuildCost: cloneStacks(instance.paidBuildCost) } : {}),
+  ...(instance.constructionCreditPaid ? { constructionCreditPaid: { ...instance.constructionCreditPaid } } : {}),
 });
 
 const rotateCell = (
@@ -226,7 +231,7 @@ export class DataDrivenWorld {
     }
     const placementIssue = this.validatePlacement(definition, request.position, request.rotation);
     if (placementIssue) return placementIssue;
-    for (const cost of aggregateStacks(definition.buildCost)) {
+    for (const cost of request.waiveBuildCost ? [] : aggregateStacks(definition.buildCost)) {
       if (this.inventoryAmount(cost.itemId) < cost.amount) {
         return { ok: false, reason: "insufficient_materials", itemId: cost.itemId };
       }
@@ -239,13 +244,15 @@ export class DataDrivenWorld {
     if (!definition) return { ok: false, reason: "unknown_building" };
     const preview = this.previewPlace(request);
     if (!preview.ok) return preview;
-    const buildCost = aggregateStacks(definition.buildCost);
+    const buildCost = request.waiveBuildCost ? [] : aggregateStacks(definition.buildCost);
 
     const instance = this.createInstance(
       `building-${this.nextInstanceId}`,
       definition,
       request.position,
       request.rotation,
+      buildCost,
+      request.constructionCredit,
     );
     // Cost, instance and occupancy become visible only after all checks pass.
     buildCost.forEach(({ itemId, amount }) => this.inventory.set(itemId, this.inventoryAmount(itemId) - amount));
@@ -283,7 +290,7 @@ export class DataDrivenWorld {
       ...Object.values(instance.outputBuffersByPortId).flat(),
       ...instance.workInProgress,
     ];
-    const recoveredItems = aggregateStacks([...definition.buildCost, ...buffered]);
+    const recoveredItems = aggregateStacks([...(instance.paidBuildCost ?? definition.buildCost), ...buffered]);
     this.removeInstance(instance, definition);
     recoveredItems.forEach(({ itemId, amount }) => this.addInventory(itemId, amount));
     return { ok: true, instance: cloneInstance(instance), recoveredItems };
@@ -377,6 +384,7 @@ export class DataDrivenWorld {
         ...Object.values(saved.inputBuffersByPortId).flat(),
         ...Object.values(saved.outputBuffersByPortId).flat(),
         ...saved.workInProgress,
+        ...(saved.paidBuildCost ?? []),
       ]);
       this.insertInstance(cloneInstance(saved), definition);
     });
@@ -409,6 +417,8 @@ export class DataDrivenWorld {
     definition: BuildingDefinition,
     position: GridCell,
     rotation: 0 | 1 | 2 | 3,
+    paidBuildCost?: readonly ItemStack[],
+    constructionCreditPaid?: Readonly<{ id: string; amount: number }>,
   ): BuildingInstance {
     const inputBuffersByPortId: Record<string, readonly ItemStack[]> = {};
     const outputBuffersByPortId: Record<string, readonly ItemStack[]> = {};
@@ -428,6 +438,8 @@ export class DataDrivenWorld {
       inputBuffersByPortId,
       outputBuffersByPortId,
       workInProgress: [],
+      ...(paidBuildCost ? { paidBuildCost: cloneStacks(paidBuildCost) } : {}),
+      ...(constructionCreditPaid ? { constructionCreditPaid: { ...constructionCreditPaid } } : {}),
       ...(extractionRecipeId ? { selectedRecipeId: extractionRecipeId } : {}),
     };
   }

@@ -227,6 +227,9 @@ export type BuildingInstance = Readonly<{
   inputBuffersByPortId: Readonly<Record<PortId, readonly ItemStack[]>>;
   outputBuffersByPortId: Readonly<Record<PortId, readonly ItemStack[]>>;
   workInProgress: readonly ItemStack[];
+  /** Exact item cost paid for this instance, so sponsored construction cannot mint materials on demolition. */
+  paidBuildCost?: readonly ItemStack[];
+  constructionCreditPaid?: Readonly<{ id: string; amount: number }>;
   powerGridId?: string;
 }>;
 

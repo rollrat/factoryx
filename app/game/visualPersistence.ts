@@ -5,6 +5,8 @@ import { DataDrivenWorld, type WorldSnapshot } from "./sim/world.ts";
 import { CampaignWorldRuntime, type CampaignWorldSnapshot } from "./sim/campaignWorld.ts";
 import { WorldProductionSimulation, type WorldProductionSnapshot } from "./sim/worldProduction.ts";
 import type { PowerNetworkControls } from "./sim/physicalPowerNetwork.ts";
+import { PhysicalPowerRuntime, type PhysicalPowerRuntimeSnapshot } from "./sim/physicalPowerRuntime.ts";
+import { ProjectDockDeliveryCommitter, type ProjectDockDeliveryCommitterSnapshot } from "./sim/projectDockCommitter.ts";
 import type { CameraMode } from "./types.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
@@ -16,7 +18,9 @@ export type FactoryRuntimeSnapshot = Readonly<{
   campaignWorld?: CampaignWorldSnapshot;
   worldProduction?: WorldProductionSnapshot;
   dockFluidTransferCredit?: number;
+  dockCommitter?: ProjectDockDeliveryCommitterSnapshot;
   powerControls?: PowerNetworkControls;
+  physicalPower?: PhysicalPowerRuntimeSnapshot;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -39,20 +43,13 @@ const isVector = (value: unknown): value is readonly [number, number, number] =>
 
 export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntimeSnapshot => {
   if (!isRecord(value)) return false;
-  const keys = Object.keys(value).sort();
-  const expected = [
+  const keys = Object.keys(value);
+  const required = [
     "cameraAngle", "cameraMode", "cameraTarget", "cameraZoom", "credits",
     "firstPersonPitch", "firstPersonYaw", "nextId", "playerPosition", "simulation", "version",
-  ].sort();
-  const expectedWithWorld = [...expected, "world"].sort();
-  const expectedWithCampaign = [...expected, "world", "campaignWorld"].sort();
-  const expectedWithProduction = [...expected, "world", "campaignWorld", "worldProduction"].sort();
-  const expectedWithFluidDelivery = [...expectedWithProduction, "dockFluidTransferCredit"].sort();
-  const expectedWithPowerControls = [...expectedWithFluidDelivery, "powerControls"].sort();
-  const matches = (candidate: readonly string[]) => keys.length === candidate.length
-    && keys.every((key, index) => key === candidate[index]);
-  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign)
-    && !matches(expectedWithProduction) && !matches(expectedWithFluidDelivery) && !matches(expectedWithPowerControls)) return false;
+  ];
+  const optional = ["world", "campaignWorld", "worldProduction", "dockFluidTransferCredit", "dockCommitter", "powerControls", "physicalPower"];
+  if (required.some((key) => !keys.includes(key)) || keys.some((key) => !required.includes(key) && !optional.includes(key))) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -100,6 +97,16 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
       if (!worldSnapshot) return false;
       const world = new DataDrivenWorld({ registry: START_REGISTRY, bounds: worldSnapshot.bounds, snapshot: worldSnapshot });
       new WorldProductionSimulation(world, value.worldProduction as WorldProductionSnapshot);
+      const campaignSnapshot = value.campaignWorld as CampaignWorldSnapshot | undefined;
+      if (value.dockCommitter !== undefined) {
+        if (!campaignSnapshot) return false;
+        const campaign = new CampaignWorldRuntime({ registry: START_REGISTRY, bounds: campaignSnapshot.world.bounds, snapshot: campaignSnapshot });
+        const production = new WorldProductionSimulation(campaign.world, value.worldProduction as WorldProductionSnapshot);
+        new ProjectDockDeliveryCommitter(campaign, production, 60, value.dockCommitter as ProjectDockDeliveryCommitterSnapshot);
+      }
+      if (value.physicalPower !== undefined) {
+        new PhysicalPowerRuntime({ world, snapshot: value.physicalPower as PhysicalPowerRuntimeSnapshot });
+      }
     }
     return true;
   } catch {

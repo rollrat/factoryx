@@ -369,6 +369,12 @@
   .credits { display: none; }
 }
 
+.credit {
+  color: #70ead8;
+  font: 700 8px/1.25 var(--font-geist-mono), monospace;
+  letter-spacing: 0.04em;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .catalog *, .catalog *::before, .catalog *::after { scroll-behavior: auto !important; }
 }

@@ -10,6 +10,9 @@ import { CampaignWorldRuntime } from "../../app/game/sim/campaignWorld.ts";
 import { START_REGISTRY } from "../../app/game/data/index.ts";
 import { CAMPAIGN_START_INVENTORY } from "../../app/game/data/campaign.ts";
 import { WorldProductionSimulation } from "../../app/game/sim/worldProduction.ts";
+import { ProjectDockDeliveryCommitter } from "../../app/game/sim/projectDockCommitter.ts";
+import { PhysicalPowerRuntime } from "../../app/game/sim/physicalPowerRuntime.ts";
+import { inferAdjacentPowerEdges } from "../../app/game/sim/physicalPowerNetwork.ts";
 
 const snapshot = (): FactoryRuntimeSnapshot => ({
   version: 1,
@@ -47,13 +50,25 @@ test("visual runtime save preserves the integrated world, campaign, and power sn
   });
   campaignWorld.stepPower(1);
   const worldProduction = new WorldProductionSimulation(campaignWorld.world);
+  const dockCommitter = new ProjectDockDeliveryCommitter(campaignWorld, worldProduction, 60, {
+    version: 1,
+    fluidTransferCredits: [],
+    unassignedFluidCredit: 0.5,
+  });
+  const physicalPower = new PhysicalPowerRuntime({
+    world: campaignWorld.world,
+    edges: inferAdjacentPowerEdges(campaignWorld.world),
+    controls: { breakers: {}, switchboardOutputs: {} },
+  });
   const integrated = {
     ...original,
     world: campaignWorld.world.snapshot(),
     campaignWorld: campaignWorld.snapshot(),
     worldProduction: worldProduction.snapshot(),
     dockFluidTransferCredit: 0.5,
+    dockCommitter: dockCommitter.snapshot(),
     powerControls: { breakers: {}, switchboardOutputs: {} },
+    physicalPower: physicalPower.snapshot(),
   };
   const decoded = factoryRuntimeSaveCodec.decode(factoryRuntimeSaveCodec.encode(integrated, { nowMs: 20 }));
   assert.equal(decoded.ok, true);

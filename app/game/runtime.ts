@@ -29,13 +29,14 @@ import { applyGridVisualState, removeGridVisualState } from "./models/gridState"
 import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
 import type { DataDrivenWorld } from "./sim/world.ts";
-import { CampaignWorldRuntime, type PowerInstanceOverride } from "./sim/campaignWorld.ts";
-import { ProjectDockFluidCommitter } from "./sim/campaignProduction.ts";
+import { CampaignWorldRuntime } from "./sim/campaignWorld.ts";
+import { ProjectDockDeliveryCommitter } from "./sim/projectDockCommitter.ts";
 import {
-  buildPhysicalPowerTopology,
   inferAdjacentPowerEdges,
   type PhysicalPowerTopology,
+  type PowerInstanceRuntime,
 } from "./sim/physicalPowerNetwork.ts";
+import { PhysicalPowerRuntime } from "./sim/physicalPowerRuntime.ts";
 import type { LoadPriority } from "./sim/powerGrid.ts";
 import { WorldProductionSimulation } from "./sim/worldProduction.ts";
 import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
@@ -141,7 +142,8 @@ export class FactoryRuntime {
   private readonly world: DataDrivenWorld;
   private readonly campaignWorld: CampaignWorldRuntime;
   private readonly worldProduction: WorldProductionSimulation;
-  private readonly dockFluidCommitter: ProjectDockFluidCommitter;
+  private readonly dockCommitter: ProjectDockDeliveryCommitter;
+  private readonly physicalPower: PhysicalPowerRuntime;
   private powerTopology: PhysicalPowerTopology;
   private collisionIndex: WorldCollisionIndex;
   private readonly powerControls: MutablePowerControls;
@@ -253,18 +255,28 @@ export class FactoryRuntime {
     this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
     if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
     this.worldProduction = new WorldProductionSimulation(this.world, restored?.worldProduction);
-    this.dockFluidCommitter = new ProjectDockFluidCommitter(
+    this.dockCommitter = new ProjectDockDeliveryCommitter(
       this.campaignWorld,
       this.worldProduction,
       60,
-      restored?.dockFluidTransferCredit ?? 0,
+      restored?.dockCommitter ?? {
+        version: 1,
+        fluidTransferCredits: [],
+        unassignedFluidCredit: restored?.dockFluidTransferCredit ?? 0,
+      },
     );
     this.powerControls = {
       breakers: { ...(restored?.powerControls?.breakers ?? {}) },
       switchboardOutputs: Object.fromEntries(Object.entries(restored?.powerControls?.switchboardOutputs ?? {})
         .map(([id, outputs]) => [id, { ...outputs }])),
     };
-    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world), this.powerControls);
+    this.physicalPower = new PhysicalPowerRuntime({
+      world: this.world,
+      edges: inferAdjacentPowerEdges(this.world),
+      controls: this.powerControls,
+      ...(restored?.physicalPower ? { snapshot: restored.physicalPower } : {}),
+    });
+    this.powerTopology = this.physicalPower.topology();
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -400,7 +412,7 @@ export class FactoryRuntime {
   }
 
   getPowerControlSnapshot(): RuntimePowerControlSnapshot {
-    const power = this.campaignWorld.powerResult();
+    const grids = this.physicalPower.powerResults();
     const breakers = this.world.allInstances()
       .filter(({ definitionId }) => definitionId === "power_breaker")
       .map((instance) => ({
@@ -419,12 +431,12 @@ export class FactoryRuntime {
         ])) as Record<LoadPriority, boolean>,
       }));
     return {
-      capacityMW: power?.capacityMW ?? 0,
-      dispatchableMW: power?.dispatchableMW ?? 0,
-      requestedMW: power?.requestedMW ?? 0,
-      servedMW: power?.servedMW ?? 0,
-      storedMWh: power?.storedMWh ?? 0,
-      mainBreakerTripped: power?.mainBreakerTripped ?? false,
+      capacityMW: grids.reduce((sum, grid) => sum + grid.capacityMW, 0),
+      dispatchableMW: grids.reduce((sum, grid) => sum + grid.dispatchableMW, 0),
+      requestedMW: grids.reduce((sum, grid) => sum + grid.requestedMW, 0),
+      servedMW: grids.reduce((sum, grid) => sum + grid.servedMW, 0),
+      storedMWh: grids.reduce((sum, grid) => sum + grid.storedMWh, 0),
+      mainBreakerTripped: grids.some((grid) => grid.mainBreakerTripped),
       zones: this.powerTopology.zones.map((zone) => ({
         id: zone.id,
         connected: zone.generatorIds.length > 0 && zone.consumerIds.length > 0,
@@ -442,6 +454,8 @@ export class FactoryRuntime {
     if (instance?.definitionId !== "power_breaker") return false;
     const next = (this.powerControls.breakers[instanceId] ?? "closed") === "closed" ? "open" : "closed";
     this.powerControls.breakers[instanceId] = next;
+    this.physicalPower.setBreakerState(instanceId, next);
+    this.powerTopology = this.physicalPower.topology();
     this.syncConnectionModels();
     this.callbacks.onToast(`${START_REGISTRY.buildings.get(instance.definitionId)?.name ?? "차단기"} · ${next === "closed" ? "투입" : "차단"}`);
     return true;
@@ -453,14 +467,18 @@ export class FactoryRuntime {
     const outputs = this.powerControls.switchboardOutputs[instanceId] ?? {};
     outputs[priority] = !(outputs[priority] ?? true);
     this.powerControls.switchboardOutputs[instanceId] = outputs;
+    this.physicalPower.setSwitchboardOutput(instanceId, priority, outputs[priority]!);
+    this.powerTopology = this.physicalPower.topology();
     this.syncConnectionModels();
     this.callbacks.onToast(`P${priority} 구역 · ${outputs[priority] ? "연결" : "차단"}`);
     return true;
   }
 
   sequentialPowerRestart() {
-    this.campaignWorld.powerGrid.sequentialRestart();
     Object.keys(this.powerControls.breakers).forEach((id) => { this.powerControls.breakers[id] = "closed"; });
+    Object.keys(this.powerControls.breakers).forEach((id) => this.physicalPower.setBreakerState(id, "closed"));
+    this.physicalPower.powerResults().filter(({ mainBreakerTripped }) => mainBreakerTripped)
+      .forEach(({ gridId }) => this.physicalPower.requestSequentialRestart(gridId));
     this.callbacks.onToast("전력망 순차 재기동을 시작했습니다");
   }
 
@@ -689,7 +707,9 @@ export class FactoryRuntime {
       world: this.world.snapshot(),
       campaignWorld: this.campaignWorld.snapshot(),
       worldProduction,
-      dockFluidTransferCredit: this.dockFluidCommitter.snapshot(),
+      dockFluidTransferCredit: this.dockCommitter.legacyFluidCredit(),
+      dockCommitter: this.dockCommitter.snapshot(),
+      physicalPower: this.physicalPower.snapshot(),
       powerControls: {
         breakers: { ...this.powerControls.breakers },
         switchboardOutputs: Object.fromEntries(Object.entries(this.powerControls.switchboardOutputs)
@@ -739,6 +759,7 @@ export class FactoryRuntime {
     this.callbacks.onConstructionState({
       unlockedIds: snapshot.unlockedIds,
       inventoryByItemId: Object.fromEntries(snapshot.constructionInventory.map(({ itemId, amount }) => [itemId, amount])),
+      constructionCredits: this.campaignWorld.constructionCreditBalances(),
     });
   }
 
@@ -772,7 +793,8 @@ export class FactoryRuntime {
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
-    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world), this.powerControls);
+    this.physicalPower.setEdges(inferAdjacentPowerEdges(this.world));
+    this.powerTopology = this.physicalPower.topology();
     this.powerTopology.cables.forEach((cable) => {
       const key = `power:${cable.id}`;
       active.add(key);
@@ -940,7 +962,7 @@ export class FactoryRuntime {
       this.scene.add(this.ghost);
     }
     this.ghostValid = this.selectedBuildingId
-      ? this.world.previewPlace({
+      ? this.campaignWorld.previewConstruction({
         buildingId: this.selectedBuildingId,
         position: { x: this.currentCell.x, z: this.currentCell.z },
         rotation: this.rotation as 0 | 1 | 2 | 3,
@@ -1107,11 +1129,17 @@ export class FactoryRuntime {
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)
       : null;
     const worldPlacement = this.selectedBuildingId
-      ? this.worldHistory.place(this.world, {
-        buildingId: this.selectedBuildingId,
-        position: { x: this.currentCell.x, z: this.currentCell.z },
-        rotation: this.rotation as 0 | 1 | 2 | 3,
-      })
+      ? this.worldHistory.execute(
+        this.world,
+        "place",
+        `건설 · ${this.selectedBuildingId}`,
+        () => this.campaignWorld.placeConstruction({
+          buildingId: this.selectedBuildingId!,
+          position: { x: this.currentCell.x, z: this.currentCell.z },
+          rotation: this.rotation as 0 | 1 | 2 | 3,
+        }),
+        this.constructionCreditLedger(),
+      )
       : null;
     if (worldPlacement && !worldPlacement.ok) {
       const messages = {
@@ -1165,11 +1193,17 @@ export class FactoryRuntime {
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)
       : null;
     const worldPlacement = this.selectedBuildingId
-      ? this.worldHistory.placeBatch(this.world, this.beltPreviewCells.map((cell) => ({
-        buildingId: this.selectedBuildingId!,
-        position: { x: cell.x, z: cell.z },
-        rotation: cell.rotation as 0 | 1 | 2 | 3,
-      })))
+      ? this.worldHistory.execute(
+        this.world,
+        "place_batch",
+        `경로 건설 · ${this.beltPreviewCells.length}칸`,
+        () => this.campaignWorld.placeConstructionBatch(this.beltPreviewCells.map((cell) => ({
+          buildingId: this.selectedBuildingId!,
+          position: { x: cell.x, z: cell.z },
+          rotation: cell.rotation as 0 | 1 | 2 | 3,
+        }))),
+        this.constructionCreditLedger(),
+      )
       : null;
     if (worldPlacement && !worldPlacement.ok) {
       this.callbacks.onToast(worldPlacement.reason === "insufficient_materials"
@@ -1239,6 +1273,15 @@ export class FactoryRuntime {
     }
     this.reconcileStructuresFromWorld();
     this.callbacks.onToast(`다시 실행 · ${result.command.label}`);
+  }
+
+  private constructionCreditLedger() {
+    return {
+      balances: () => this.campaignWorld.constructionCreditBalances(),
+      applyDeltas: (deltas: readonly Readonly<{ id: string; amount: number }>[]) => (
+        this.campaignWorld.applyConstructionCreditDeltas(deltas)
+      ),
+    };
   }
 
   private reconcileStructuresFromWorld() {
@@ -1361,13 +1404,19 @@ export class FactoryRuntime {
       }
       const structure = this.simulation.structures.get(id);
       if (structure?.worldInstanceId) {
+        const constructionInstance = this.world.instance(structure.worldInstanceId);
         // Synchronize live buffers/WIP before the command captures its undo boundary.
         this.worldProduction.snapshot();
         const demolition = this.worldHistory.execute(
           this.world,
           "demolish",
           `철거 · ${structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId)?.name : structure.worldInstanceId}`,
-          () => this.worldProduction.demolish(structure.worldInstanceId!),
+          () => {
+            const result = this.worldProduction.demolish(structure.worldInstanceId!);
+            if (result.ok && constructionInstance) this.campaignWorld.refundConstructionCreditFor(constructionInstance);
+            return result;
+          },
+          this.constructionCreditLedger(),
         );
         if (!demolition.ok) {
           this.callbacks.onToast("이 설비는 철거할 수 없습니다");
@@ -1758,12 +1807,12 @@ export class FactoryRuntime {
   }
 
   private publishPower() {
-    const campaignPower = this.campaignWorld.powerResult();
-    const power = campaignPower ? {
-      supplyMW: campaignPower.capacityMW,
-      demandMW: campaignPower.requestedMW,
-      servedMW: campaignPower.servedMW,
-      overloaded: campaignPower.satisfaction < 0.999 || campaignPower.mainBreakerTripped,
+    const grids = this.physicalPower.powerResults();
+    const power = grids.length > 0 ? {
+      supplyMW: grids.reduce((sum, grid) => sum + grid.capacityMW, 0),
+      demandMW: grids.reduce((sum, grid) => sum + grid.requestedMW, 0),
+      servedMW: grids.reduce((sum, grid) => sum + grid.servedMW, 0),
+      overloaded: grids.some((grid) => grid.satisfaction < 0.999 || grid.mainBreakerTripped),
     } : this.simulation.getPowerGrid();
     const signature = `${power.supplyMW}:${power.demandMW}:${power.servedMW}:${power.overloaded}`;
     if (signature === this.lastPowerSignature) return;
@@ -1772,38 +1821,48 @@ export class FactoryRuntime {
   }
 
   private stepCampaignPower(delta: number) {
-    const overrides: Record<string, PowerInstanceOverride> = {};
+    const overrides: Record<string, PowerInstanceRuntime> = {};
+    const activePoweredStage = [...START_REGISTRY.projectStages.values()].find((stage) => (
+      stage.dockPowerMode === "powered"
+      && this.campaignWorld.campaign.isUnlocked(stage.id)
+      && this.campaignWorld.campaign.progress(stage.id)?.completed === false
+    ));
     this.simulation.structures.forEach((structure) => {
       if (!structure.worldInstanceId) return;
       const state = this.worldProduction.nodeState(structure.worldInstanceId);
       const definition = structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId) : null;
-      const fuelItemId = definition?.generatorPolicy?.fuelItemId;
       const powerNode = this.powerTopology.nodes.find(({ instanceId }) => instanceId === structure.worldInstanceId);
-      const powerZone = powerNode
-        ? this.powerTopology.zones.find(({ id }) => id === powerNode.gridId)
-        : null;
-      const connected = Boolean(powerNode?.connectionState === "connected" && powerZone && powerZone.generatorIds.length > 0);
       overrides[structure.worldInstanceId] = {
-        connected,
-        active: state?.runtimeState === "working" || (isTransportType(structure.type) && state?.runtimeState !== "disconnected"),
+        active: definition?.id === "project_dock"
+          ? activePoweredStage !== undefined
+          : state?.runtimeState === "working" || (isTransportType(structure.type) && state?.runtimeState !== "disconnected"),
         ...(powerNode?.priority ? { priority: powerNode.priority } : {}),
-        ...(fuelItemId ? {
-          fuelAvailable: Boolean(state && [...state.inputs, ...state.outputs]
-            .some(({ itemId, amount }) => itemId === fuelItemId && amount > 0)),
-        } : {}),
       };
     });
-    this.powerTopology.nodes.forEach((powerNode) => {
-      const powerZone = this.powerTopology.zones.find(({ id }) => id === powerNode.gridId);
-      overrides[powerNode.instanceId] = {
-        ...overrides[powerNode.instanceId],
-        connected: Boolean(powerNode.connectionState === "connected" && powerZone && powerZone.generatorIds.length > 0),
-        ...(powerNode.priority ? { priority: powerNode.priority } : {}),
-      };
+    const projectDock = this.world.allInstances().find(({ definitionId }) => definitionId === "project_dock");
+    if (projectDock) overrides[projectDock.id] = { ...overrides[projectDock.id], active: activePoweredStage !== undefined };
+    this.powerTopology.nodes.filter(({ roles }) => roles.includes("generator")).forEach(({ instanceId }) => {
+      const fuel = this.physicalPower.generatorFuelState(instanceId);
+      if (!fuel || fuel.buffered >= fuel.capacity) return;
+      const state = this.worldProduction.nodeState(instanceId);
+      const input = state?.inputs.find(({ itemId, amount }) => itemId === fuel.fuelItemId && amount > 0);
+      if (!input) return;
+      const amount = Math.min(input.amount, fuel.capacity - fuel.buffered);
+      if (amount > 0 && this.worldProduction.withdraw(instanceId, input.portId, "input", fuel.fuelItemId, amount)) {
+        this.physicalPower.supplyGeneratorFuel(instanceId, fuel.fuelItemId, amount);
+      }
     });
-    const result = this.campaignWorld.stepPower(delta, overrides);
-    this.worldProduction.applyPowerResult(result);
-    const poweredByWorldId = new Map(result.consumers.map((consumer) => [consumer.id, consumer.satisfaction >= 0.999]));
+    const result = this.physicalPower.step(delta, overrides);
+    this.powerTopology = result.topology;
+    result.visualStates.forEach(({ instanceId, satisfaction }) => {
+      if (this.worldProduction.nodeState(instanceId)) this.worldProduction.setPowerSatisfaction(instanceId, satisfaction);
+    });
+    const dockSupplied = projectDock
+      ? result.grids.flatMap(({ consumers }) => consumers).find(({ id }) => id === projectDock.id)?.servedMW ?? 0
+      : 0;
+    this.campaignWorld.setDockSuppliedPowerMW(dockSupplied);
+    const poweredByWorldId = new Map(result.grids.flatMap(({ consumers }) => consumers)
+      .map((consumer) => [consumer.id, consumer.satisfaction >= 0.999] as const));
     this.simulation.setExternalPowerAvailability(new Map(
       [...this.simulation.structures.values()].map((structure) => [
         structure.id,
@@ -1904,8 +1963,8 @@ export class FactoryRuntime {
     this.simulation.update(delta);
     this.worldProduction.advance(delta, {
       afterTick: (_tick, fixedDelta) => {
-        const accepted = this.dockFluidCommitter.advanceFixedTick(fixedDelta);
-        if (accepted > 0) {
+        const accepted = this.dockCommitter.advanceFixedTick(fixedDelta);
+        if (accepted.acceptedAmount > 0) {
           this.publishConstructionState();
           this.publishProject();
         }

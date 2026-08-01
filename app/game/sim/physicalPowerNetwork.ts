@@ -73,8 +73,10 @@ export type PhysicalPowerTopology = Readonly<{
 export type PowerInstanceRuntime = Readonly<{
   active?: boolean;
   requestedMW?: number;
+  priority?: LoadPriority;
   enabled?: boolean;
   fuelAvailable?: boolean;
+  dispatchableMW?: number;
   storedMWh?: number;
 }>;
 
@@ -441,6 +443,7 @@ export const createPowerGridInputs = (
       nameplateMW: definition.generatorPolicy.capacityMW,
       minimumLoadMW: definition.generatorPolicy.capacityMW * definition.generatorPolicy.minimumLoadRatio,
       dispatchPriority: definition.generatorPolicy.dispatchPriority,
+      dispatchableMW: override.dispatchableMW,
       connected,
       enabled: override.enabled,
       requiresFuel: definition.generatorPolicy.fuelItemId !== undefined,
@@ -452,7 +455,7 @@ export const createPowerGridInputs = (
       activeMW: definition.activeMW ?? 0,
       idleMW: definition.idleMW ?? 0,
       requestedMW: override.requestedMW,
-      priority: node.priority,
+      priority: override.priority ?? node.priority,
       connected,
     });
     if (definition.powerStoragePolicy) batteries.push({

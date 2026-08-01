@@ -114,6 +114,7 @@ export default function FactoryGame({
   const [constructionState, setConstructionState] = useState(() => ({
     unlockedIds,
     inventoryByItemId: inventoryByItemId ?? {},
+    constructionCredits: {} as Readonly<Record<string, number>>,
   }));
   const [campaignSnapshot, setCampaignSnapshot] = useState<CampaignSnapshot | null>(null);
   const [dockSuppliedPowerMW, setDockSuppliedPowerMW] = useState(0);
@@ -296,6 +297,7 @@ export default function FactoryGame({
         open={catalogOpen}
         unlockedIds={constructionState.unlockedIds}
         inventoryByItemId={constructionState.inventoryByItemId}
+        constructionCredits={constructionState.constructionCredits}
         credits={credits}
         selectedBuildingId={catalogBuildingId}
         onSelect={chooseCatalogBuilding}
