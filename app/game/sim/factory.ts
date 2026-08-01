@@ -34,12 +34,14 @@ export type FactoryTransferContext = Readonly<{
 }>;
 
 export type FactoryTransfer = (context: FactoryTransferContext) => number;
+export type FactoryMachineSpeed = (machineId: string, tick: number) => number;
 
 export type FactoryConfig = Readonly<{
   machines: readonly FactoryMachineConfig[];
   storages: readonly FactoryStorageConfig[];
   links: readonly FactoryLink[];
   transfer?: FactoryTransfer;
+  machineSpeed?: FactoryMachineSpeed;
 }>;
 
 export type FactoryNodeSnapshot = Readonly<{
@@ -113,6 +115,7 @@ export class HeadlessFactory {
   private readonly storageAcceptedItems = new Map<string, ItemId | undefined>();
   private readonly links: readonly FactoryLink[];
   private readonly transfer: FactoryTransfer;
+  private readonly machineSpeed: FactoryMachineSpeed;
   private paused = false;
 
   constructor(config: FactoryConfig, snapshot?: FactorySnapshot) {
@@ -165,6 +168,7 @@ export class HeadlessFactory {
 
     this.links = [...config.links];
     this.transfer = config.transfer ?? transferDirectly;
+    this.machineSpeed = config.machineSpeed ?? (() => 1);
     this.validateLinks();
     this.clock = new FixedStepClock(SIMULATION_TICK_SECONDS, snapshot?.clock);
     this.paused = snapshot?.paused ?? false;
@@ -215,9 +219,14 @@ export class HeadlessFactory {
       }
     }
     for (const machine of this.machines.values()) {
+      const speed = this.machineSpeed(machine.id, tick);
+      if (!Number.isFinite(speed) || speed < 0 || speed > 1) {
+        throw new RangeError(`machine speed for ${machine.id} must be between 0 and 1`);
+      }
       machine.process.step(machine.inputs, machine.outputs, {
         paused: this.paused,
         deltaSeconds,
+        speed,
       });
     }
   }

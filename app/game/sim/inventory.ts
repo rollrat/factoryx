@@ -162,6 +162,20 @@ export const produceOutputsAtomically = (
   outputs: readonly RecipeAmount[],
 ): InventoryTransactionResult => {
   const aggregated = aggregateAmounts(outputs);
+  const preflight = canProduceOutputsAtomically(inventories, outputs);
+  if (!preflight.ok) return preflight;
+  for (const output of aggregated) {
+    inventories.get(output.portId)!.deposit(output.itemId, output.amount);
+  }
+  return { ok: true };
+};
+
+/** Checks every output without mutating any buffer. */
+export const canProduceOutputsAtomically = (
+  inventories: PortInventoryMap,
+  outputs: readonly RecipeAmount[],
+): InventoryTransactionResult => {
+  const aggregated = aggregateAmounts(outputs);
   for (const output of aggregated) {
     const inventory = inventories.get(output.portId);
     if (!inventory) return { ok: false, reason: "missing_port", portId: output.portId };
@@ -171,9 +185,6 @@ export const produceOutputsAtomically = (
     if (!inventory.canDeposit(output.itemId, output.amount)) {
       return { ok: false, reason: "insufficient_capacity", portId: output.portId };
     }
-  }
-  for (const output of aggregated) {
-    inventories.get(output.portId)!.deposit(output.itemId, output.amount);
   }
   return { ok: true };
 };

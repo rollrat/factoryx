@@ -78,14 +78,14 @@ test("pause and snapshot restore preserve the same deterministic flow", () => {
   assert.equal(restored.inventory({ nodeId: "storage", portId: "solid_in" }).amount, 2);
 });
 
-test("a full storage propagates blocked state without losing completed WIP", () => {
+test("a full storage propagates backpressure before another cycle consumes input", () => {
   const factory = new HeadlessFactory(createConfig());
   factory.advance(25);
 
   assert.equal(factory.inventory({ nodeId: "storage", portId: "solid_in" }).amount, 2);
   const former = factory.machine("former");
   assert.equal(former.runtimeState, "blocked");
-  assert.equal(former.progress, 1);
-  assert.equal(former.workInProgress?.completed, true);
+  assert.equal(former.progress, 0);
+  assert.equal(former.workInProgress, null);
   assert.equal(former.completedCycles, 3);
 });

@@ -61,7 +61,7 @@ test("process snapshot preserves consumed inputs as WIP across restore", () => {
   assert.equal(output.itemId, "plate");
 });
 
-test("completed WIP blocks without loss and resumes once output has capacity", () => {
+test("a full output prevents cycle start and preserves every input", () => {
   const input = new PortInventory("input", 4, { itemId: "ore", amount: 2 });
   const output = new PortInventory("output", 1, { itemId: "plate", amount: 1 });
   const process = new RecipeProcess(recipe);
@@ -70,16 +70,16 @@ test("completed WIP blocks without loss and resumes once output has capacity", (
 
   const blocked = process.step(inputs, outputs, { deltaSeconds: 1 });
   assert.equal(blocked.runtimeState, "blocked");
-  assert.equal(blocked.workInProgress?.completed, true);
+  assert.equal(blocked.workInProgress, null);
   assert.equal(blocked.completedCycles, 0);
-  assert.equal(input.amount, 0);
+  assert.equal(input.amount, 2);
   assert.equal(output.amount, 1);
 
   assert.equal(output.withdraw("plate", 1), true);
   const resumed = process.step(inputs, outputs, { deltaSeconds: 1 / 20 });
-  assert.equal(resumed.runtimeState, "idle");
-  assert.equal(resumed.workInProgress, null);
-  assert.equal(resumed.completedCycles, 1);
-  assert.equal(output.amount, 1);
-  assert.equal(output.itemId, "plate");
+  assert.equal(resumed.runtimeState, "working");
+  assert.notEqual(resumed.workInProgress, null);
+  assert.equal(resumed.completedCycles, 0);
+  assert.equal(input.amount, 0);
+  assert.equal(output.amount, 0);
 });

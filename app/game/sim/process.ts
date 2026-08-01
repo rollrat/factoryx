@@ -2,6 +2,7 @@ import type { ItemId, RecipeDefinition, RecipeId } from "../domain/types.ts";
 import { SIMULATION_TICK_SECONDS, type MachineRuntimeState } from "./contracts.ts";
 import {
   consumeInputsAtomically,
+  canProduceOutputsAtomically,
   produceOutputsAtomically,
   type InventoryTransactionResult,
   type PortInventoryMap,
@@ -79,6 +80,11 @@ export class RecipeProcess {
     }
 
     if (!this.wip) {
+      const outputSpace = canProduceOutputsAtomically(outputs, this.recipe.outputs);
+      if (!outputSpace.ok) {
+        this.state = outputSpace.reason === "missing_port" ? "disconnected" : "blocked";
+        return this.snapshot();
+      }
       const start = consumeInputsAtomically(inputs, this.recipe.inputs);
       if (!start.ok) {
         this.state = start.reason === "missing_port" ? "disconnected" : "starved";
