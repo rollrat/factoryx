@@ -72,6 +72,15 @@ const defaultBuildingForLegacyType = (type: BuildType): BuildingId => ({
   storage: "small_storage",
 })[type];
 
+const PROJECT_STAGE_NAMES: Readonly<Record<string, string>> = {
+  phase_1_settlement_package: "기초 정착 패키지",
+  phase_2_industrial_power_node: "산업 전력 노드",
+  phase_3_automation_core: "자동화 코어",
+  phase_4_chemistry_stabilization: "화학 안정화",
+  phase_4_thermal_management_verification: "열관리 검증",
+  phase_4_colony_seed: "AX-17 개척 시드",
+};
+
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly powerCoreGroup: THREE.Group;
@@ -174,7 +183,6 @@ export class FactoryRuntime {
     this.saveStorage = createFactoryRuntimeSaveStorage(window.localStorage);
     const loaded = this.saveStorage.load();
     const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
-    this.simulation = new FactorySimulation(24, restored?.simulation);
     this.campaignWorld = new CampaignWorldRuntime({
       registry: START_REGISTRY,
       bounds: { minX: -12, maxX: 12, minZ: -12, maxZ: 12 },
@@ -184,6 +192,7 @@ export class FactoryRuntime {
         : restored?.world ? { worldSnapshot: restored.world } : {}),
     });
     this.world = this.campaignWorld.world;
+    this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
     if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
     if (restored) {
       this.credits = restored.credits;
@@ -1288,17 +1297,17 @@ export class FactoryRuntime {
     };
     animateFieldPowerCoreModel(this.powerCoreGroup, powerState);
     animateDistributionPoleModel(this.powerPoleGroup, powerState);
-    const project = this.simulation.getProjectProgress();
-    const delivered = Object.fromEntries(project.deliveries.map((delivery) => [delivery.itemId, delivery.delivered]));
+    const project = this.activeProjectProgress();
+    const delivered = Object.fromEntries((project?.deliveries ?? []).map((delivery) => [delivery.itemId, delivery.delivered]));
     animateProjectDockModel(this.projectDockGroup, {
       time: this.elapsed,
-      progress: project.totalProgress,
+      progress: project?.totalProgress ?? 0,
       deliveryCounts: {
         ironPlate: delivered.iron_plate ?? 0,
         constructionBlock: delivered.construction_block ?? 0,
         fastenerPack: delivered.fastener_pack ?? 0,
       },
-      completed: project.completed,
+      completed: project?.completed ?? false,
     });
   }
 
@@ -1362,12 +1371,13 @@ export class FactoryRuntime {
   }
 
   private publishProject() {
-    const progress = this.simulation.getProjectProgress();
-    const signature = progress.deliveries.map(({ delivered }) => delivered).join(":");
+    const progress = this.activeProjectProgress();
+    if (!progress) return;
+    const signature = `${progress.stageId}:${progress.deliveries.map(({ delivered }) => delivered).join(":")}`;
     if (signature === this.lastProjectSignature) return;
     this.lastProjectSignature = signature;
     this.callbacks.onProject({
-      stageName: "기초 정착 패키지",
+      stageName: PROJECT_STAGE_NAMES[progress.stageId] ?? progress.stageId,
       delivered: progress.deliveredTotal,
       total: progress.requiredTotal,
       completed: progress.completed,
@@ -1378,6 +1388,24 @@ export class FactoryRuntime {
         total: delivery.required,
       })),
     });
+  }
+
+  private activeProjectProgress() {
+    const progress = this.campaignWorld.campaign.allProgress();
+    return progress.find((stage) => !stage.completed && this.campaignWorld.campaign.isUnlocked(stage.stageId))
+      ?? progress.at(-1)
+      ?? null;
+  }
+
+  private deliverToActiveProject(request: Readonly<{ portId: string; itemId: string; amount: number }>) {
+    const active = this.activeProjectProgress();
+    if (!active || active.completed) return false;
+    const result = this.campaignWorld.deliverProject(active.stageId, request);
+    if (result.accepted) {
+      this.publishConstructionState();
+      this.publishProject();
+    }
+    return result.accepted;
   }
 
   private animate = (time: number) => {

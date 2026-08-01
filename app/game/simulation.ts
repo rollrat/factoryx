@@ -22,11 +22,19 @@ const PROJECT_DOCK_INPUTS = new Map([
   [cellKey(5, 7), "phase1_plate_in"],
   [cellKey(5, 8), "phase1_block_in"],
   [cellKey(5, 9), "phase1_fastener_in"],
+  [cellKey(5, 10), "reserved_solid_in_1"],
+  [cellKey(5, 11), "reserved_solid_in_2"],
 ] as const);
 const isProjectDockCell = (cell: string) => {
   const [x, z] = cell.split(",").map(Number);
   return x >= 6 && x <= 11 && z >= 6 && z <= 11;
 };
+
+export type ProjectDeliveryHandler = (request: Readonly<{
+  portId: string;
+  itemId: ItemType;
+  amount: number;
+}>) => boolean;
 
 const aggregateItems = (items: readonly ItemType[]) => {
   const counts = new Map<ItemType, number>();
@@ -76,10 +84,12 @@ export class FactorySimulation {
   private nextItemId = 1;
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
   private readonly powerSupplyMW: number;
+  private readonly projectDeliveryHandler?: ProjectDeliveryHandler;
   private externalPoweredByStructureId: ReadonlyMap<number, boolean> | null = null;
 
-  constructor(powerSupplyMW = 24, snapshot?: FactorySimulationSnapshot) {
+  constructor(powerSupplyMW = 24, snapshot?: FactorySimulationSnapshot, projectDeliveryHandler?: ProjectDeliveryHandler) {
     this.powerSupplyMW = powerSupplyMW;
+    this.projectDeliveryHandler = projectDeliveryHandler;
     this.clock = new FixedStepClock(undefined, snapshot?.clock);
     this.project = createPhaseOneProject(snapshot?.project);
     if (snapshot) this.restore(snapshot);
@@ -445,8 +455,10 @@ export class FactorySimulation {
       const direction = directionForRotation(belt.rotation);
       const projectPortId = PROJECT_DOCK_INPUTS.get(cellKey(belt.x, belt.z));
       if (projectPortId && direction.x === 1 && direction.z === 0) {
-        const delivery = this.project.deliver({ portId: projectPortId, itemId: item.type, amount: 1 });
-        if (delivery.accepted) {
+        const accepted = this.projectDeliveryHandler
+          ? this.projectDeliveryHandler({ portId: projectPortId, itemId: item.type, amount: 1 })
+          : this.project.deliver({ portId: projectPortId, itemId: item.type, amount: 1 }).accepted;
+        if (accepted) {
           this.beltItems.delete(beltId);
           return;
         }
