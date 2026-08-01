@@ -1,0 +1,163 @@
+import type { BuildingDefinition, ItemId, PortDefinition } from "../domain/types.ts";
+
+const ALL_START_SOLIDS: readonly ItemId[] = [
+  "iron_ore", "copper_ore", "limestone", "iron_ingot", "copper_ingot",
+  "iron_plate", "iron_rod", "construction_block", "fastener_pack",
+];
+
+const solidPort = (
+  id: string,
+  direction: "input" | "output" | "bidirectional",
+  x: number,
+  z: number,
+  facingX: number,
+  acceptedItemIds: readonly ItemId[],
+  deliverySlotId?: string,
+): PortDefinition => ({
+  id,
+  direction,
+  medium: "solid",
+  connectorProfile: "belt_standard",
+  connectionCell: { x, z },
+  localPosition: { x: facingX < 0 ? -1 : 1, y: 0.36, z: z - 0.5 },
+  localFacing: { x: facingX, z: 0 },
+  bufferSlots: 2,
+  acceptedItemIds,
+  ...(deliverySlotId ? { deliverySlotId } : {}),
+});
+
+const input = (accepted: readonly ItemId[]) => solidPort("solid_in", "input", -1, 0, -1, accepted);
+const output = (accepted: readonly ItemId[]) => solidPort("solid_out", "output", 2, 0, 1, accepted);
+const ROTATIONS = [0, 1, 2, 3] as const;
+
+export const START_BUILDINGS = [
+  {
+    id: "vein_miner",
+    name: "광맥 채굴기",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 2, z: 2 },
+    allowedRotations: ROTATIONS,
+    ports: [output(["iron_ore", "copper_ore", "limestone"])],
+    recipeIds: ["mine_iron_ore", "mine_copper_ore", "mine_limestone"],
+    buildCost: [
+      { itemId: "iron_plate", amount: 12 },
+      { itemId: "iron_rod", amount: 8 },
+      { itemId: "fastener_pack", amount: 4 },
+    ],
+  },
+  {
+    id: "arc_smelter",
+    name: "아크 제련기",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 2, z: 2 },
+    allowedRotations: ROTATIONS,
+    ports: [input(["iron_ore", "copper_ore"]), output(["iron_ingot", "copper_ingot"])],
+    recipeIds: ["smelt_iron_ingot", "smelt_copper_ingot"],
+    buildCost: [
+      { itemId: "iron_plate", amount: 16 },
+      { itemId: "construction_block", amount: 8 },
+      { itemId: "fastener_pack", amount: 6 },
+    ],
+  },
+  {
+    id: "crusher",
+    name: "파쇄기",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 2, z: 2 },
+    allowedRotations: ROTATIONS,
+    ports: [input(["limestone"]), output(["construction_block"])],
+    recipeIds: ["crush_construction_block"],
+    buildCost: [
+      { itemId: "iron_plate", amount: 12 },
+      { itemId: "iron_rod", amount: 8 },
+      { itemId: "fastener_pack", amount: 4 },
+    ],
+  },
+  {
+    id: "hydraulic_former",
+    name: "유압 성형기",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 2, z: 2 },
+    allowedRotations: ROTATIONS,
+    ports: [input(["iron_ingot", "iron_rod"]), output(["iron_plate", "iron_rod", "fastener_pack"])],
+    recipeIds: ["form_iron_plate", "form_iron_rod", "form_fastener_pack"],
+    buildCost: [
+      { itemId: "iron_plate", amount: 12 },
+      { itemId: "construction_block", amount: 8 },
+      { itemId: "fastener_pack", amount: 6 },
+    ],
+  },
+  {
+    id: "conveyor_mk1",
+    name: "컨베이어 Mk.1",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 1, z: 1 },
+    allowedRotations: ROTATIONS,
+    ports: [
+      solidPort("solid_in", "input", -1, 0, -1, ALL_START_SOLIDS),
+      solidPort("solid_out", "output", 1, 0, 1, ALL_START_SOLIDS),
+    ],
+    recipeIds: [],
+    buildCost: [{ itemId: "iron_plate", amount: 1 }],
+  },
+  {
+    id: "small_storage",
+    name: "소형 저장고",
+    unlockId: "start",
+    placementMode: "buildable",
+    footprint: { x: 2, z: 2 },
+    allowedRotations: ROTATIONS,
+    ports: [input(ALL_START_SOLIDS), output(ALL_START_SOLIDS)],
+    recipeIds: [],
+    buildCost: [
+      { itemId: "iron_plate", amount: 20 },
+      { itemId: "construction_block", amount: 8 },
+      { itemId: "fastener_pack", amount: 8 },
+    ],
+    storageSlots: 4,
+  },
+  {
+    id: "project_dock",
+    name: "개척 프로젝트 도크",
+    unlockId: "start",
+    placementMode: "preplaced_unique",
+    footprint: { x: 6, z: 6 },
+    allowedRotations: [0],
+    ports: [
+      solidPort("phase1_plate_in", "input", -1, 0, -1, ["iron_plate"], "phase1_plate"),
+      solidPort("phase1_block_in", "input", -1, 1, -1, ["construction_block"], "phase1_block"),
+      solidPort("phase1_fastener_in", "input", -1, 2, -1, ["fastener_pack"], "phase1_fastener"),
+      solidPort("reserved_solid_in_1", "input", -1, 3, -1, [], "reserved_1"),
+      solidPort("reserved_solid_in_2", "input", -1, 4, -1, [], "reserved_2"),
+      {
+        id: "fluid_in",
+        direction: "input",
+        medium: "fluid",
+        connectorProfile: "pipe_mk1",
+        connectionCell: { x: 6, z: 4 },
+        localPosition: { x: 3, y: 0.7, z: 1.5 },
+        localFacing: { x: 1, z: 0 },
+        bufferSlots: 0,
+        acceptedItemIds: [],
+      },
+      {
+        id: "power_in",
+        direction: "input",
+        medium: "power",
+        connectorProfile: "power_local",
+        connectionCell: { x: 6, z: 5 },
+        localPosition: { x: 3, y: 0.7, z: 2.5 },
+        localFacing: { x: 1, z: 0 },
+        bufferSlots: 0,
+        acceptedItemIds: [],
+      },
+    ],
+    recipeIds: [],
+    buildCost: [],
+  },
+] as const satisfies readonly BuildingDefinition[];

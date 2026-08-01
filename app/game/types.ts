@@ -82,3 +82,26 @@ export type GameCallbacks = {
   onPointerLock: (locked: boolean) => void;
   onBeltBuildInfo: (info: BeltBuildInfo) => void;
 };
+
+// New data-driven contracts live beside the legacy prototype types so the
+// runtime can migrate one vertical slice at a time without breaking the game.
+export type {
+  BuildingDefinition,
+  BuildingId,
+  DefinitionRegistry,
+  ItemDefinition,
+  ItemId,
+  PortDefinition,
+  PortId,
+  ProjectStageDefinition,
+  RecipeDefinition,
+  RecipeId,
+  UnlockId,
+} from "./domain/types";
+
+export type {
+  MachineRuntimeState,
+  MachineSnapshot,
+  SimulationCommand,
+  SimulationSnapshot,
+} from "./sim/contracts";
