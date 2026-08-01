@@ -13,6 +13,7 @@ type GameHudProps = {
   toastVisible: boolean;
   onToolChange: (tool: Tool) => void;
   onCameraModeChange: () => void;
+  onLineageToggle: () => void;
 };
 
 type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
@@ -62,6 +63,7 @@ export default function GameHud({
   toastVisible,
   onToolChange,
   onCameraModeChange,
+  onLineageToggle,
 }: GameHudProps) {
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
   const objectiveProgress = Math.min(100, (motors / 20) * 100);
@@ -253,6 +255,11 @@ export default function GameHud({
 
       {cameraMode === "firstPerson" ? <div className="crosshair" aria-hidden="true"><i /></div> : null}
       {cameraMode === "firstPerson" && !pointerLocked ? <div className="pointer-lock-tip">클릭하여 시점 제어</div> : null}
+      <button className="lineage-launch-button instrument-panel" onClick={onLineageToggle} aria-label="공장 전체 생산 계보 열기">
+        <span>⌘</span>
+        <strong>생산 계보</strong>
+        <kbd>TAB</kbd>
+      </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>
         <strong>{cameraMode === "firstPerson" ? "건설 시점" : "현장 시점"}</strong>

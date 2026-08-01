@@ -32,5 +32,7 @@ test("server-renders the Factory X game shell", async () => {
   assert.match(html, />A-17</);
   assert.match(html, />목표 01</);
   assert.match(html, /aria-label="건설 도구"/);
+  assert.match(html, /aria-label="공장 전체 생산 계보 열기"/);
+  assert.match(html, />생산 계보</);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });

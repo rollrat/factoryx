@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { COST, STORAGE_CAPACITY, TYPE_NAME, cellKey, directionForRotation, machinePorts } from "./config";
+import { COST, STORAGE_CAPACITY, TYPE_NAME, cellKey, directionForRotation, machinePorts, sameDirection } from "./config";
 import {
   createFactoryMaterials,
   createItemModel,
@@ -11,6 +11,7 @@ import { animateSmelterModel } from "./models/smelter";
 import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
 import { FactorySimulation } from "./simulation";
+import { buildLiveTelemetry } from "./telemetry/live.ts";
 import type {
   BuildType,
   CameraMode,
@@ -151,6 +152,10 @@ export class FactoryRuntime {
     this.renderer.domElement.style.cursor =
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
     this.updateGhost();
+  }
+
+  getLiveTelemetry() {
+    return buildLiveTelemetry(this.simulation);
   }
 
   toggleCameraMode() {

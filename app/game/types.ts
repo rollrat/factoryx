@@ -1,3 +1,5 @@
+import type { MachineRuntimeState } from "./sim/contracts.ts";
+
 export type Tool =
   | "inspect"
   | "belt"

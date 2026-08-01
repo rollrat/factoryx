@@ -868,6 +868,34 @@ kbd {
   pointer-events: auto;
 }
 
+.lineage-launch-button {
+  position: absolute;
+  right: 14px;
+  bottom: 56px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 0;
+  color: #b8c4c3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.lineage-launch-button > span {
+  color: var(--cyan);
+}
+
+.lineage-launch-button strong {
+  font: 700 8px/1 var(--font-geist-mono), monospace;
+}
+
+.lineage-launch-button:hover {
+  border-color: var(--line-strong);
+  background: var(--hud-raised);
+}
+
 .camera-mode-button > span {
   color: var(--amber);
 }
@@ -988,6 +1016,11 @@ kbd {
   .camera-mode-button {
     right: 8px;
     bottom: 72px;
+  }
+
+  .lineage-launch-button {
+    right: 8px;
+    bottom: 112px;
   }
 }
 
