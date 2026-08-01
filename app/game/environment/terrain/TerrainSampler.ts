@@ -1,4 +1,5 @@
 import { BIOMES, BIOME_BY_ID } from "../data/biomes.ts";
+import { CAVE_ZONES } from "../data/caveZones.ts";
 import type { BiomeDefinition, EnvironmentDefinition, SurfaceType, TerrainSample } from "../types.ts";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -54,15 +55,64 @@ export class TerrainSampler {
     return Math.max(Math.abs(x), Math.abs(z)) <= 13.5 ? 0 : this.heightAt(x, z);
   }
 
+  caveHeightAt(x: number, z: number, stratumId: string) {
+    const zone = CAVE_ZONES.find((candidate) => candidate.stratumId === stratumId);
+    if (!zone) return -12;
+    const points = [
+      { x: zone.portals[0].x, y: zone.portals[0].y - 2, z: zone.portals[0].z },
+      ...zone.rooms.map(({ center }) => center),
+      { x: zone.portals[1].x, y: zone.portals[1].y - 2, z: zone.portals[1].z },
+    ];
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestHeight = zone.rooms[0].center.y;
+    for (let index = 1; index < points.length; index += 1) {
+      const from = points[index - 1];
+      const to = points[index];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const lengthSq = dx * dx + dz * dz;
+      const t = lengthSq === 0 ? 0 : clamp01(((x - from.x) * dx + (z - from.z) * dz) / lengthSq);
+      const projectedX = from.x + dx * t;
+      const projectedZ = from.z + dz * t;
+      const distance = Math.hypot(x - projectedX, z - projectedZ);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestHeight = from.y + (to.y - from.y) * t;
+      }
+    }
+    return bestHeight;
+  }
+
+  isCaveFloorAt(x: number, z: number, stratumId: string) {
+    const zone = CAVE_ZONES.find((candidate) => candidate.stratumId === stratumId);
+    if (!zone) return false;
+    if (zone.rooms.some((room) => Math.hypot(x - room.center.x, z - room.center.z) <= room.radius * 0.82)) return true;
+    const points = [
+      { x: zone.portals[0].x, z: zone.portals[0].z },
+      ...zone.rooms.map(({ center }) => ({ x: center.x, z: center.z })),
+      { x: zone.portals[1].x, z: zone.portals[1].z },
+    ];
+    return points.slice(1).some((to, index) => {
+      const from = points[index];
+      const dx = to.x - from.x;
+      const dz = to.z - from.z;
+      const lengthSq = dx * dx + dz * dz;
+      const t = lengthSq === 0 ? 0 : clamp01(((x - from.x) * dx + (z - from.z) * dz) / lengthSq);
+      return Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t)) <= 3;
+    });
+  }
+
   sample(x: number, z: number, stratumId: string = "surface"): TerrainSample {
     if (stratumId !== "surface") {
+      const height = this.caveHeightAt(x, z, stratumId);
+      const inside = this.isCaveFloorAt(x, z, stratumId);
       return {
-        height: -12,
-        normal: { x: 0, y: 1, z: 0 },
-        slopeDegrees: 0,
+        height,
+        normal: inside ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 },
+        slopeDegrees: inside ? 0 : 90,
         biomeId: "thermal_rift",
-        surface: "cave_floor",
-        buildability: "foundation_required",
+        surface: inside ? "cave_floor" : "steep",
+        buildability: inside ? "foundation_required" : "restricted",
         stratumId,
       };
     }

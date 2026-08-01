@@ -6,6 +6,7 @@ import { PropScatterRenderer } from "./PropScatterRenderer.ts";
 import { SkySystem } from "./SkySystem.ts";
 import { TerrainRenderer } from "./TerrainRenderer.ts";
 import { WeatherSystem, type WeatherKind } from "./WeatherSystem.ts";
+import { CaveRenderer } from "./CaveRenderer.ts";
 
 export class EnvironmentRenderer {
   readonly sampler: TerrainSampler;
@@ -14,6 +15,7 @@ export class EnvironmentRenderer {
   readonly sky: SkySystem;
   readonly weather: WeatherSystem;
   readonly chunks: TerrainChunkManager;
+  readonly caves: CaveRenderer;
   readonly root = new THREE.Group();
   private readonly scene: THREE.Scene;
   readonly definition: EnvironmentDefinition;
@@ -34,6 +36,7 @@ export class EnvironmentRenderer {
     this.sky = new SkySystem(scene);
     this.weather = new WeatherSystem(scene, quality);
     this.chunks = new TerrainChunkManager(definition);
+    this.caves = new CaveRenderer(scene);
     this.root.add(this.terrain.root, this.props.root);
     this.scene.add(this.root);
     this.scene.background = new THREE.Color(0x263d42);
@@ -58,6 +61,21 @@ export class EnvironmentRenderer {
       if (child.name.startsWith("landmark:")) child.visible = visible;
     });
   }
+  setStratum(stratumId: string) {
+    const surface = stratumId === "surface";
+    this.terrain.root.visible = surface;
+    this.props.root.visible = surface;
+    this.sky.root.visible = surface;
+    this.weather.root.visible = surface;
+    this.caves.setVisible(!surface);
+    this.scene.background = new THREE.Color(surface ? 0x263d42 : 0x0b1518);
+    this.scene.fog = new THREE.FogExp2(surface ? 0x607877 : 0x263d3f, surface ? 0.0085 : 0.025);
+  }
+  setCaveCutaway(visible: boolean) {
+    this.caves.setVisible(visible);
+    this.terrain.terrain.visible = !visible;
+    this.terrain.surveyPad.visible = !visible;
+  }
 
   stats(renderer?: THREE.WebGLRenderer): EnvironmentFrameStats {
     return {
@@ -74,5 +92,6 @@ export class EnvironmentRenderer {
     this.props.dispose();
     this.sky.dispose();
     this.weather.dispose();
+    this.caves.dispose();
   }
 }

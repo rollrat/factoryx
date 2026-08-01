@@ -8,7 +8,7 @@ import { migrateWorldSnapshotBounds } from "../../app/game/sim/world.ts";
 test("A-17 defines the six authored production biomes inside a 256m sector", () => {
   assert.equal(BIOMES.length, 6);
   assert.deepEqual(A17_ENVIRONMENT.worldBounds, { minX: -128, maxX: 127, minZ: -128, maxZ: 127 });
-  assert.deepEqual(A17_ENVIRONMENT.constructionBounds, { minX: -48, maxX: 48, minZ: -48, maxZ: 48 });
+  assert.deepEqual(A17_ENVIRONMENT.constructionBounds, { minX: -128, maxX: 127, minZ: -128, maxZ: 127 });
   assert.deepEqual(new Set(BIOMES.flatMap(({ resourceAffinity }) => resourceAffinity)), new Set([
     "iron_ore", "copper_ore", "limestone", "coal", "quartz", "crude_oil", "bauxite", "tungsten_ore",
   ]));
@@ -40,6 +40,8 @@ test("terrain sampling is deterministic and preserves the starting survey pad", 
   assert.equal(sampler.sample(74, 58).biomeId, "blackwater_marsh");
   assert.equal(sampler.sample(-62, -72).biomeId, "hematite_crown");
   assert.equal(sampler.sample(12, 96).biomeId, "thermal_rift");
+  assert.equal(sampler.sample(4, 108, "rift_depths").surface, "cave_floor");
+  assert.equal(sampler.sample(60, 60, "rift_depths").surface, "steep");
 });
 
 test("terrain chunks stay within the 5x5 and 3x3 performance budgets", () => {

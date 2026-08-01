@@ -8,6 +8,8 @@ import type { PowerNetworkControls } from "./sim/physicalPowerNetwork.ts";
 import { PhysicalPowerRuntime, type PhysicalPowerRuntimeSnapshot } from "./sim/physicalPowerRuntime.ts";
 import { ProjectDockDeliveryCommitter, type ProjectDockDeliveryCommitterSnapshot } from "./sim/projectDockCommitter.ts";
 import type { CameraMode } from "./types.ts";
+import { A17_ENVIRONMENT } from "./environment/data/environment.ts";
+import { isEnvironmentSnapshotCompatible, type EnvironmentSnapshot } from "./environment/persistence/environmentSnapshot.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
 
@@ -30,6 +32,8 @@ export type FactoryRuntimeSnapshot = Readonly<{
   playerPosition: readonly [number, number, number];
   firstPersonYaw: number;
   firstPersonPitch: number;
+  environment?: EnvironmentSnapshot;
+  activeStratumId?: string;
 }>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -48,7 +52,7 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     "cameraAngle", "cameraMode", "cameraTarget", "cameraZoom", "credits",
     "firstPersonPitch", "firstPersonYaw", "nextId", "playerPosition", "simulation", "version",
   ];
-  const optional = ["world", "campaignWorld", "worldProduction", "dockFluidTransferCredit", "dockCommitter", "powerControls", "physicalPower"];
+  const optional = ["world", "campaignWorld", "worldProduction", "dockFluidTransferCredit", "dockCommitter", "powerControls", "physicalPower", "environment", "activeStratumId"];
   if (required.some((key) => !keys.includes(key)) || keys.some((key) => !required.includes(key) && !optional.includes(key))) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
@@ -60,6 +64,8 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     || !isVector(value.playerPosition)
     || !isFiniteNumber(value.firstPersonYaw)
     || !isFiniteNumber(value.firstPersonPitch)
+    || (value.activeStratumId !== undefined && typeof value.activeStratumId !== "string")
+    || (value.environment !== undefined && !isEnvironmentSnapshotCompatible(value.environment as EnvironmentSnapshot, A17_ENVIRONMENT))
     || (value.dockFluidTransferCredit !== undefined
       && (!isFiniteNumber(value.dockFluidTransferCredit) || value.dockFluidTransferCredit < 0 || value.dockFluidTransferCredit > 1 + Number.EPSILON))) return false;
   if (value.powerControls !== undefined) {

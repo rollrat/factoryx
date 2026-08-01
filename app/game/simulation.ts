@@ -1,7 +1,8 @@
 import {
   ORE_ANCHORS,
   STORAGE_CAPACITY,
-  WORLD_BUILD_LIMIT,
+  WORLD_BUILD_MAX,
+  WORLD_BUILD_MIN,
   cellKey,
   directionForRotation,
   footprint,
@@ -206,7 +207,7 @@ export class FactorySimulation {
     const cells = footprint(type, x, z);
     const inside = cells.every((cell) => {
       const [cellX, cellZ] = cell.split(",").map(Number);
-      return Math.abs(cellX) <= WORLD_BUILD_LIMIT && Math.abs(cellZ) <= WORLD_BUILD_LIMIT;
+      return cellX >= WORLD_BUILD_MIN && cellX <= WORLD_BUILD_MAX && cellZ >= WORLD_BUILD_MIN && cellZ <= WORLD_BUILD_MAX;
     });
     if (!inside) return false;
     if (type === "miner" && !ORE_ANCHORS.has(cellKey(x, z))) return false;

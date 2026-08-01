@@ -69,11 +69,14 @@ export class WorldCollisionIndex {
   readonly bucketSize: number;
   private readonly buckets = new Map<string, FootprintCollider[]>();
 
-  constructor(world: DataDrivenWorld, bucketSize = 8) {
+  constructor(world: DataDrivenWorld, bucketSize = 8, stratumId = "surface") {
     if (!Number.isFinite(bucketSize) || bucketSize <= 0) throw new RangeError("collision bucketSize must be positive");
     this.bounds = { ...world.bounds };
     this.bucketSize = bucketSize;
-    this.obstacles = world.allInstances().map((instance) => footprintCollider(world, instance));
+    this.obstacles = world.allInstances()
+      .filter((instance) => (instance.stratumId ?? "surface") === stratumId)
+      .filter((instance) => world.registry.buildings.get(instance.definitionId)?.terrainPolicy?.role !== "foundation")
+      .map((instance) => footprintCollider(world, instance));
     this.obstacles.forEach((obstacle) => {
       const minX = Math.floor(obstacle.bounds.minX / bucketSize);
       const maxX = Math.floor((obstacle.bounds.maxX - EPSILON) / bucketSize);

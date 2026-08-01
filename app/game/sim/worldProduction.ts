@@ -607,7 +607,10 @@ export class WorldProductionSimulation {
   private compatiblePorts(source: WorldPort, target: WorldPort) {
     return source.connectionCell.x === target.connectionCell.x
       && source.connectionCell.z === target.connectionCell.z
+      && (source.stratumId === target.stratumId || (source.connectsStrata && target.connectsStrata))
       && source.definition.medium === target.definition.medium
+      && (source.stratumId !== target.stratumId
+        || Math.abs(source.localPosition.y - target.localPosition.y) <= 0.85)
       && source.definition.connectorProfile === target.definition.connectorProfile
       && source.localFacing.x === -target.localFacing.x
       && source.localFacing.z === -target.localFacing.z;

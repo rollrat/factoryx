@@ -148,6 +148,7 @@ export class WorldStudioRuntime {
     const [position, target] = views[view];
     this.camera.position.fromArray(position);
     this.controls.target.fromArray(target);
+    this.environment.setCaveCutaway(view === "caveCutaway");
     this.controls.maxPolarAngle = view === "caveCutaway" ? Math.PI * 0.8 : Math.PI * 0.49;
     this.controls.update();
   }

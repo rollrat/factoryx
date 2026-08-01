@@ -55,10 +55,12 @@ import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
 } from "./visualPersistence.ts";
+import { createEnvironmentSnapshot } from "./environment/persistence/environmentSnapshot.ts";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildWorldRuntimeTopology } from "./telemetry/worldTopology.ts";
 import {
   A17_ENVIRONMENT,
+  CAVE_ZONES,
   EnvironmentRenderer,
   TerrainSampler,
   evaluateTerrainPlacement,
@@ -85,6 +87,7 @@ const modelPosition = (type: BuildType, x: number, z: number) =>
 
 const legacyTypeForBuilding = (buildingId: BuildingId): BuildType => {
   if (buildingId.startsWith("conveyor_") || buildingId === "pipe_mk1") return "belt";
+  if (["conveyor_lift", "solid_wall_socket", "pipe_riser", "pipe_wall_socket", "shaft_logistics_socket"].includes(buildingId)) return "belt";
   if (buildingId === "splitter" || buildingId === "pipe_t_junction") return "splitter";
   if (buildingId === "merger") return "merger";
   if (buildingId === "vein_miner" || buildingId === "fluid_extractor") return "miner";
@@ -245,6 +248,7 @@ export class FactoryRuntime {
   private readonly playerVelocity = new THREE.Vector3();
   private firstPersonYaw = 0;
   private firstPersonPitch = -0.08;
+  private activeStratumId = "surface";
   private animationId = 0;
   private lastTime = performance.now();
   private elapsed = 0;
@@ -272,11 +276,14 @@ export class FactoryRuntime {
       registry: START_REGISTRY,
       bounds: gameplayBounds,
       constructionInventory: CAMPAIGN_START_INVENTORY,
-      terrainPlacement: (definition, position, rotation) => {
+      terrainPlacement: (definition, position, rotation, context) => {
         if (definition.id === "vein_miner" || definition.id === "fluid_extractor") return { ok: true };
         const verdict = evaluateTerrainPlacement(this.terrainSampler, definition, position, rotation);
+        if (definition.terrainPolicy?.role === "hazard_stabilizer") return { ok: true };
+        if (verdict.reason === "terrain_hazard" && context.hazardStabilized) return { ok: true };
+        if (definition.terrainPolicy?.allowedOnRestrictedSurface && verdict.reason !== "terrain_hazard") return { ok: true };
         if (!verdict.allowed) return { ok: false, reason: verdict.reason ?? "terrain_clearance", cell: position };
-        if (verdict.requiresFoundation && definition.footprint.x * definition.footprint.z > 4) {
+        if (verdict.requiresFoundation && !context.foundationCoverage && definition.footprint.x * definition.footprint.z > 4) {
           return { ok: false, reason: "foundation_required", cell: position };
         }
         return { ok: true };
@@ -332,8 +339,9 @@ export class FactoryRuntime {
       this.playerPosition.fromArray(restored.playerPosition);
       this.firstPersonYaw = restored.firstPersonYaw;
       this.firstPersonPitch = restored.firstPersonPitch;
+      this.activeStratumId = restored.activeStratumId ?? "surface";
     }
-    this.collisionIndex = new WorldCollisionIndex(this.world);
+    this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
     const recoveredPlayer = recoverPlayerStart(this.collisionIndex, this.playerPosition);
     this.playerPosition.x = recoveredPlayer.position.x;
     this.playerPosition.z = recoveredPlayer.position.z;
@@ -353,6 +361,7 @@ export class FactoryRuntime {
     this.hoverTile.position.y = 0.035;
 
     this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, "high");
+    this.environment.setStratum(this.activeStratumId);
     const powerModels = this.setupWorld();
     this.powerCoreGroup = powerModels.core;
     this.powerPoleGroup = powerModels.pole;
@@ -575,10 +584,15 @@ export class FactoryRuntime {
     const sourcePorts = this.world.portsFor(sourceId).filter(({ definition }) => definition.medium === "power");
     const pair = sourcePorts.flatMap((source) => targetPorts.flatMap((target) => {
       if (source.definition.connectorProfile !== target.definition.connectorProfile) return [];
+      if (source.stratumId !== target.stratumId && !(source.connectsStrata && target.connectsStrata)) return [];
       const direct = source.definition.direction !== "input" && target.definition.direction !== "output";
       const reverse = target.definition.direction !== "input" && source.definition.direction !== "output";
       if (!direct && !reverse) return [];
-      const distance = Math.hypot(source.localPosition.x - target.localPosition.x, source.localPosition.z - target.localPosition.z);
+      const distance = Math.hypot(
+        source.localPosition.x - target.localPosition.x,
+        source.localPosition.y - target.localPosition.y,
+        source.localPosition.z - target.localPosition.z,
+      );
       const maxDistance = source.definition.connectorProfile === "power_high_voltage" ? 24 : 8;
       if (distance > maxDistance) return [];
       return [{ source, target, reverse, distance }];
@@ -713,7 +727,7 @@ export class FactoryRuntime {
   }
 
   private setupWorld() {
-    const grid = new THREE.GridHelper(98, 98, 0x4c7a7e, 0x29474d);
+    const grid = new THREE.GridHelper(256, 256, 0x4c7a7e, 0x29474d);
     grid.position.y = 0.012;
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
     gridMaterials.forEach((material) => {
@@ -741,6 +755,7 @@ export class FactoryRuntime {
       );
       patch.visible = anchor.active;
       patch.userData.resourceAnchorId = anchor.id;
+      patch.userData.resourceActive = anchor.active;
       this.resourceGroups.set(anchor.id, patch);
       this.scene.add(patch);
     });
@@ -789,8 +804,12 @@ export class FactoryRuntime {
     const position = definition
       ? new THREE.Vector3(data.x + definition.footprint.x / 2, 0, data.z + definition.footprint.z / 2)
       : modelPosition(data.type, data.x, data.z);
-    position.y = this.terrainSampler.constructionHeightAt(position.x, position.z);
+    const worldInstance = data.worldInstanceId ? this.world.instance(data.worldInstanceId) : null;
+    const stratumId = worldInstance?.stratumId ?? "surface";
+    position.y = worldInstance?.elevation ?? this.elevationAt(position.x, position.z, stratumId);
     group.position.copy(position);
+    group.userData.stratumId = stratumId;
+    group.visible = stratumId === this.activeStratumId;
     group.rotation.y = data.buildingId
       ? buildingModelRotationY(data.rotation)
       : data.rotation * (Math.PI / 2);
@@ -854,6 +873,8 @@ export class FactoryRuntime {
       playerPosition: this.playerPosition.toArray(),
       firstPersonYaw: this.firstPersonYaw,
       firstPersonPitch: this.firstPersonPitch,
+      environment: createEnvironmentSnapshot(A17_ENVIRONMENT),
+      activeStratumId: this.activeStratumId,
     };
   }
 
@@ -861,7 +882,9 @@ export class FactoryRuntime {
     const snapshot = this.world.snapshot();
     this.world.resourceAnchors().forEach((anchor) => {
       const group = this.resourceGroups.get(anchor.id);
-      if (group) group.visible = anchor.active;
+      if (!group) return;
+      group.userData.resourceActive = anchor.active;
+      group.visible = anchor.active && this.activeStratumId === "surface";
     });
     this.callbacks.onConstructionState({
       unlockedIds: snapshot.unlockedIds,
@@ -876,15 +899,11 @@ export class FactoryRuntime {
     const building = START_REGISTRY.buildings.get(instance.definitionId);
     const worldPort = this.world.portsFor(instanceId).find(({ definition }) => definition.id === portId);
     if (!building || !worldPort) return null;
-    const elevation = this.terrainSampler.constructionHeightAt(
-      instance.position.x + building.footprint.x / 2,
-      instance.position.z + building.footprint.z / 2,
-    );
     return {
       buildingId: building.id,
       port: worldPort.definition,
-      position: new THREE.Vector3(worldPort.localPosition.x, worldPort.localPosition.y + elevation, worldPort.localPosition.z),
-      connectionAnchor: new THREE.Vector3(worldPort.connectionCell.x + 0.5, worldPort.localPosition.y + elevation, worldPort.connectionCell.z + 0.5),
+      position: new THREE.Vector3(worldPort.localPosition.x, worldPort.localPosition.y, worldPort.localPosition.z),
+      connectionAnchor: new THREE.Vector3(worldPort.connectionCell.x + 0.5, worldPort.localPosition.y, worldPort.connectionCell.z + 0.5),
       facing: worldPort.localFacing,
       rotation: instance.rotation,
     };
@@ -984,6 +1003,12 @@ export class FactoryRuntime {
     this.renderer.setSize(width, height);
   };
 
+  private elevationAt(x: number, z: number, stratumId = this.activeStratumId) {
+    return stratumId === "surface"
+      ? this.terrainSampler.constructionHeightAt(x, z)
+      : this.terrainSampler.caveHeightAt(x, z, stratumId);
+  }
+
   private updateCamera() {
     const distance = 23;
     this.camera.position.set(
@@ -991,7 +1016,7 @@ export class FactoryRuntime {
       18,
       this.cameraTarget.z + Math.cos(this.cameraAngle) * distance,
     );
-    this.cameraTarget.y = this.terrainSampler.constructionHeightAt(this.cameraTarget.x, this.cameraTarget.z);
+    this.cameraTarget.y = this.elevationAt(this.cameraTarget.x, this.cameraTarget.z);
     this.camera.lookAt(this.cameraTarget);
     this.camera.zoom = this.cameraZoom;
     this.camera.updateProjectionMatrix();
@@ -1021,7 +1046,7 @@ export class FactoryRuntime {
       this.playerPosition,
       { x: this.playerVelocity.x * delta, z: this.playerVelocity.z * delta },
     );
-    const terrainResolved = resolveTerrainMovement(this.terrainSampler, this.playerPosition, resolved.position);
+    const terrainResolved = resolveTerrainMovement(this.terrainSampler, this.playerPosition, resolved.position, this.activeStratumId);
     this.playerPosition.x = terrainResolved.position.x;
     this.playerPosition.z = terrainResolved.position.z;
     this.playerPosition.y += ((terrainResolved.elevation + 1.62) - this.playerPosition.y) * (1 - Math.exp(-delta * 15));
@@ -1041,7 +1066,8 @@ export class FactoryRuntime {
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const point = this.raycaster.intersectObject(this.environment.terrain.root, true)[0]?.point;
+    const interactionRoot = this.activeStratumId === "surface" ? this.environment.terrain.root : this.environment.caves.interactionRoot;
+    const point = this.raycaster.intersectObject(interactionRoot, true)[0]?.point;
     if (!point) return null;
     this.hitPoint.copy(point);
     const bounds = this.world.bounds;
@@ -1089,13 +1115,15 @@ export class FactoryRuntime {
         buildingId: this.selectedBuildingId,
         position: { x: this.currentCell.x, z: this.currentCell.z },
         rotation: this.rotation as 0 | 1 | 2 | 3,
+        elevation: this.elevationAt(this.currentCell.x, this.currentCell.z),
+        stratumId: this.activeStratumId,
       }).ok
       : this.simulation.canPlace(type, this.currentCell.x, this.currentCell.z);
     const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
     this.ghost.position.copy(definition
       ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
       : modelPosition(type, this.currentCell.x, this.currentCell.z));
-    this.ghost.position.y = this.terrainSampler.constructionHeightAt(this.ghost.position.x, this.ghost.position.z);
+    this.ghost.position.y = this.elevationAt(this.ghost.position.x, this.ghost.position.z);
     this.ghost.rotation.y = this.selectedBuildingId
       ? buildingModelRotationY(this.rotation)
       : this.rotation * (Math.PI / 2);
@@ -1178,7 +1206,7 @@ export class FactoryRuntime {
       if (!valid) allValid = false;
       reserved.add(cellKey(cell.x, cell.z));
       const model = createStructureModel("belt", this.materials);
-      model.position.set(cell.x, this.terrainSampler.constructionHeightAt(cell.x, cell.z), cell.z);
+      model.position.set(cell.x, this.elevationAt(cell.x, cell.z), cell.z);
       model.rotation.y = cell.rotation * (Math.PI / 2);
       this.recolorGhost(model, valid);
       this.beltPreview?.add(model);
@@ -1263,6 +1291,8 @@ export class FactoryRuntime {
           buildingId: this.selectedBuildingId!,
           position: { x: this.currentCell.x, z: this.currentCell.z },
           rotation: this.rotation as 0 | 1 | 2 | 3,
+          elevation: this.elevationAt(this.currentCell.x, this.currentCell.z),
+          stratumId: this.activeStratumId,
         }),
         this.constructionCreditLedger(),
       )
@@ -1305,7 +1335,7 @@ export class FactoryRuntime {
       this.history.push({ added: [{ ...data }], removed: [], creditDelta: -cost });
       this.changeCredits(this.credits - cost);
     } else {
-      this.collisionIndex = new WorldCollisionIndex(this.world);
+      this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
       this.publishConstructionState();
     }
     const buildingName = this.selectedBuildingId
@@ -1332,6 +1362,8 @@ export class FactoryRuntime {
           buildingId: this.selectedBuildingId!,
           position: { x: cell.x, z: cell.z },
           rotation: cell.rotation as 0 | 1 | 2 | 3,
+          elevation: this.elevationAt(cell.x, cell.z),
+          stratumId: this.activeStratumId,
         }))),
         this.constructionCreditLedger(),
       )
@@ -1360,7 +1392,7 @@ export class FactoryRuntime {
       this.history.push({ added: added.map((data) => ({ ...data })), removed: [], creditDelta: -cost });
       this.changeCredits(this.credits - cost);
     } else {
-      this.collisionIndex = new WorldCollisionIndex(this.world);
+      this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
       this.publishConstructionState();
     }
     const connected = added.some((belt) =>
@@ -1435,7 +1467,7 @@ export class FactoryRuntime {
       });
     });
     this.worldProduction.syncWorld();
-    this.collisionIndex = new WorldCollisionIndex(this.world);
+    this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
     this.publishConstructionState();
     this.syncConnectionModels();
     this.updateGhost();
@@ -1460,7 +1492,7 @@ export class FactoryRuntime {
     const cell = this.pointerToCell(event);
     if (!cell) return;
     this.currentCell = cell;
-    this.hoverTile.position.set(cell.x, this.terrainSampler.constructionHeightAt(cell.x, cell.z) + 0.035, cell.z);
+    this.hoverTile.position.set(cell.x, this.elevationAt(cell.x, cell.z) + 0.035, cell.z);
     if (this.beltStart) this.updateBeltPreview(cell, event.shiftKey);
     else this.updateGhost();
   };
@@ -1557,7 +1589,7 @@ export class FactoryRuntime {
       const removed = this.removeStructure(id);
       if (removed) {
         if (removed.worldInstanceId) {
-          this.collisionIndex = new WorldCollisionIndex(this.world);
+          this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
           this.publishConstructionState();
           this.callbacks.onToast(`${removed.buildingId ? START_REGISTRY.buildings.get(removed.buildingId)?.name : TYPE_NAME[removed.type]} 철거 · 재료 회수`);
         } else {
@@ -1587,6 +1619,42 @@ export class FactoryRuntime {
     this.callbacks.onToast("건설 작업을 취소했습니다");
   };
 
+  private toggleStratum() {
+    const zone = CAVE_ZONES[0];
+    const entering = this.activeStratumId === "surface";
+    const reference = this.cameraMode === "firstPerson" ? this.playerPosition : this.cameraTarget;
+    const nearestPortal = [...zone.portals].sort((a, b) => (
+      Math.hypot(reference.x - a.x, reference.z - a.z) - Math.hypot(reference.x - b.x, reference.z - b.z)
+    ))[0];
+    if (entering && Math.hypot(reference.x - nearestPortal.x, reference.z - nearestPortal.z) > 8) {
+      this.callbacks.onToast("열극 천공 입구 가까이에서 C를 눌러야 합니다");
+      return;
+    }
+    this.activeStratumId = entering ? zone.stratumId : "surface";
+    this.environment.setStratum(this.activeStratumId);
+    if (entering) {
+      const room = zone.rooms[0];
+      this.playerPosition.set(room.center.x, room.center.y + 1.62, room.center.z);
+      this.desiredTarget.set(room.center.x, room.center.y, room.center.z);
+      this.cameraTarget.copy(this.desiredTarget);
+    } else {
+      const portal = nearestPortal;
+      const elevation = this.elevationAt(portal.x, portal.z, "surface");
+      this.playerPosition.set(portal.x, elevation + 1.62, portal.z);
+      this.desiredTarget.set(portal.x, elevation, portal.z);
+      this.cameraTarget.copy(this.desiredTarget);
+    }
+    this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
+    this.groups.forEach((group) => { group.visible = (group.userData.stratumId ?? "surface") === this.activeStratumId; });
+    this.resourceGroups.forEach((group) => { group.visible = !entering && group.userData.resourceActive !== false; });
+    this.powerCoreGroup.visible = !entering;
+    this.projectDockGroup.visible = !entering;
+    this.buildGrid.position.y = entering ? zone.rooms[1].center.y + 0.02 : 0.012;
+    this.updateCamera();
+    this.updateGhost();
+    this.callbacks.onToast(entering ? "열극 심층부로 진입했습니다 · C 지상 복귀" : "지상 열극 입구로 복귀했습니다");
+  }
+
   private onKeyDown = (event: KeyboardEvent) => {
     if (this.inputLocked) return;
     const key = event.key.toLowerCase();
@@ -1594,6 +1662,10 @@ export class FactoryRuntime {
     this.pressed.add(key);
     if (key === "v") {
       this.toggleCameraMode();
+      return;
+    }
+    if (key === "c") {
+      this.toggleStratum();
       return;
     }
     if (this.cameraMode === "firstPerson") return;
@@ -1757,7 +1829,7 @@ export class FactoryRuntime {
       const group = this.groups.get(id);
       const decision = decisions.get(structure.worldInstanceId);
       if (!group || !decision) return;
-      group.visible = decision.visible;
+      group.visible = decision.visible && (group.userData.stratumId ?? "surface") === this.activeStratumId;
       group.userData.lodTier = decision.detailTier;
     });
   }

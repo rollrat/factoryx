@@ -314,12 +314,67 @@ export const START_BUILDINGS = [
   building("small_storage", "소형 저장고", "start", { x: 2, z: 2 }, straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS), [], cost(["iron_plate", 20], ["construction_block", 8], ["fastener_pack", 8]), 4),
   building("industrial_storage", "산업 저장고", "phase_2_complete", { x: 3, z: 3 }, [...straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 3), consumerPower(3, 2)], [], cost(["steel_billet", 24], ["iron_plate", 32], ["industrial_frame", 4]), 24),
 
+  // 지형 대응 기반 시설
+  {
+    ...building("foundation_2m", "산업 기초", "start", { x: 2, z: 2 }, [], [], cost(["construction_block", 4], ["iron_plate", 2])),
+    terrainPolicy: { role: "foundation", stabilizesSurface: true, allowedOnRestrictedSurface: true },
+  },
+  {
+    ...building("access_ramp", "접근 램프", "phase_1_complete", { x: 2, z: 3 }, [], [], cost(["construction_block", 6], ["iron_plate", 4])),
+    terrainPolicy: { role: "ramp", allowedOnRestrictedSurface: true, elevationStep: 2 },
+  },
+  {
+    ...building("short_bridge", "단경간 교량", "phase_1_complete", { x: 2, z: 4 }, [], [], cost(["steel_billet", 8], ["construction_block", 8])),
+    terrainPolicy: { role: "bridge", allowedOnRestrictedSurface: true, elevationStep: 2 },
+  },
+  {
+    ...building("conveyor_lift", "컨베이어 리프트", "phase_1_complete", { x: 1, z: 1 }, [
+      port("lower_in", "input", "solid", "belt_standard", { x: 0, z: -1 }, { x: 0, y: 0.45, z: -0.5 }, { x: 0, z: -1 }, SOLID_ITEMS),
+      port("upper_out", "output", "solid", "belt_standard", { x: 0, z: 1 }, { x: 0, y: 3.45, z: 0.5 }, { x: 0, z: 1 }, SOLID_ITEMS),
+    ], [], cost(["steel_billet", 4], ["iron_plate", 4], ["fastener_pack", 2])),
+    terrainPolicy: { role: "conveyor_lift", allowedOnRestrictedSurface: true, elevationStep: 3 },
+    transportPolicy: { throughputPerMinute: 52, maxSegmentLengthTiles: 1 },
+  },
+  {
+    ...building("solid_wall_socket", "벨트 벽 관통 소켓", "phase_2_complete", { x: 1, z: 1 }, straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 1), [], cost(["steel_billet", 3], ["fastener_pack", 2])),
+    terrainPolicy: { role: "wall_socket", allowedOnRestrictedSurface: true },
+    transportPolicy: { throughputPerMinute: 52, maxSegmentLengthTiles: 1 },
+  },
+  {
+    ...building("shaft_logistics_socket", "대형 갱도 물류 소켓", "thermal_verified", { x: 3, z: 3 }, [
+      ...straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 3),
+      power("shaft_power", "bidirectional", "power_high_voltage", 3, 2, 1.5, 1, 1),
+    ], [], cost(["steel_beam", 24], ["industrial_frame", 8], ["advanced_control_board", 4])),
+    terrainPolicy: { role: "shaft_socket", allowedOnRestrictedSurface: true, connectsStrata: true, elevationStep: 12 },
+    transportPolicy: { throughputPerMinute: 120, maxSegmentLengthTiles: 1 },
+  },
+
   // 유체 물류
   building("fluid_tank", "유체 탱크", "phase_3_complete", { x: 2, z: 2 }, [fluid("fluid_in", "input", -1, 0, -1, -0.5, -1, FLUID_ITEMS), fluid("fluid_out", "output", 2, 1, 1, 0.5, 1, FLUID_ITEMS)], [], cost(["steel_billet", 20], ["iron_plate", 20], ["fastener_pack", 8])),
   building("pipe_mk1", "파이프 Mk.1", "phase_3_complete", { x: 1, z: 1 }, [fluid("pipe_in", "bidirectional", -1, 0, -0.5, 0, -1, FLUID_ITEMS), fluid("pipe_out", "bidirectional", 1, 0, 0.5, 0, 1, FLUID_ITEMS)], [], cost(["steel_billet", 1])),
   building("pipe_t_junction", "파이프 T 접합부", "phase_3_complete", { x: 1, z: 1 }, [fluid("pipe_a", "bidirectional", -1, 0, -0.5, 0, -1, FLUID_ITEMS), fluid("pipe_b", "bidirectional", 1, 0, 0.5, 0, 1, FLUID_ITEMS), port("pipe_c", "bidirectional", "fluid", "pipe_mk1", { x: 0, z: 1 }, { x: 0, y: 0.5, z: 0.5 }, { x: 0, z: 1 }, FLUID_ITEMS)], [], cost(["steel_billet", 3], ["fastener_pack", 2])),
   building("pipe_pump", "파이프 펌프", "phase_3_complete", { x: 1, z: 1 }, [fluid("fluid_in", "input", -1, 0, -0.5, 0, -1, FLUID_ITEMS), fluid("fluid_out", "output", 1, 0, 0.5, 0, 1, FLUID_ITEMS), consumerPower(1)], [], cost(["steel_billet", 8], ["industrial_motor", 1], ["basic_control_circuit", 1])),
+  {
+    ...building("pipe_riser", "파이프 라이저", "phase_3_complete", { x: 1, z: 1 }, [
+      port("lower_pipe", "bidirectional", "fluid", "pipe_mk1", { x: 0, z: -1 }, { x: 0, y: 0.5, z: -0.5 }, { x: 0, z: -1 }, FLUID_ITEMS),
+      port("upper_pipe", "bidirectional", "fluid", "pipe_mk1", { x: 0, z: 1 }, { x: 0, y: 3.5, z: 0.5 }, { x: 0, z: 1 }, FLUID_ITEMS),
+    ], [], cost(["steel_billet", 5], ["fastener_pack", 2])),
+    terrainPolicy: { role: "pipe_riser", allowedOnRestrictedSurface: true, elevationStep: 3 },
+    fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true },
+  },
+  {
+    ...building("pipe_wall_socket", "파이프 벽 관통 소켓", "phase_3_complete", { x: 1, z: 1 }, [
+      fluid("pipe_in", "bidirectional", -1, 0, -0.5, 0, -1, FLUID_ITEMS),
+      fluid("pipe_out", "bidirectional", 1, 0, 0.5, 0, 1, FLUID_ITEMS),
+    ], [], cost(["steel_billet", 4], ["fastener_pack", 2])),
+    terrainPolicy: { role: "wall_socket", allowedOnRestrictedSurface: true },
+    fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true },
+  },
   building("emergency_flare", "비상 플레어", "phase_3_complete", { x: 2, z: 2 }, [fluid("gas_in", "input", -1, 0, -1, -0.5, -1, ["fuel_gas"]), consumerPower(2)], [], cost(["steel_billet", 16], ["industrial_frame", 2], ["basic_control_circuit", 1])),
+  {
+    ...building("hazard_stabilizer", "지열 안정화 설비", "phase_3_complete", { x: 2, z: 2 }, [consumerPower(2)], [], cost(["steel_billet", 18], ["industrial_frame", 4], ["basic_control_circuit", 3])),
+    terrainPolicy: { role: "hazard_stabilizer", allowedOnRestrictedSurface: true },
+  },
 
   // 발전 및 송배전
   {

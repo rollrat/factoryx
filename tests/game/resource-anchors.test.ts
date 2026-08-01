@@ -47,7 +47,7 @@ const registry: DefinitionRegistry = {
   buildings: new Map(buildings.map((building) => [building.id, building])), projectStages: new Map(),
 };
 const createWorld = () => new DataDrivenWorld({
-  registry, bounds: { minX: -48, maxX: 48, minZ: -48, maxZ: 48 }, constructionInventory: [{ itemId: "iron_ore", amount: 100 }],
+  registry, bounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 }, constructionInventory: [{ itemId: "iron_ore", amount: 100 }],
 });
 
 test("all eight document resources expose stable anchors for world and visual lookup", () => {
@@ -58,7 +58,7 @@ test("all eight document resources expose stable anchors for world and visual lo
 
 test("every shipped anchor can fit its full-size extraction building inside the playable map", () => {
   for (const anchor of RESOURCE_ANCHORS) {
-    const world = new DataDrivenWorld({ registry: START_REGISTRY, bounds: { minX: -48, maxX: 48, minZ: -48, maxZ: 48 } });
+    const world = new DataDrivenWorld({ registry: START_REGISTRY, bounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 } });
     (["phase_1_complete", "phase_2_complete", "phase_3_complete", "chemistry_stable", "thermal_verified"] as const)
       .forEach((unlockId) => world.unlock(unlockId));
     const definition = START_REGISTRY.buildings.get(anchor.extractionBuildingId)!;

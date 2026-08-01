@@ -360,6 +360,57 @@ const addInfrastructure = (
   materials: GenericBuildingMaterials,
 ) => {
   const { x, z } = definition.footprint;
+  const terrainRole = definition.terrainPolicy?.role;
+  if (terrainRole === "foundation") {
+    box(group, [x * 0.96, 0.22, z * 0.96], [0, 0.11, 0], materials.dark, "foundationSlab");
+    for (const px of [-x * 0.38, x * 0.38]) for (const pz of [-z * 0.38, z * 0.38]) {
+      cylinder(group, 0.09, 0.72, 8, [px, -0.24, pz], materials.steel, "foundationPier");
+    }
+    box(group, [x * 0.72, 0.025, 0.035], [0, 0.235, -z * 0.22], materials.orange, "foundationMark");
+    return;
+  }
+  if (terrainRole === "ramp") {
+    for (const px of [-x * 0.34, x * 0.34]) box(group, [0.12, 1.75, z * 0.88], [px, 0.72, 0], materials.dark, "rampBeam", [-0.32, 0, 0]);
+    box(group, [x * 0.92, 0.16, z * 0.92], [0, 0.78, 0], materials.steel, "rampDeck", [-0.32, 0, 0]);
+    for (const pz of [-z * 0.3, 0, z * 0.3]) box(group, [x * 0.72, 0.035, 0.05], [0, 0.76 - pz * 0.32, pz], materials.orange, "rampGrip", [-0.32, 0, 0]);
+    return;
+  }
+  if (terrainRole === "bridge") {
+    box(group, [x * 0.96, 0.18, z * 0.96], [0, 1.1, 0], materials.steel, "bridgeDeck");
+    for (const px of [-x * 0.4, x * 0.4]) {
+      box(group, [0.12, 1.1, z * 0.9], [px, 0.54, 0], materials.dark, "bridgeTruss");
+      for (const pz of [-z * 0.38, z * 0.38]) cylinder(group, 0.09, 2.1, 8, [px, 0.05, pz], materials.dark, "bridgePier");
+    }
+    return;
+  }
+  if (terrainRole === "conveyor_lift") {
+    for (const px of [-0.34, 0.34]) box(group, [0.1, 3.45, 0.1], [px, 1.72, 0], materials.dark, "liftMast");
+    box(group, [0.62, 3.05, 0.18], [0, 1.65, 0], materials.steel, "verticalTransportLane");
+    for (const y of [0.38, 1.2, 2.02, 2.84]) box(group, [0.7, 0.08, 0.26], [0, y, 0], materials.orange, "liftCarrier");
+    return;
+  }
+  if (terrainRole === "pipe_riser") {
+    cylinder(group, 0.19, 3.4, 12, [0, 1.7, 0], materials.steel, "fluidPath");
+    for (const y of [0.3, 1.15, 2, 2.85]) add(group, new THREE.TorusGeometry(0.23, 0.035, 6, 14), materials.orange, [0, y, 0], [Math.PI / 2, 0, 0], "riserClamp");
+    return;
+  }
+  if (terrainRole === "wall_socket") {
+    box(group, [x * 0.86, 1.8, 0.24], [0, 0.9, 0], materials.dark, "wallSocketFrame");
+    box(group, [x * 0.58, 0.66, 0.38], [0, 0.65, 0], materials.steel, "wallSocketSleeve");
+    return;
+  }
+  if (terrainRole === "shaft_socket") {
+    for (const px of [-x * 0.4, x * 0.4]) for (const pz of [-z * 0.4, z * 0.4]) box(group, [0.16, 3.4, 0.16], [px, 1.7, pz], materials.dark, "shaftColumn");
+    box(group, [x * 0.9, 0.18, z * 0.9], [0, 3.25, 0], materials.steel, "shaftGantry");
+    cylinder(group, Math.min(x, z) * 0.28, 0.32, 16, [0, 0.22, 0], materials.orange, "shaftCradle");
+    return;
+  }
+  if (terrainRole === "hazard_stabilizer") {
+    for (const px of [-0.45, 0.45]) cylinder(group, 0.16, 1.5, 10, [px, 0.75, 0], materials.steel, "stabilizerProbe");
+    add(group, new THREE.TorusGeometry(0.64, 0.09, 8, 24), materials.orange, [0, 0.18, 0], [Math.PI / 2, 0, 0], "stabilizerRing");
+    addStatus(group, definition, materials, 1.35);
+    return;
+  }
   const height = Math.min(1.6, 0.7 + Math.max(x, z) * 0.12);
   for (const px of [-x * 0.36, x * 0.36]) {
     for (const pz of [-z * 0.36, z * 0.36]) box(group, [0.16, height, 0.16], [px, 0.12 + height / 2, pz], materials.dark, "infrastructureColumn");

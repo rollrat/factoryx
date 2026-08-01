@@ -163,6 +163,24 @@ export type FluidStoragePolicy = Readonly<{
   locksFluidType: boolean;
 }>;
 
+export type TerrainInfrastructureRole =
+  | "foundation"
+  | "ramp"
+  | "bridge"
+  | "conveyor_lift"
+  | "pipe_riser"
+  | "wall_socket"
+  | "shaft_socket"
+  | "hazard_stabilizer";
+
+export type TerrainPolicy = Readonly<{
+  role?: TerrainInfrastructureRole;
+  stabilizesSurface?: boolean;
+  allowedOnRestrictedSurface?: boolean;
+  elevationStep?: number;
+  connectsStrata?: boolean;
+}>;
+
 export type BuildingDefinition = Readonly<{
   id: BuildingId;
   name: string;
@@ -187,6 +205,7 @@ export type BuildingDefinition = Readonly<{
   powerStoragePolicy?: PowerStoragePolicy;
   distributionPolicy?: DistributionPolicy;
   fluidStoragePolicy?: FluidStoragePolicy;
+  terrainPolicy?: TerrainPolicy;
 }>;
 
 export type ProjectDeliveryDefinition = Readonly<{
@@ -232,6 +251,8 @@ export type BuildingInstance = Readonly<{
   paidBuildCost?: readonly ItemStack[];
   constructionCreditPaid?: Readonly<{ id: string; amount: number }>;
   powerGridId?: string;
+  elevation?: number;
+  stratumId?: string;
 }>;
 
 export type StorageState = Readonly<{

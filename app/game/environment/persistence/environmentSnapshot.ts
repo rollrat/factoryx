@@ -21,9 +21,14 @@ export const createEnvironmentSnapshot = (
   stabilizedHazardIds: [...new Set(deltas.stabilizedHazardIds ?? [])].sort(),
 });
 
-export const isEnvironmentSnapshotCompatible = (snapshot: EnvironmentSnapshot, definition: EnvironmentDefinition) => (
-  snapshot.version === 1
-  && snapshot.environmentId === definition.id
-  && snapshot.environmentVersion <= definition.version
-  && Number.isSafeInteger(snapshot.seed)
-);
+export const isEnvironmentSnapshotCompatible = (value: unknown, definition: EnvironmentDefinition): value is EnvironmentSnapshot => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const snapshot = value as Partial<EnvironmentSnapshot>;
+  return snapshot.version === 1
+    && snapshot.environmentId === definition.id
+    && typeof snapshot.environmentVersion === "number"
+    && snapshot.environmentVersion <= definition.version
+    && Number.isSafeInteger(snapshot.seed)
+    && Array.isArray(snapshot.removedPropIds) && snapshot.removedPropIds.every((id) => typeof id === "string")
+    && Array.isArray(snapshot.stabilizedHazardIds) && snapshot.stabilizedHazardIds.every((id) => typeof id === "string");
+};

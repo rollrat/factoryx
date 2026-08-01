@@ -7,7 +7,7 @@ export const A17_ENVIRONMENT: EnvironmentDefinition = {
   version: 1,
   seed: 171703,
   worldBounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 },
-  constructionBounds: { minX: -48, maxX: 48, minZ: -48, maxZ: 48 },
+  constructionBounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 },
   chunkSize: 32,
   biomeIds: BIOMES.map(({ id }) => id),
   skyProfileId: "a17_platinum_afternoon",

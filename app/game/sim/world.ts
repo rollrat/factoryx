@@ -28,6 +28,7 @@ export type WorldTerrainPlacementValidator = (
   definition: BuildingDefinition,
   position: GridCell,
   rotation: 0 | 1 | 2 | 3,
+  context: Readonly<{ foundationCoverage: boolean; hazardStabilized: boolean; stratumId: string }>,
 ) => Readonly<{ ok: true }> | WorldTerrainPlacementIssue;
 
 export type WorldSnapshot = Readonly<{
@@ -46,6 +47,8 @@ export type WorldPlacementRequest = Readonly<{
   /** Campaign construction credits may sponsor one placement without consuming item build costs. */
   waiveBuildCost?: boolean;
   constructionCredit?: Readonly<{ id: string; amount: number }>;
+  elevation?: number;
+  stratumId?: string;
 }>;
 
 export type WorldPlacementResult =
@@ -84,6 +87,8 @@ export type WorldPort = Readonly<{
   connectionCell: GridCell;
   localPosition: LocalPosition;
   localFacing: GridCell;
+  stratumId: string;
+  connectsStrata: boolean;
 }>;
 
 type RuntimeContents = Readonly<{
@@ -95,7 +100,7 @@ type RuntimeContents = Readonly<{
   selectedRecipeId?: string | null;
 }>;
 
-const cellKey = ({ x, z }: GridCell) => `${x},${z}`;
+const cellKey = ({ x, z }: GridCell, stratumId = "surface") => `${stratumId}:${x},${z}`;
 const cloneStacks = (stacks: readonly ItemStack[]) => stacks.map((stack) => ({ ...stack }));
 const cloneBufferRecord = (buffers: Readonly<Record<string, readonly ItemStack[]>>) => Object.fromEntries(
   Object.entries(buffers).map(([portId, stacks]) => [portId, cloneStacks(stacks)]),
@@ -166,6 +171,7 @@ export class DataDrivenWorld {
   readonly bounds: WorldBounds;
   private readonly instances = new Map<string, BuildingInstance>();
   private readonly occupancy = new Map<string, string>();
+  private readonly foundations = new Map<string, string>();
   private readonly inventory = new Map<ItemId, number>();
   private readonly unlockedIds = new Set<UnlockId>();
   private readonly terrainPlacement?: WorldTerrainPlacementValidator;
@@ -201,8 +207,9 @@ export class DataDrivenWorld {
     return instance ? cloneInstance(instance) : null;
   }
 
-  instanceAt(cell: GridCell): BuildingInstance | null {
-    const id = this.occupancy.get(cellKey(cell));
+  instanceAt(cell: GridCell, stratumId = "surface"): BuildingInstance | null {
+    const key = cellKey(cell, stratumId);
+    const id = this.occupancy.get(key) ?? this.foundations.get(key);
     return id ? this.instance(id) : null;
   }
 
@@ -249,7 +256,7 @@ export class DataDrivenWorld {
       }
       if (!anchor.active) return { ok: false, reason: "resource_locked", itemId: anchor.itemId };
     }
-    const placementIssue = this.validatePlacement(definition, request.position, request.rotation);
+    const placementIssue = this.validatePlacement(definition, request.position, request.rotation, request.stratumId ?? "surface");
     if (placementIssue) return placementIssue;
     for (const cost of request.waiveBuildCost ? [] : aggregateStacks(definition.buildCost)) {
       if (this.inventoryAmount(cost.itemId) < cost.amount) {
@@ -273,6 +280,8 @@ export class DataDrivenWorld {
       request.rotation,
       buildCost,
       request.constructionCredit,
+      request.elevation,
+      request.stratumId,
     );
     // Cost, instance and occupancy become visible only after all checks pass.
     buildCost.forEach(({ itemId, amount }) => this.inventory.set(itemId, this.inventoryAmount(itemId) - amount));
@@ -355,8 +364,10 @@ export class DataDrivenWorld {
       return {
         definition: port,
         connectionCell: { x: instance.position.x + connection.x, z: instance.position.z + connection.z },
-        localPosition: { x: center.x + localPosition.x, y: localPosition.y, z: center.z + localPosition.z },
+        localPosition: { x: center.x + localPosition.x, y: localPosition.y + (instance.elevation ?? 0), z: center.z + localPosition.z },
         localFacing: rotateVector(port.localFacing, instance.rotation),
+        stratumId: instance.stratumId ?? "surface",
+        connectsStrata: definition.terrainPolicy?.connectsStrata === true,
       };
     });
   }
@@ -384,11 +395,16 @@ export class DataDrivenWorld {
 
     this.instances.clear();
     this.occupancy.clear();
+    this.foundations.clear();
     this.inventory.clear();
     this.unlockedIds.clear();
     snapshot.unlockedIds.forEach((id) => this.unlockedIds.add(id));
     snapshot.constructionInventory.forEach(({ itemId, amount }) => this.addInventory(itemId, amount));
-    snapshot.instances.forEach((saved) => {
+    [...snapshot.instances].sort((a, b) => {
+      const aFoundation = this.registry.buildings.get(a.definitionId)?.terrainPolicy?.role === "foundation" ? 0 : 1;
+      const bFoundation = this.registry.buildings.get(b.definitionId)?.terrainPolicy?.role === "foundation" ? 0 : 1;
+      return aFoundation - bFoundation;
+    }).forEach((saved) => {
       const definition = this.registry.buildings.get(saved.definitionId);
       if (!definition) throw new Error(`unknown snapshot building definition: ${saved.definitionId}`);
       if (definition.placementMode === "preplaced_unique") {
@@ -398,7 +414,7 @@ export class DataDrivenWorld {
           throw new Error(`preplaced snapshot transform mismatch: ${saved.definitionId}`);
         }
       }
-      const issue = this.validatePlacement(definition, saved.position, saved.rotation);
+      const issue = this.validatePlacement(definition, saved.position, saved.rotation, saved.stratumId ?? "surface");
       if (issue) throw new Error(`invalid snapshot placement for ${saved.id}: ${issue.reason}`);
       this.validateStacks([
         ...Object.values(saved.inputBuffersByPortId).flat(),
@@ -417,7 +433,7 @@ export class DataDrivenWorld {
       if (definition.placementMode !== "preplaced_unique") return;
       const policy = definition.preplacedPolicy;
       if (!policy) throw new Error(`preplaced definition lacks policy: ${definition.id}`);
-      const issue = this.validatePlacement(definition, policy.worldAnchor, policy.fixedRotation);
+      const issue = this.validatePlacement(definition, policy.worldAnchor, policy.fixedRotation, "surface");
       if (issue) throw new Error(`cannot seed ${definition.id}: ${issue.reason}`);
       const instance = this.createInstance(`preplaced:${definition.id}`, definition, policy.worldAnchor, policy.fixedRotation);
       this.insertInstance(instance, definition);
@@ -439,6 +455,8 @@ export class DataDrivenWorld {
     rotation: 0 | 1 | 2 | 3,
     paidBuildCost?: readonly ItemStack[],
     constructionCreditPaid?: Readonly<{ id: string; amount: number }>,
+    elevation?: number,
+    stratumId?: string,
   ): BuildingInstance {
     const inputBuffersByPortId: Record<string, readonly ItemStack[]> = {};
     const outputBuffersByPortId: Record<string, readonly ItemStack[]> = {};
@@ -461,6 +479,8 @@ export class DataDrivenWorld {
       ...(paidBuildCost ? { paidBuildCost: cloneStacks(paidBuildCost) } : {}),
       ...(constructionCreditPaid ? { constructionCreditPaid: { ...constructionCreditPaid } } : {}),
       ...(extractionRecipeId ? { selectedRecipeId: extractionRecipeId } : {}),
+      ...(elevation !== undefined && elevation !== 0 ? { elevation } : {}),
+      ...(stratumId && stratumId !== "surface" ? { stratumId } : {}),
     };
   }
 
@@ -468,6 +488,7 @@ export class DataDrivenWorld {
     definition: BuildingDefinition,
     position: GridCell,
     rotation: 0 | 1 | 2 | 3,
+    stratumId = "surface",
   ): Extract<WorldPlacementResult, { ok: false }> | null {
     if (!definition.allowedRotations.includes(rotation)) return { ok: false, reason: "invalid_rotation" };
     const cells = occupiedCells(definition, position, rotation);
@@ -476,9 +497,20 @@ export class DataDrivenWorld {
         || cell.z < this.bounds.minZ || cell.z > this.bounds.maxZ) {
         return { ok: false, reason: "out_of_bounds", cell };
       }
-      if (this.occupancy.has(cellKey(cell))) return { ok: false, reason: "occupied", cell };
+      const key = cellKey(cell, stratumId);
+      if (definition.terrainPolicy?.role === "foundation") {
+        if (this.foundations.has(key)) return { ok: false, reason: "occupied", cell };
+      } else if (this.occupancy.has(key)) return { ok: false, reason: "occupied", cell };
     }
-    const terrainIssue = this.terrainPlacement?.(definition, position, rotation);
+    const foundationCoverage = cells.every((cell) => this.foundations.has(cellKey(cell, stratumId)));
+    const center = { x: position.x + definition.footprint.x / 2, z: position.z + definition.footprint.z / 2 };
+    const hazardStabilized = [...this.instances.values()].some((instance) => {
+      const existing = this.registry.buildings.get(instance.definitionId);
+      if (existing?.terrainPolicy?.role !== "hazard_stabilizer" || (instance.stratumId ?? "surface") !== stratumId) return false;
+      const size = rotatedSize(existing, instance.rotation);
+      return Math.hypot(instance.position.x + size.x / 2 - center.x, instance.position.z + size.z / 2 - center.z) <= 7;
+    });
+    const terrainIssue = this.terrainPlacement?.(definition, position, rotation, { foundationCoverage, hazardStabilized, stratumId });
     if (terrainIssue && !terrainIssue.ok) return terrainIssue;
     return null;
   }
@@ -486,11 +518,13 @@ export class DataDrivenWorld {
   private insertInstance(instance: BuildingInstance, definition: BuildingDefinition) {
     if (this.instances.has(instance.id)) throw new Error(`duplicate world instance id: ${instance.id}`);
     this.instances.set(instance.id, instance);
-    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => this.occupancy.set(cellKey(cell), instance.id));
+    const target = definition.terrainPolicy?.role === "foundation" ? this.foundations : this.occupancy;
+    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.set(cellKey(cell, instance.stratumId ?? "surface"), instance.id));
   }
 
   private removeInstance(instance: BuildingInstance, definition: BuildingDefinition) {
-    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => this.occupancy.delete(cellKey(cell)));
+    const target = definition.terrainPolicy?.role === "foundation" ? this.foundations : this.occupancy;
+    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.delete(cellKey(cell, instance.stratumId ?? "surface")));
     this.instances.delete(instance.id);
   }
 

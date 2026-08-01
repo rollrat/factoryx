@@ -189,6 +189,8 @@ export const inferAdjacentPowerEdges = (world: DataDrivenWorld): readonly PowerE
       if (from.instance.id === to.instance.id
         || from.port.connectionCell.x !== to.port.connectionCell.x
         || from.port.connectionCell.z !== to.port.connectionCell.z
+        || (from.port.stratumId !== to.port.stratumId && !(from.port.connectsStrata && to.port.connectsStrata))
+        || Math.abs(from.port.localPosition.y - to.port.localPosition.y) > (from.port.definition.connectorProfile === "power_high_voltage" ? 8 : 3)
         || from.port.definition.connectorProfile !== to.port.definition.connectorProfile
         || from.port.localFacing.x !== -to.port.localFacing.x
         || from.port.localFacing.z !== -to.port.localFacing.z
