@@ -4,7 +4,6 @@ import {
   createBuildingModel,
   createFactoryMaterials,
   createItemModel,
-  createOrePatch,
   createStructureModel,
 } from "./models";
 import { animateMinerModel } from "./models/miner";
@@ -37,7 +36,15 @@ import {
   inferAdjacentPowerEdges,
   type PhysicalPowerTopology,
 } from "./sim/physicalPowerNetwork.ts";
+import type { LoadPriority } from "./sim/powerGrid.ts";
 import { WorldProductionSimulation } from "./sim/worldProduction.ts";
+import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
+import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
+import {
+  classifyBuildingLods,
+  createWorldBuildingLodSubjects,
+  frustumPlanesFromMatrix,
+} from "./models/buildingLod.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
@@ -94,6 +101,33 @@ const PROJECT_STAGE_NAMES: Readonly<Record<string, string>> = {
   phase_4_colony_seed: "AX-17 개척 시드",
 };
 
+export type RuntimePowerControlSnapshot = Readonly<{
+  capacityMW: number;
+  dispatchableMW: number;
+  requestedMW: number;
+  servedMW: number;
+  storedMWh: number;
+  mainBreakerTripped: boolean;
+  zones: readonly Readonly<{
+    id: string;
+    connected: boolean;
+    generators: number;
+    consumers: number;
+    batteries: number;
+  }>[];
+  breakers: readonly Readonly<{ instanceId: string; name: string; state: "closed" | "open" | "tripped" }>[];
+  switchboards: readonly Readonly<{
+    instanceId: string;
+    name: string;
+    outputs: Readonly<Record<LoadPriority, boolean>>;
+  }>[];
+}>;
+
+type MutablePowerControls = {
+  breakers: Record<string, "closed" | "open" | "tripped">;
+  switchboardOutputs: Record<string, Partial<Record<LoadPriority, boolean>>>;
+};
+
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly powerCoreGroup: THREE.Group;
@@ -109,12 +143,16 @@ export class FactoryRuntime {
   private readonly worldProduction: WorldProductionSimulation;
   private readonly dockFluidCommitter: ProjectDockFluidCommitter;
   private powerTopology: PhysicalPowerTopology;
+  private collisionIndex: WorldCollisionIndex;
+  private readonly powerControls: MutablePowerControls;
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
   private readonly worldItemMeshes = new Map<string, THREE.Group>();
   private readonly connectionGroups = new Map<string, THREE.Group>();
+  private readonly resourceGroups = new Map<string, THREE.Group>();
   private readonly history: HistoryEntry[] = [];
+  private readonly worldHistory = new WorldCommandHistory(120);
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -194,6 +232,7 @@ export class FactoryRuntime {
   private selectedUiClock = 0;
   private lastAutoSaveTime = 0;
   private lastConnectionSyncTime = -1;
+  private lastLodSyncTime = -1;
 
   constructor(
     private readonly mount: HTMLDivElement,
@@ -220,7 +259,12 @@ export class FactoryRuntime {
       60,
       restored?.dockFluidTransferCredit ?? 0,
     );
-    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world));
+    this.powerControls = {
+      breakers: { ...(restored?.powerControls?.breakers ?? {}) },
+      switchboardOutputs: Object.fromEntries(Object.entries(restored?.powerControls?.switchboardOutputs ?? {})
+        .map(([id, outputs]) => [id, { ...outputs }])),
+    };
+    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world), this.powerControls);
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -234,6 +278,10 @@ export class FactoryRuntime {
       this.firstPersonYaw = restored.firstPersonYaw;
       this.firstPersonPitch = restored.firstPersonPitch;
     }
+    this.collisionIndex = new WorldCollisionIndex(this.world);
+    const recoveredPlayer = recoverPlayerStart(this.collisionIndex, this.playerPosition);
+    this.playerPosition.x = recoveredPlayer.position.x;
+    this.playerPosition.z = recoveredPlayer.position.z;
     this.scene.background = new THREE.Color(0x071419);
     this.scene.fog = new THREE.FogExp2(0x071419, 0.027);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -351,9 +399,95 @@ export class FactoryRuntime {
     return this.campaignWorld.snapshot().dockSuppliedPowerMW;
   }
 
+  getPowerControlSnapshot(): RuntimePowerControlSnapshot {
+    const power = this.campaignWorld.powerResult();
+    const breakers = this.world.allInstances()
+      .filter(({ definitionId }) => definitionId === "power_breaker")
+      .map((instance) => ({
+        instanceId: instance.id,
+        name: START_REGISTRY.buildings.get(instance.definitionId)?.name ?? instance.definitionId,
+        state: this.powerControls.breakers[instance.id] ?? "closed" as const,
+      }));
+    const switchboards = this.world.allInstances()
+      .filter(({ definitionId }) => definitionId === "priority_switchboard")
+      .map((instance) => ({
+        instanceId: instance.id,
+        name: START_REGISTRY.buildings.get(instance.definitionId)?.name ?? instance.definitionId,
+        outputs: Object.fromEntries(([1, 2, 3, 4] as const).map((priority) => [
+          priority,
+          this.powerControls.switchboardOutputs[instance.id]?.[priority] ?? true,
+        ])) as Record<LoadPriority, boolean>,
+      }));
+    return {
+      capacityMW: power?.capacityMW ?? 0,
+      dispatchableMW: power?.dispatchableMW ?? 0,
+      requestedMW: power?.requestedMW ?? 0,
+      servedMW: power?.servedMW ?? 0,
+      storedMWh: power?.storedMWh ?? 0,
+      mainBreakerTripped: power?.mainBreakerTripped ?? false,
+      zones: this.powerTopology.zones.map((zone) => ({
+        id: zone.id,
+        connected: zone.generatorIds.length > 0 && zone.consumerIds.length > 0,
+        generators: zone.generatorIds.length,
+        consumers: zone.consumerIds.length,
+        batteries: zone.batteryIds.length,
+      })),
+      breakers,
+      switchboards,
+    };
+  }
+
+  togglePowerBreaker(instanceId: string) {
+    const instance = this.world.instance(instanceId);
+    if (instance?.definitionId !== "power_breaker") return false;
+    const next = (this.powerControls.breakers[instanceId] ?? "closed") === "closed" ? "open" : "closed";
+    this.powerControls.breakers[instanceId] = next;
+    this.syncConnectionModels();
+    this.callbacks.onToast(`${START_REGISTRY.buildings.get(instance.definitionId)?.name ?? "차단기"} · ${next === "closed" ? "투입" : "차단"}`);
+    return true;
+  }
+
+  togglePowerPriority(instanceId: string, priority: LoadPriority) {
+    const instance = this.world.instance(instanceId);
+    if (instance?.definitionId !== "priority_switchboard") return false;
+    const outputs = this.powerControls.switchboardOutputs[instanceId] ?? {};
+    outputs[priority] = !(outputs[priority] ?? true);
+    this.powerControls.switchboardOutputs[instanceId] = outputs;
+    this.syncConnectionModels();
+    this.callbacks.onToast(`P${priority} 구역 · ${outputs[priority] ? "연결" : "차단"}`);
+    return true;
+  }
+
+  sequentialPowerRestart() {
+    this.campaignWorld.powerGrid.sequentialRestart();
+    Object.keys(this.powerControls.breakers).forEach((id) => { this.powerControls.breakers[id] = "closed"; });
+    this.callbacks.onToast("전력망 순차 재기동을 시작했습니다");
+  }
+
+  cycleSelectedRecipe() {
+    if (this.selectedId === null) return false;
+    const selected = this.simulation.structures.get(this.selectedId);
+    const worldRecipeId = selected?.worldInstanceId
+      ? this.worldProduction.cycleRecipe(selected.worldInstanceId)
+      : null;
+    const recipe = worldRecipeId
+      ? START_REGISTRY.recipes.get(worldRecipeId) ?? null
+      : selected?.worldInstanceId ? null : this.simulation.cycleAssemblerRecipe(this.selectedId);
+    if (!recipe) {
+      this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
+      return false;
+    }
+    this.callbacks.onSelected(this.selectedInfo(this.selectedId));
+    this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
+    return true;
+  }
+
   toggleCameraMode() {
     if (this.inputLocked) return;
     if (this.cameraMode === "overview") {
+      const recovered = recoverPlayerStart(this.collisionIndex, this.playerPosition);
+      this.playerPosition.x = recovered.position.x;
+      this.playerPosition.z = recovered.position.z;
       this.cameraMode = "firstPerson";
       this.setTool("inspect");
       this.selectStructure(null);
@@ -448,15 +582,24 @@ export class FactoryRuntime {
       this.scene.add(edge);
     });
 
-    const ironPatch = createOrePatch(this.materials);
-    ironPatch.position.set(-7.5, 0, -2.5);
-    this.scene.add(ironPatch);
-    const copperPatch = createOrePatch(this.materials, true);
-    copperPatch.position.set(7.5, 0, 4.5);
-    this.scene.add(copperPatch);
-    const limestonePatch = createOrePatch(this.materials, false, true);
-    limestonePatch.position.set(-6.5, 0, 7.5);
-    this.scene.add(limestonePatch);
+    this.world.resourceAnchors().forEach((anchor) => {
+      const patch = new THREE.Group();
+      const offsets = anchor.medium === "fluid"
+        ? [[0, 0, 0]]
+        : [[-0.28, 0, -0.2], [0.25, 0.04, -0.12], [-0.04, 0.08, 0.28]];
+      offsets.forEach(([x, y, z], index) => {
+        const model = createItemModel(anchor.itemId, this.materials);
+        model.position.set(x, y, z);
+        model.rotation.y = index * 1.9;
+        model.scale.setScalar(anchor.medium === "fluid" ? 1.7 : 1.35);
+        patch.add(model);
+      });
+      patch.position.set(anchor.position.x + 0.5, 0.04, anchor.position.z + 0.5);
+      patch.visible = anchor.active;
+      patch.userData.resourceAnchorId = anchor.id;
+      this.resourceGroups.set(anchor.id, patch);
+      this.scene.add(patch);
+    });
     const core = createFieldPowerCoreModel(this.materials);
     core.position.set(1, 0, 1);
     this.scene.add(core);
@@ -547,6 +690,11 @@ export class FactoryRuntime {
       campaignWorld: this.campaignWorld.snapshot(),
       worldProduction,
       dockFluidTransferCredit: this.dockFluidCommitter.snapshot(),
+      powerControls: {
+        breakers: { ...this.powerControls.breakers },
+        switchboardOutputs: Object.fromEntries(Object.entries(this.powerControls.switchboardOutputs)
+          .map(([id, outputs]) => [id, { ...outputs }])),
+      },
       credits: this.credits,
       nextId: this.nextId,
       cameraMode: this.cameraMode,
@@ -584,6 +732,10 @@ export class FactoryRuntime {
 
   private publishConstructionState() {
     const snapshot = this.world.snapshot();
+    this.world.resourceAnchors().forEach((anchor) => {
+      const group = this.resourceGroups.get(anchor.id);
+      if (group) group.visible = anchor.active;
+    });
     this.callbacks.onConstructionState({
       unlockedIds: snapshot.unlockedIds,
       inventoryByItemId: Object.fromEntries(snapshot.constructionInventory.map(({ itemId, amount }) => [itemId, amount])),
@@ -620,7 +772,7 @@ export class FactoryRuntime {
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
-    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world));
+    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world), this.powerControls);
     this.powerTopology.cables.forEach((cable) => {
       const key = `power:${cable.id}`;
       active.add(key);
@@ -710,21 +862,6 @@ export class FactoryRuntime {
     return this.cameraMode === "firstPerson" ? this.firstPersonCamera : this.camera;
   }
 
-  private canPlayerStand(position: THREE.Vector3) {
-    const radius = 0.24;
-    const samples = [
-      [position.x - radius, position.z - radius],
-      [position.x + radius, position.z - radius],
-      [position.x - radius, position.z + radius],
-      [position.x + radius, position.z + radius],
-    ];
-    return samples.every(([x, z]) => {
-      if (Math.abs(x) > 12.45 || Math.abs(z) > 12.45) return false;
-      const structure = this.simulation.getStructureAt(Math.round(x), Math.round(z));
-      return !structure || structure.type === "belt";
-    });
-  }
-
   private updateFirstPerson(delta: number) {
     const forward = new THREE.Vector3(-Math.sin(this.firstPersonYaw), 0, -Math.cos(this.firstPersonYaw));
     const right = new THREE.Vector3(Math.cos(this.firstPersonYaw), 0, -Math.sin(this.firstPersonYaw));
@@ -740,14 +877,15 @@ export class FactoryRuntime {
     this.playerVelocity.x += (movement.x - this.playerVelocity.x) * damping;
     this.playerVelocity.z += (movement.z - this.playerVelocity.z) * damping;
 
-    const nextX = this.playerPosition.clone();
-    nextX.x += this.playerVelocity.x * delta;
-    if (this.canPlayerStand(nextX)) this.playerPosition.x = nextX.x;
-    else this.playerVelocity.x = 0;
-    const nextZ = this.playerPosition.clone();
-    nextZ.z += this.playerVelocity.z * delta;
-    if (this.canPlayerStand(nextZ)) this.playerPosition.z = nextZ.z;
-    else this.playerVelocity.z = 0;
+    const resolved = resolvePlayerMovement(
+      this.collisionIndex,
+      this.playerPosition,
+      { x: this.playerVelocity.x * delta, z: this.playerVelocity.z * delta },
+    );
+    this.playerPosition.x = resolved.position.x;
+    this.playerPosition.z = resolved.position.z;
+    if (resolved.contacts.some(({ normal }) => normal.x !== 0)) this.playerVelocity.x = 0;
+    if (resolved.contacts.some(({ normal }) => normal.z !== 0)) this.playerVelocity.z = 0;
 
     const moving = movement.lengthSq() > 0.01;
     const headBob = moving ? Math.sin(this.elapsed * (this.pressed.has("shift") ? 13 : 9)) * 0.025 : 0;
@@ -969,7 +1107,7 @@ export class FactoryRuntime {
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)
       : null;
     const worldPlacement = this.selectedBuildingId
-      ? this.world.place({
+      ? this.worldHistory.place(this.world, {
         buildingId: this.selectedBuildingId,
         position: { x: this.currentCell.x, z: this.currentCell.z },
         rotation: this.rotation as 0 | 1 | 2 | 3,
@@ -984,6 +1122,8 @@ export class FactoryRuntime {
         invalid_rotation: "지원하지 않는 회전입니다",
         unknown_building: "알 수 없는 설비입니다",
         preplaced_unique: "고정 설비는 건설할 수 없습니다",
+        invalid_resource_anchor: "이 채취 설비와 맞는 천연자원 지점이 아닙니다",
+        resource_locked: "아직 해금되지 않은 천연자원입니다",
       } as const;
       this.callbacks.onToast(messages[worldPlacement.reason]);
       return;
@@ -1005,7 +1145,10 @@ export class FactoryRuntime {
     if (!selectedDefinition) {
       this.history.push({ added: [{ ...data }], removed: [], creditDelta: -cost });
       this.changeCredits(this.credits - cost);
-    } else this.publishConstructionState();
+    } else {
+      this.collisionIndex = new WorldCollisionIndex(this.world);
+      this.publishConstructionState();
+    }
     const buildingName = this.selectedBuildingId
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)?.name
       : TYPE_NAME[type];
@@ -1022,7 +1165,7 @@ export class FactoryRuntime {
       ? START_REGISTRY.buildings.get(this.selectedBuildingId)
       : null;
     const worldPlacement = this.selectedBuildingId
-      ? this.world.placeBatch(this.beltPreviewCells.map((cell) => ({
+      ? this.worldHistory.placeBatch(this.world, this.beltPreviewCells.map((cell) => ({
         buildingId: this.selectedBuildingId!,
         position: { x: cell.x, z: cell.z },
         rotation: cell.rotation as 0 | 1 | 2 | 3,
@@ -1051,7 +1194,10 @@ export class FactoryRuntime {
     if (!selectedDefinition) {
       this.history.push({ added: added.map((data) => ({ ...data })), removed: [], creditDelta: -cost });
       this.changeCredits(this.credits - cost);
-    } else this.publishConstructionState();
+    } else {
+      this.collisionIndex = new WorldCollisionIndex(this.world);
+      this.publishConstructionState();
+    }
     const connected = added.some((belt) =>
       Array.from(this.simulation.structures.values()).some(
         (machine) => !isTransportType(machine.type)
@@ -1064,6 +1210,16 @@ export class FactoryRuntime {
   }
 
   private undo() {
+    if (this.worldHistory.canUndo) {
+      const result = this.worldHistory.undo(this.world);
+      if (result.ok) {
+        this.reconcileStructuresFromWorld();
+        this.callbacks.onToast(`되돌리기 · ${result.command.label}`);
+      } else {
+        this.callbacks.onToast(result.reason === "insufficient_inventory" ? "되돌릴 재료가 부족합니다" : "설비 상태가 바뀌어 안전하게 되돌릴 수 없습니다");
+      }
+      return;
+    }
     const entry = this.history.pop();
     if (!entry) {
       this.callbacks.onToast("되돌릴 작업이 없습니다");
@@ -1073,6 +1229,42 @@ export class FactoryRuntime {
     entry.removed.forEach((data) => this.addStructure(data));
     this.changeCredits(this.credits - entry.creditDelta);
     this.callbacks.onToast("마지막 작업을 되돌렸습니다");
+  }
+
+  private redo() {
+    const result = this.worldHistory.redo(this.world);
+    if (!result.ok) {
+      this.callbacks.onToast(result.reason === "empty" ? "다시 실행할 작업이 없습니다" : "현재 공장 상태에서는 다시 실행할 수 없습니다");
+      return;
+    }
+    this.reconcileStructuresFromWorld();
+    this.callbacks.onToast(`다시 실행 · ${result.command.label}`);
+  }
+
+  private reconcileStructuresFromWorld() {
+    const worldInstances = new Map(this.world.allInstances().map((instance) => [instance.id, instance]));
+    [...this.simulation.structures.values()]
+      .filter(({ worldInstanceId }) => worldInstanceId && !worldInstances.has(worldInstanceId))
+      .forEach(({ id }) => this.removeStructure(id));
+    const mirroredIds = new Set([...this.simulation.structures.values()].map(({ worldInstanceId }) => worldInstanceId).filter(Boolean));
+    worldInstances.forEach((instance) => {
+      const definition = START_REGISTRY.buildings.get(instance.definitionId);
+      if (!definition || definition.placementMode === "preplaced_unique" || mirroredIds.has(instance.id)) return;
+      this.addStructure({
+        id: this.nextId++,
+        type: legacyTypeForBuilding(instance.definitionId),
+        buildingId: instance.definitionId,
+        worldInstanceId: instance.id,
+        x: instance.position.x,
+        z: instance.position.z,
+        rotation: instance.rotation,
+      });
+    });
+    this.worldProduction.syncWorld();
+    this.collisionIndex = new WorldCollisionIndex(this.world);
+    this.publishConstructionState();
+    this.syncConnectionModels();
+    this.updateGhost();
   }
 
   private onPointerMove = (event: PointerEvent) => {
@@ -1169,7 +1361,14 @@ export class FactoryRuntime {
       }
       const structure = this.simulation.structures.get(id);
       if (structure?.worldInstanceId) {
-        const demolition = this.worldProduction.demolish(structure.worldInstanceId);
+        // Synchronize live buffers/WIP before the command captures its undo boundary.
+        this.worldProduction.snapshot();
+        const demolition = this.worldHistory.execute(
+          this.world,
+          "demolish",
+          `철거 · ${structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId)?.name : structure.worldInstanceId}`,
+          () => this.worldProduction.demolish(structure.worldInstanceId!),
+        );
         if (!demolition.ok) {
           this.callbacks.onToast("이 설비는 철거할 수 없습니다");
           return;
@@ -1178,6 +1377,7 @@ export class FactoryRuntime {
       const removed = this.removeStructure(id);
       if (removed) {
         if (removed.worldInstanceId) {
+          this.collisionIndex = new WorldCollisionIndex(this.world);
           this.publishConstructionState();
           this.callbacks.onToast(`${removed.buildingId ? START_REGISTRY.buildings.get(removed.buildingId)?.name : TYPE_NAME[removed.type]} 철거 · 재료 회수`);
         } else {
@@ -1231,19 +1431,7 @@ export class FactoryRuntime {
     };
     if (tools[key]) this.setTool(tools[key]);
     if (key === "f" && this.activeTool === "inspect" && this.selectedId !== null) {
-      const selected = this.simulation.structures.get(this.selectedId);
-      const worldRecipeId = selected?.worldInstanceId
-        ? this.worldProduction.cycleRecipe(selected.worldInstanceId)
-        : null;
-      const recipe = worldRecipeId
-        ? START_REGISTRY.recipes.get(worldRecipeId) ?? null
-        : selected?.worldInstanceId ? null : this.simulation.cycleAssemblerRecipe(this.selectedId);
-      if (recipe) {
-        this.callbacks.onSelected(this.selectedInfo(this.selectedId));
-        this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
-      } else {
-        this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
-      }
+      this.cycleSelectedRecipe();
       return;
     }
     if (key === "r") {
@@ -1259,7 +1447,12 @@ export class FactoryRuntime {
     if (key === "escape") this.setTool("inspect");
     if (key === "z" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      this.undo();
+      if (event.shiftKey) this.redo();
+      else this.undo();
+    }
+    if (key === "y" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      this.redo();
     }
   };
 
@@ -1361,6 +1554,30 @@ export class FactoryRuntime {
     });
   }
 
+  private updateBuildingLods() {
+    const camera = this.activeCamera;
+    camera.updateMatrixWorld();
+    const projectionView = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const decisions = new Map(classifyBuildingLods(
+      createWorldBuildingLodSubjects(this.world),
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      {
+        nearDistance: this.cameraMode === "firstPerson" ? 12 : 18,
+        farDistance: this.cameraMode === "firstPerson" ? 32 : 45,
+        maxDistance: this.cameraMode === "firstPerson" ? 72 : 95,
+        frustumPlanes: frustumPlanesFromMatrix(projectionView.elements),
+      },
+    ).map((decision) => [decision.instanceId, decision]));
+    this.simulation.structures.forEach((structure, id) => {
+      if (!structure.worldInstanceId) return;
+      const group = this.groups.get(id);
+      const decision = decisions.get(structure.worldInstanceId);
+      if (!group || !decision) return;
+      group.visible = decision.visible;
+      group.userData.lodTier = decision.detailTier;
+    });
+  }
+
   private animateMachines(delta: number) {
     const campaignPower = this.campaignWorld.powerResult();
     const legacyPower = this.simulation.getPowerGrid();
@@ -1372,7 +1589,8 @@ export class FactoryRuntime {
       : legacyPower.overloaded;
     this.simulation.structures.forEach((data, id) => {
       const group = this.groups.get(id);
-      if (!group) return;
+      if (!group || !group.visible) return;
+      if (group.userData.lodTier === 2 && (Math.floor(this.elapsed * 4) + id) % 4 !== 0) return;
       const state = this.simulation.machines.get(id);
       const worldState = data.worldInstanceId ? this.worldProduction.nodeState(data.worldInstanceId) : null;
       const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
@@ -1696,6 +1914,10 @@ export class FactoryRuntime {
     if (this.elapsed - this.lastConnectionSyncTime >= 0.25) {
       this.lastConnectionSyncTime = this.elapsed;
       this.syncConnectionModels();
+    }
+    if (this.elapsed - this.lastLodSyncTime >= 0.25) {
+      this.lastLodSyncTime = this.elapsed;
+      this.updateBuildingLods();
     }
     this.syncPhaseOneCampaign();
     this.publishPower();

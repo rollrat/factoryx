@@ -10,6 +10,11 @@ import type {
   PortDefinition,
   UnlockId,
 } from "../domain/types.ts";
+import {
+  RESOURCE_ANCHORS,
+  getResourceAnchorAt,
+  type ResourceAnchorDefinition,
+} from "../data/resourceAnchors.ts";
 
 export type WorldBounds = Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
 
@@ -39,6 +44,8 @@ export type WorldPlacementResult =
       | "invalid_rotation"
       | "out_of_bounds"
       | "occupied"
+      | "invalid_resource_anchor"
+      | "resource_locked"
       | "insufficient_materials";
     itemId?: ItemId;
     cell?: GridCell;
@@ -182,6 +189,25 @@ export class DataDrivenWorld {
     this.unlockedIds.add(unlockId);
   }
 
+  isUnlockActive(unlockId: UnlockId): boolean {
+    return this.unlockedIds.has(unlockId);
+  }
+
+  resourceAnchors(): readonly Readonly<ResourceAnchorDefinition & { active: boolean }>[] {
+    return RESOURCE_ANCHORS.map((anchor) => ({
+      ...anchor,
+      position: { ...anchor.position },
+      active: this.registry.items.has(anchor.itemId) && this.unlockedIds.has(anchor.unlockId),
+    }));
+  }
+
+  resourceAnchorAt(position: GridCell): Readonly<ResourceAnchorDefinition & { active: boolean }> | null {
+    const anchor = getResourceAnchorAt(position);
+    return anchor && this.registry.items.has(anchor.itemId)
+      ? { ...anchor, position: { ...anchor.position }, active: this.unlockedIds.has(anchor.unlockId) }
+      : null;
+  }
+
   grantItems(stacks: readonly ItemStack[]): void {
     stacks.forEach(({ itemId, amount }) => this.addInventory(itemId, amount));
   }
@@ -191,6 +217,13 @@ export class DataDrivenWorld {
     if (!definition) return { ok: false, reason: "unknown_building" };
     if (definition.placementMode === "preplaced_unique") return { ok: false, reason: "preplaced_unique" };
     if (!this.unlockedIds.has(definition.unlockId)) return { ok: false, reason: "locked" };
+    if (definition.id === "vein_miner" || definition.id === "fluid_extractor") {
+      const anchor = this.resourceAnchorAt(request.position);
+      if (!anchor || anchor.extractionBuildingId !== definition.id) {
+        return { ok: false, reason: "invalid_resource_anchor" };
+      }
+      if (!anchor.active) return { ok: false, reason: "resource_locked", itemId: anchor.itemId };
+    }
     const placementIssue = this.validatePlacement(definition, request.position, request.rotation);
     if (placementIssue) return placementIssue;
     for (const cost of aggregateStacks(definition.buildCost)) {
@@ -383,6 +416,8 @@ export class DataDrivenWorld {
       if (port.direction !== "output") inputBuffersByPortId[port.id] = [];
       if (port.direction !== "input") outputBuffersByPortId[port.id] = [];
     });
+    const anchor = this.resourceAnchorAt(position);
+    const extractionRecipeId = anchor?.extractionBuildingId === definition.id ? anchor.recipeId : undefined;
     return {
       id,
       definitionId: definition.id,
@@ -393,6 +428,7 @@ export class DataDrivenWorld {
       inputBuffersByPortId,
       outputBuffersByPortId,
       workInProgress: [],
+      ...(extractionRecipeId ? { selectedRecipeId: extractionRecipeId } : {}),
     };
   }
 

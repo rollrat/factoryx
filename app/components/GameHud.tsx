@@ -37,6 +37,8 @@ type GameHudProps = {
   onLineageToggle: () => void;
   onBuildCatalogToggle: () => void;
   onProjectProgressToggle: () => void;
+  onPowerControlToggle: () => void;
+  onRecipeCycle: () => void;
 };
 
 type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
@@ -136,6 +138,8 @@ export default function GameHud({
   onLineageToggle,
   onBuildCatalogToggle,
   onProjectProgressToggle,
+  onPowerControlToggle,
+  onRecipeCycle,
 }: GameHudProps) {
   const activeToolButtonRef = useRef<HTMLButtonElement>(null);
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
@@ -174,6 +178,8 @@ export default function GameHud({
     ?? (isCrusher
       ? "원광을 파쇄해 다음 공정으로 공급"
       : isSplitter ? "연결된 출력으로 균등 분배" : isMerger ? "준비된 입력을 순차 병합" : null);
+  const canCycleRecipe = Boolean(selectedDetails?.buildingId
+    && (START_REGISTRY.buildings.get(selectedDetails.buildingId)?.recipeIds.length ?? 0) > 1);
 
   useEffect(() => {
     activeToolButtonRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -259,7 +265,12 @@ export default function GameHud({
             </div>
           </div>
 
-          {equipmentMode ? <div className="equipment-recipe">{equipmentMode}</div> : null}
+          {equipmentMode ? (
+            <div className="equipment-recipe-row">
+              <div className="equipment-recipe">{equipmentMode}</div>
+              {canCycleRecipe ? <button type="button" onClick={onRecipeCycle}>레시피 변경 <kbd>F</kbd></button> : null}
+            </div>
+          ) : null}
 
           <div className="process-meter">
             <div className="process-meter-head">
@@ -403,6 +414,11 @@ export default function GameHud({
         <span aria-hidden="true">◈</span>
         <strong>프로젝트 계약</strong>
         <kbd>P</kbd>
+      </button>
+      <button className="power-control-button instrument-panel" onClick={onPowerControlToggle} aria-label="전력망 제어실 열기">
+        <span aria-hidden="true">ϟ</span>
+        <strong>전력망 제어</strong>
+        <kbd>H</kbd>
       </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>

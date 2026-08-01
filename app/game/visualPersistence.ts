@@ -4,6 +4,7 @@ import { START_REGISTRY } from "./data/index.ts";
 import { DataDrivenWorld, type WorldSnapshot } from "./sim/world.ts";
 import { CampaignWorldRuntime, type CampaignWorldSnapshot } from "./sim/campaignWorld.ts";
 import { WorldProductionSimulation, type WorldProductionSnapshot } from "./sim/worldProduction.ts";
+import type { PowerNetworkControls } from "./sim/physicalPowerNetwork.ts";
 import type { CameraMode } from "./types.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
@@ -15,6 +16,7 @@ export type FactoryRuntimeSnapshot = Readonly<{
   campaignWorld?: CampaignWorldSnapshot;
   worldProduction?: WorldProductionSnapshot;
   dockFluidTransferCredit?: number;
+  powerControls?: PowerNetworkControls;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -46,10 +48,11 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
   const expectedWithCampaign = [...expected, "world", "campaignWorld"].sort();
   const expectedWithProduction = [...expected, "world", "campaignWorld", "worldProduction"].sort();
   const expectedWithFluidDelivery = [...expectedWithProduction, "dockFluidTransferCredit"].sort();
+  const expectedWithPowerControls = [...expectedWithFluidDelivery, "powerControls"].sort();
   const matches = (candidate: readonly string[]) => keys.length === candidate.length
     && keys.every((key, index) => key === candidate[index]);
   if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign)
-    && !matches(expectedWithProduction) && !matches(expectedWithFluidDelivery)) return false;
+    && !matches(expectedWithProduction) && !matches(expectedWithFluidDelivery) && !matches(expectedWithPowerControls)) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -62,6 +65,22 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     || !isFiniteNumber(value.firstPersonPitch)
     || (value.dockFluidTransferCredit !== undefined
       && (!isFiniteNumber(value.dockFluidTransferCredit) || value.dockFluidTransferCredit < 0 || value.dockFluidTransferCredit > 1 + Number.EPSILON))) return false;
+  if (value.powerControls !== undefined) {
+    if (!isRecord(value.powerControls)) return false;
+    const controlKeys = Object.keys(value.powerControls);
+    if (controlKeys.some((key) => key !== "breakers" && key !== "switchboardOutputs")) return false;
+    if (value.powerControls.breakers !== undefined) {
+      if (!isRecord(value.powerControls.breakers)
+        || Object.values(value.powerControls.breakers).some((state) => !["closed", "open", "tripped"].includes(state as string))) return false;
+    }
+    if (value.powerControls.switchboardOutputs !== undefined) {
+      if (!isRecord(value.powerControls.switchboardOutputs)) return false;
+      for (const outputs of Object.values(value.powerControls.switchboardOutputs)) {
+        if (!isRecord(outputs) || Object.keys(outputs).some((priority) => !["1", "2", "3", "4"].includes(priority))
+          || Object.values(outputs).some((enabled) => typeof enabled !== "boolean")) return false;
+      }
+    }
+  }
   try {
     new FactorySimulation(24, value.simulation as FactorySimulationSnapshot);
     if (value.world !== undefined) {

@@ -53,8 +53,21 @@ test("visual runtime save preserves the integrated world, campaign, and power sn
     campaignWorld: campaignWorld.snapshot(),
     worldProduction: worldProduction.snapshot(),
     dockFluidTransferCredit: 0.5,
+    powerControls: { breakers: {}, switchboardOutputs: {} },
   };
   const decoded = factoryRuntimeSaveCodec.decode(factoryRuntimeSaveCodec.encode(integrated, { nowMs: 20 }));
   assert.equal(decoded.ok, true);
   if (decoded.ok) assert.deepEqual(decoded.value.snapshot, integrated);
+});
+
+test("visual runtime save rejects malformed power control state", () => {
+  const original = snapshot();
+  assert.equal(isFactoryRuntimeSnapshot({
+    ...original,
+    world: undefined,
+    campaignWorld: undefined,
+    worldProduction: undefined,
+    dockFluidTransferCredit: 0,
+    powerControls: { breakers: { bad: "half_open" }, switchboardOutputs: {} },
+  }), false);
 });

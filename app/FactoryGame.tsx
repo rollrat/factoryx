@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { BuildCatalogDialog } from "./components/BuildCatalog";
 import GameHud, { type ProjectHudState } from "./components/GameHud";
 import ProjectProgressPanel from "./components/ProjectProgressPanel";
+import PowerControlPanel from "./components/PowerControlPanel";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
-import { FactoryRuntime } from "./game/runtime";
+import { FactoryRuntime, type RuntimePowerControlSnapshot } from "./game/runtime";
 import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.ts";
 import type { CampaignSnapshot } from "./game/sim/campaign.ts";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
@@ -25,6 +26,10 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
 };
 
 const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
+const INITIAL_POWER_CONTROL: RuntimePowerControlSnapshot = {
+  capacityMW: 0, dispatchableMW: 0, requestedMW: 0, servedMW: 0, storedMWh: 0,
+  mainBreakerTripped: false, zones: [], breakers: [], switchboards: [],
+};
 const START_UNLOCKS: readonly UnlockId[] = ["start"];
 const INITIAL_PROJECT: ProjectHudState = {
   stageName: "기초 정착 패키지",
@@ -101,6 +106,7 @@ export default function FactoryGame({
   const [lineageOpen, setLineageOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
+  const [powerControlOpen, setPowerControlOpen] = useState(false);
   const [catalogBuildingId, setCatalogBuildingId] = useState<string | null>(null);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
@@ -111,6 +117,7 @@ export default function FactoryGame({
   }));
   const [campaignSnapshot, setCampaignSnapshot] = useState<CampaignSnapshot | null>(null);
   const [dockSuppliedPowerMW, setDockSuppliedPowerMW] = useState(0);
+  const [powerControl, setPowerControl] = useState<RuntimePowerControlSnapshot>(INITIAL_POWER_CONTROL);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -139,10 +146,12 @@ export default function FactoryGame({
     setTopology(runtime.getProductionTopology());
     setCampaignSnapshot(runtime.getCampaignSnapshot());
     setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
+    setPowerControl(runtime.getPowerControlSnapshot());
     const telemetryTimer = window.setInterval(() => {
       setTopology(runtime.getProductionTopology());
       setCampaignSnapshot(runtime.getCampaignSnapshot());
       setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
+      setPowerControl(runtime.getPowerControlSnapshot());
     }, 250);
     return () => {
       window.clearInterval(telemetryTimer);
@@ -158,6 +167,7 @@ export default function FactoryGame({
         setLineageOpen(false);
         setCatalogOpen(false);
         setProjectOpen(false);
+        setPowerControlOpen(false);
         return;
       }
       if (
@@ -167,7 +177,7 @@ export default function FactoryGame({
         && !event.altKey
         && !isTextEntryTarget(event.target)
         && !catalogOpen
-        && !projectOpen
+        && !projectOpen && !powerControlOpen
       ) {
         event.preventDefault();
         if (event.repeat) return;
@@ -179,18 +189,28 @@ export default function FactoryGame({
         && !event.ctrlKey && !event.metaKey && !event.altKey
         && !isTextEntryTarget(event.target)
         && !lineageOpen && !catalogOpen
+        && !powerControlOpen
       ) {
         event.preventDefault();
         if (!event.repeat) setProjectOpen((open) => !open);
       }
+      if (
+        event.key.toLowerCase() === "h"
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !isTextEntryTarget(event.target)
+        && !lineageOpen && !catalogOpen && !projectOpen
+      ) {
+        event.preventDefault();
+        if (!event.repeat) setPowerControlOpen((open) => !open);
+      }
     };
     window.addEventListener("keydown", handleLineageKey);
     return () => window.removeEventListener("keydown", handleLineageKey);
-  }, [catalogOpen, lineageOpen, projectOpen]);
+  }, [catalogOpen, lineageOpen, powerControlOpen, projectOpen]);
 
   useEffect(() => {
-    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen || projectOpen);
-  }, [catalogOpen, lineageOpen, projectOpen]);
+    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen || projectOpen || powerControlOpen);
+  }, [catalogOpen, lineageOpen, powerControlOpen, projectOpen]);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
   const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();
@@ -225,19 +245,47 @@ export default function FactoryGame({
         onLineageToggle={() => {
           setCatalogOpen(false);
           setProjectOpen(false);
+          setPowerControlOpen(false);
           setLineageOpen((open) => !open);
         }}
         onBuildCatalogToggle={() => {
           setLineageOpen(false);
           setProjectOpen(false);
+          setPowerControlOpen(false);
           setCatalogOpen((open) => !open);
         }}
         onProjectProgressToggle={() => {
           setLineageOpen(false);
           setCatalogOpen(false);
+          setPowerControlOpen(false);
           setProjectOpen((open) => !open);
         }}
+        onPowerControlToggle={() => {
+          setLineageOpen(false);
+          setCatalogOpen(false);
+          setProjectOpen(false);
+          setPowerControlOpen((open) => !open);
+        }}
+        onRecipeCycle={() => runtimeRef.current?.cycleSelectedRecipe()}
       />
+      {powerControlOpen ? (
+        <PowerControlPanel
+          snapshot={powerControl}
+          onClose={() => setPowerControlOpen(false)}
+          onToggleBreaker={(instanceId) => {
+            runtimeRef.current?.togglePowerBreaker(instanceId);
+            if (runtimeRef.current) setPowerControl(runtimeRef.current.getPowerControlSnapshot());
+          }}
+          onTogglePriority={(instanceId, priority) => {
+            runtimeRef.current?.togglePowerPriority(instanceId, priority);
+            if (runtimeRef.current) setPowerControl(runtimeRef.current.getPowerControlSnapshot());
+          }}
+          onRestart={() => {
+            runtimeRef.current?.sequentialPowerRestart();
+            if (runtimeRef.current) setPowerControl(runtimeRef.current.getPowerControlSnapshot());
+          }}
+        />
+      ) : null}
       {projectOpen && campaignSnapshot ? (
         <div className="project-progress-overlay" role="dialog" aria-modal="true" aria-label="프로젝트 계약 진행 상황">
           <button className="project-progress-close" type="button" onClick={() => setProjectOpen(false)} aria-label="프로젝트 진행 상황 닫기">닫기 <kbd>ESC</kbd></button>

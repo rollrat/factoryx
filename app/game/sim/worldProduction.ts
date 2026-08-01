@@ -120,7 +120,11 @@ export class WorldProductionSimulation {
       };
       const inputs = new Map(definition.ports.filter(allowsInput).map((port) => [port.id, makeInventory(port)]));
       const outputs = new Map(definition.ports.filter(allowsOutput).map((port) => [port.id, makeInventory(port)]));
-      const selectedRecipeId = instance.selectedRecipeId
+      const extractionRecipeId = (definition.id === "vein_miner" || definition.id === "fluid_extractor")
+        ? this.world.resourceAnchorAt(instance.position)?.recipeId
+        : undefined;
+      const selectedRecipeId = extractionRecipeId
+        ?? instance.selectedRecipeId
         ?? definition.recipeIds.find((id) => this.world.registry.recipes.has(id))
         ?? null;
       const recipe = selectedRecipeId ? this.world.registry.recipes.get(selectedRecipeId) : undefined;
@@ -151,6 +155,8 @@ export class WorldProductionSimulation {
     const node = this.nodes.get(instanceId);
     const recipe = this.world.registry.recipes.get(recipeId);
     if (!node || !recipe || recipe.buildingId !== node.definition.id || !node.definition.recipeIds.includes(recipeId)) return false;
+    if ((node.definition.id === "vein_miner" || node.definition.id === "fluid_extractor")
+      && this.world.resourceAnchorAt(this.world.instance(instanceId)!.position)?.recipeId !== recipeId) return false;
     if (node.process?.snapshot().workInProgress) return false;
     if ([...node.inputs.values(), ...node.outputs.values()].some(({ amount }) => amount > 0)) return false;
     node.selectedRecipeId = recipeId;

@@ -472,6 +472,11 @@ button {
   white-space: nowrap;
 }
 
+.equipment-recipe-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.equipment-recipe-row .equipment-recipe { min-width: 0; }
+.equipment-recipe-row button { flex: none; margin-top: 7px; border: 1px solid var(--line); padding: 5px 7px; color: var(--cyan); background: var(--hud-raised); font: 700 8px/1 var(--font-geist-mono), monospace; cursor: pointer; }
+.equipment-recipe-row button:hover { border-color: var(--cyan); }
+
 .process-meter {
   margin-top: 14px;
   padding: 9px 0 11px;
@@ -1106,6 +1111,24 @@ kbd {
   pointer-events: auto;
 }
 
+.power-control-button {
+  position: absolute;
+  right: 14px;
+  bottom: 182px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 0;
+  color: #b8c4c3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.power-control-button > span { color: var(--amber); }
+.power-control-button strong { font: 700 8px/1 var(--font-geist-mono), monospace; }
+.power-control-button:hover { border-color: var(--line-strong); background: var(--hud-raised); }
+
 .project-launch-button > span { color: var(--amber); }
 .project-launch-button strong { font: 700 8px/1 var(--font-geist-mono), monospace; }
 .project-launch-button:hover { border-color: var(--line-strong); background: var(--hud-raised); }
@@ -1283,6 +1306,9 @@ kbd {
     right: 8px;
     bottom: 152px;
   }
+
+  .project-launch-button { right: 8px; bottom: 192px; }
+  .power-control-button { right: 8px; bottom: 232px; }
 }
 
 @media (max-width: 480px) {
