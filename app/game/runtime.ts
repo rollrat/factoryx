@@ -16,13 +16,13 @@ import { animateCrusherModel } from "./models/crusher";
 import { animateGenericBuildingModel } from "./models/genericBuilding.ts";
 import {
   animateConnectionModel,
+  createPowerCableConnectionModel,
   createPortConnectionModel,
   type ResolvedWorldPort,
 } from "./models/connection.ts";
 import {
   animateDistributionPoleModel,
   animateFieldPowerCoreModel,
-  createDistributionPoleModel,
   createFieldPowerCoreModel,
 } from "./models/power";
 import { animateProjectDockModel, createProjectDockModel } from "./models/projectDock";
@@ -31,13 +31,19 @@ import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
 import type { DataDrivenWorld } from "./sim/world.ts";
 import { CampaignWorldRuntime, type PowerInstanceOverride } from "./sim/campaignWorld.ts";
+import { ProjectDockFluidCommitter } from "./sim/campaignProduction.ts";
+import {
+  buildPhysicalPowerTopology,
+  inferAdjacentPowerEdges,
+  type PhysicalPowerTopology,
+} from "./sim/physicalPowerNetwork.ts";
 import { WorldProductionSimulation } from "./sim/worldProduction.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
 } from "./visualPersistence.ts";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
-import { buildRuntimeTopology } from "./telemetry/topology.ts";
+import { buildWorldRuntimeTopology } from "./telemetry/worldTopology.ts";
 import type {
   BuildingId,
   BuildType,
@@ -45,6 +51,7 @@ import type {
   Cell,
   GameCallbacks,
   HistoryEntry,
+  SelectedInfo,
   StructureData,
   Tool,
 } from "./types";
@@ -100,9 +107,12 @@ export class FactoryRuntime {
   private readonly world: DataDrivenWorld;
   private readonly campaignWorld: CampaignWorldRuntime;
   private readonly worldProduction: WorldProductionSimulation;
+  private readonly dockFluidCommitter: ProjectDockFluidCommitter;
+  private powerTopology: PhysicalPowerTopology;
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
+  private readonly worldItemMeshes = new Map<string, THREE.Group>();
   private readonly connectionGroups = new Map<string, THREE.Group>();
   private readonly history: HistoryEntry[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -204,6 +214,13 @@ export class FactoryRuntime {
     this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
     if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
     this.worldProduction = new WorldProductionSimulation(this.world, restored?.worldProduction);
+    this.dockFluidCommitter = new ProjectDockFluidCommitter(
+      this.campaignWorld,
+      this.worldProduction,
+      60,
+      restored?.dockFluidTransferCredit ?? 0,
+    );
+    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world));
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -323,7 +340,7 @@ export class FactoryRuntime {
   }
 
   getProductionTopology() {
-    return buildRuntimeTopology(this.simulation);
+    return buildWorldRuntimeTopology(this.campaignWorld, this.worldProduction);
   }
 
   getCampaignSnapshot() {
@@ -441,11 +458,11 @@ export class FactoryRuntime {
     limestonePatch.position.set(-6.5, 0, 7.5);
     this.scene.add(limestonePatch);
     const core = createFieldPowerCoreModel(this.materials);
-    core.position.set(9.5, 0, -9.5);
+    core.position.set(1, 0, 1);
     this.scene.add(core);
-    const pole = createDistributionPoleModel(this.materials);
-    pole.position.set(7.5, 0, -9.5);
-    this.scene.add(pole);
+    // Distribution poles are player-built world instances. Keep no decorative
+    // duplicate that could imply a power connection which does not exist.
+    const pole = new THREE.Group();
     const projectDock = createProjectDockModel(this.materials);
     projectDock.position.set(8.5, 0, 8.5);
     this.scene.add(projectDock);
@@ -529,6 +546,7 @@ export class FactoryRuntime {
       world: this.world.snapshot(),
       campaignWorld: this.campaignWorld.snapshot(),
       worldProduction,
+      dockFluidTransferCredit: this.dockFluidCommitter.snapshot(),
       credits: this.credits,
       nextId: this.nextId,
       cameraMode: this.cameraMode,
@@ -602,6 +620,16 @@ export class FactoryRuntime {
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
+    this.powerTopology = buildPhysicalPowerTopology(this.world, inferAdjacentPowerEdges(this.world));
+    this.powerTopology.cables.forEach((cable) => {
+      const key = `power:${cable.id}`;
+      active.add(key);
+      if (this.connectionGroups.has(key)) return;
+      const group = createPowerCableConnectionModel(cable, START_REGISTRY, this.materials);
+      group.userData.connectionKey = key;
+      this.connectionGroups.set(key, group);
+      this.scene.add(group);
+    });
     this.connectionGroups.forEach((group, key) => {
       if (active.has(key)) return;
       this.scene.remove(group);
@@ -610,11 +638,31 @@ export class FactoryRuntime {
   }
 
   private animateConnections() {
-    this.connectionGroups.forEach((group) => animateConnectionModel(group, {
-      time: this.elapsed,
-      activity: 1,
-      flowing: true,
-    }));
+    const states = new Map(this.worldProduction.connectionStates().map((connection) => [
+      `${connection.fromInstanceId}:${connection.fromPortId}->${connection.toInstanceId}:${connection.toPortId}`,
+      connection,
+    ]));
+    this.connectionGroups.forEach((group, key) => {
+      if (key.startsWith("power:")) {
+        const cable = this.powerTopology.cables.find(({ id }) => `power:${id}` === key);
+        const zone = cable?.gridId ? this.powerTopology.zones.find(({ id }) => id === cable.gridId) : null;
+        const energized = Boolean(cable?.enabled && zone && zone.generatorIds.length > 0);
+        animateConnectionModel(group, {
+          time: this.elapsed,
+          activity: energized ? 1 : 0,
+          flowing: energized,
+          blocked: !cable?.enabled,
+        });
+        return;
+      }
+      const state = states.get(key);
+      animateConnectionModel(group, {
+        time: this.elapsed,
+        activity: state?.flowing ? 1 : 0,
+        flowing: state?.flowing ?? false,
+        blocked: state?.blocked ?? false,
+      });
+    });
   }
 
   private save(paused: boolean) {
@@ -862,7 +910,49 @@ export class FactoryRuntime {
 
   private selectStructure(id: number | null) {
     this.selectedId = id;
-    this.callbacks.onSelected(id === null ? null : this.simulation.getSelectedInfo(id));
+    this.callbacks.onSelected(id === null ? null : this.selectedInfo(id));
+  }
+
+  private selectedInfo(id: number): SelectedInfo {
+    const data = this.simulation.structures.get(id);
+    if (!data?.worldInstanceId) return this.simulation.getSelectedInfo(id);
+    const state = this.worldProduction.nodeState(data.worldInstanceId);
+    const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
+    if (!state || !definition) return this.simulation.getSelectedInfo(id);
+    const recipe = state.selectedRecipeId ? START_REGISTRY.recipes.get(state.selectedRecipeId) : null;
+    const items = (inventories: typeof state.inputs) => inventories
+      .filter(({ itemId, amount }) => itemId && amount > 0)
+      .map(({ itemId, amount }) => ({
+        itemId: itemId!,
+        name: START_REGISTRY.items.get(itemId!)?.name ?? itemId!,
+        amount,
+      }));
+    const total = (inventories: typeof state.inputs, key: "amount" | "capacity") => (
+      inventories.reduce((sum, inventory) => sum + inventory[key], 0)
+    );
+    const status = {
+      working: "가동 중",
+      starved: "원료 부족",
+      blocked: "출력 막힘",
+      disconnected: "연결 끊김",
+      paused: state.powerSatisfaction < 0.999 ? "전력 부족" : "일시 정지",
+      idle: recipe ? "가동 대기" : "물류 대기",
+    }[state.runtimeState];
+    return {
+      id,
+      type: data.type,
+      buildingId: definition.id,
+      status,
+      runtimeState: state.runtimeState,
+      recipeName: recipe?.name ?? (definition.recipeIds.length > 0 ? "레시피 선택 필요" : "물류 처리"),
+      progress: state.progress,
+      inputCount: total(state.inputs, "amount"),
+      inputItems: items(state.inputs),
+      inputCapacity: total(state.inputs, "capacity"),
+      outputCount: total(state.outputs, "amount"),
+      outputItems: items(state.outputs),
+      outputCapacity: total(state.outputs, "capacity"),
+    };
   }
 
   private changeCredits(value: number) {
@@ -1141,12 +1231,18 @@ export class FactoryRuntime {
     };
     if (tools[key]) this.setTool(tools[key]);
     if (key === "f" && this.activeTool === "inspect" && this.selectedId !== null) {
-      const recipe = this.simulation.cycleAssemblerRecipe(this.selectedId);
+      const selected = this.simulation.structures.get(this.selectedId);
+      const worldRecipeId = selected?.worldInstanceId
+        ? this.worldProduction.cycleRecipe(selected.worldInstanceId)
+        : null;
+      const recipe = worldRecipeId
+        ? START_REGISTRY.recipes.get(worldRecipeId) ?? null
+        : selected?.worldInstanceId ? null : this.simulation.cycleAssemblerRecipe(this.selectedId);
       if (recipe) {
-        this.callbacks.onSelected(this.simulation.getSelectedInfo(this.selectedId));
+        this.callbacks.onSelected(this.selectedInfo(this.selectedId));
         this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
       } else {
-        this.callbacks.onToast("성형기가 비어 있고 정지한 상태에서만 레시피를 바꿀 수 있습니다");
+        this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
       }
       return;
     }
@@ -1221,37 +1317,102 @@ export class FactoryRuntime {
     });
   }
 
+  private syncWorldConnectionItems(delta: number) {
+    const active = new Set<string>();
+    this.worldProduction.connectionStates().forEach((connection) => {
+      if (connection.medium !== "solid" || !connection.itemId) return;
+      const key = `${connection.fromInstanceId}:${connection.fromPortId}->${connection.toInstanceId}:${connection.toPortId}`;
+      const connectionGroup = this.connectionGroups.get(key);
+      const path = connectionGroup?.userData.pathPoints as Array<[number, number, number]> | undefined;
+      if (!connectionGroup || !path || path.length < 2) return;
+      active.add(key);
+      let mesh = this.worldItemMeshes.get(key);
+      if (!mesh || mesh.userData.itemId !== connection.itemId) {
+        if (mesh) this.scene.remove(mesh);
+        mesh = createItemModel(connection.itemId, this.materials);
+        mesh.scale.setScalar(0.78);
+        mesh.userData.itemId = connection.itemId;
+        this.worldItemMeshes.set(key, mesh);
+        this.scene.add(mesh);
+      }
+      const previous = (mesh.userData.travel as number | undefined) ?? 0;
+      const travel = connection.flowing && !connection.blocked ? (previous + delta * 0.72) % 1 : Math.min(previous, 0.92);
+      mesh.userData.travel = travel;
+      const points = path.map(([x, y, z]) => new THREE.Vector3(x, y + 0.18, z));
+      const lengths = points.slice(1).map((point, index) => point.distanceTo(points[index]));
+      const totalLength = lengths.reduce((sum, length) => sum + length, 0);
+      let remaining = travel * totalLength;
+      let position = points[0];
+      for (let index = 1; index < points.length; index += 1) {
+        const segmentLength = lengths[index - 1];
+        if (remaining <= segmentLength || index === points.length - 1) {
+          position = points[index - 1].clone().lerp(points[index], segmentLength > 0 ? remaining / segmentLength : 0);
+          break;
+        }
+        remaining -= segmentLength;
+      }
+      mesh.position.copy(position);
+      mesh.rotation.y += delta * 1.8;
+    });
+    this.worldItemMeshes.forEach((mesh, key) => {
+      if (active.has(key)) return;
+      this.scene.remove(mesh);
+      this.worldItemMeshes.delete(key);
+    });
+  }
+
   private animateMachines(delta: number) {
-    const power = this.simulation.getPowerGrid();
+    const campaignPower = this.campaignWorld.powerResult();
+    const legacyPower = this.simulation.getPowerGrid();
+    const supplyMW = campaignPower?.capacityMW ?? legacyPower.supplyMW;
+    const servedMW = campaignPower?.servedMW ?? legacyPower.servedMW;
+    const demandMW = campaignPower?.requestedMW ?? legacyPower.demandMW;
+    const overloaded = campaignPower
+      ? campaignPower.satisfaction < 0.999 || campaignPower.mainBreakerTripped
+      : legacyPower.overloaded;
     this.simulation.structures.forEach((data, id) => {
       const group = this.groups.get(id);
       if (!group) return;
       const state = this.simulation.machines.get(id);
-      const machineTime = (state?.animationTime ?? this.elapsed) + id * 0.17;
-      const activity = state?.activity ?? 1;
-      const outputQueued = (state?.output.length ?? 0) > 0;
-      const inputConnections = isTransportType(data.type) ? [] : this.simulation.getInputConnections(data);
+      const worldState = data.worldInstanceId ? this.worldProduction.nodeState(data.worldInstanceId) : null;
+      const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
+      const runtimeState = worldState?.runtimeState ?? (state?.working ? "working" : "idle");
+      const progress = worldState?.progress ?? state?.progress ?? 0;
+      const activity = worldState ? (runtimeState === "working" ? 1 : 0) : state?.activity ?? 1;
+      const inputCount = worldState
+        ? worldState.inputs.reduce((total, inventory) => total + inventory.amount, 0)
+        : state?.input.length ?? 0;
+      const outputQueued = worldState
+        ? worldState.outputs.some(({ amount }) => amount > 0)
+        : (state?.output.length ?? 0) > 0;
+      const connectedPortIds = new Set(worldState?.connectedPortIds ?? []);
+      const inputConnections = worldState && definition
+        ? definition.ports.filter(({ direction }) => direction !== "output").map(({ id: portId }) => connectedPortIds.has(portId))
+        : isTransportType(data.type) ? [] : this.simulation.getInputConnections(data);
       const hasInputConnection = inputConnections.some(Boolean);
-      const hasOutputConnection = !isTransportType(data.type) && this.simulation.hasOutputConnection(data);
+      const hasOutputConnection = worldState && definition
+        ? definition.ports.filter(({ direction }) => direction !== "input").some(({ id: portId }) => connectedPortIds.has(portId))
+        : !isTransportType(data.type) && this.simulation.hasOutputConnection(data);
       const beltItem = isTransportType(data.type) ? this.simulation.beltItems.get(id) : undefined;
+      const machineTime = (worldState ? this.elapsed * Math.max(activity, 0.08) : state?.animationTime ?? this.elapsed) + id * 0.17;
       const genericModel = group.userData.modelSource === "generic";
       if (genericModel) {
         animateGenericBuildingModel(group, {
           time: machineTime,
-          progress: state?.progress ?? (beltItem ? beltItem.progress : 0),
-          activity: state?.activity ?? (beltItem ? 1 : 0),
-          runtimeState: state?.working || beltItem
+          progress: beltItem ? beltItem.progress : progress,
+          activity: worldState ? activity : state?.activity ?? (beltItem ? 1 : 0),
+          runtimeState: worldState?.runtimeState ?? (state?.working || beltItem
             ? "working"
-            : outputQueued ? "blocked" : hasInputConnection ? "idle" : "disconnected",
+            : outputQueued ? "blocked" : hasInputConnection ? "idle" : "disconnected"),
         });
       }
       if (!genericModel && data.type === "miner") {
         animateMinerModel(group, {
           time: machineTime,
           delta,
-          progress: state?.progress ?? 0,
+          progress,
           activity,
-          working: state?.working ?? false,
+          working: runtimeState === "working",
           outputQueued,
           outputConnected: hasOutputConnection,
         });
@@ -1260,10 +1421,10 @@ export class FactoryRuntime {
         animateSmelterModel(group, {
           time: machineTime,
           delta,
-          progress: state?.progress ?? 0,
+          progress,
           activity,
-          working: state?.working ?? false,
-          inputCount: state?.input.length ?? 0,
+          working: runtimeState === "working",
+          inputCount,
           outputQueued,
           inputConnected: hasInputConnection,
           outputConnected: hasOutputConnection,
@@ -1273,10 +1434,10 @@ export class FactoryRuntime {
         animateCrusherModel(group, {
           time: machineTime,
           delta,
-          progress: state?.progress ?? 0,
+          progress,
           activity,
-          working: state?.working ?? false,
-          inputCount: state?.input.length ?? 0,
+          working: runtimeState === "working",
+          inputCount,
           outputQueued,
           inputConnected: hasInputConnection,
           outputConnected: hasOutputConnection,
@@ -1286,10 +1447,10 @@ export class FactoryRuntime {
         animateAssemblerModel(group, {
           time: machineTime,
           delta,
-          progress: state?.progress ?? 0,
+          progress,
           activity,
-          working: state?.working ?? false,
-          inputCount: state?.input.length ?? 0,
+          working: runtimeState === "working",
+          inputCount,
           outputQueued,
           inputConnected: hasInputConnection,
           outputConnected: hasOutputConnection,
@@ -1299,13 +1460,13 @@ export class FactoryRuntime {
         animateStorageModel(group, {
           time: machineTime,
           delta,
-          stored: state?.stored ?? 0,
-          capacity: STORAGE_CAPACITY,
-          intakePulse: state?.intakePulse ?? 0,
+          stored: worldState ? inputCount + worldState.outputs.reduce((total, inventory) => total + inventory.amount, 0) : state?.stored ?? 0,
+          capacity: worldState ? [...worldState.inputs, ...worldState.outputs].reduce((total, inventory) => total + inventory.capacity, 0) : STORAGE_CAPACITY,
+          intakePulse: worldState && runtimeState === "working" ? 1 : state?.intakePulse ?? 0,
           inputConnected: hasInputConnection,
         });
       }
-      const beltJammed = Boolean(beltItem && beltItem.progress >= 0.979);
+      const beltJammed = worldState?.runtimeState === "blocked" || Boolean(beltItem && beltItem.progress >= 0.979);
       const beltSpeed = beltJammed ? 0 : 1;
       const beltTravel = ((group.userData.beltTravel as number | undefined) ?? 0) + delta * beltSpeed;
       group.userData.beltTravel = beltTravel;
@@ -1335,19 +1496,21 @@ export class FactoryRuntime {
       if (data.type === "splitter" || data.type === "merger") {
         animateLogisticsModel(group, {
           time: this.elapsed,
-          activity: beltItem ? 1 : 0,
-          working: Boolean(beltItem && !beltJammed),
+          activity: worldState ? activity : beltItem ? 1 : 0,
+          working: worldState ? runtimeState === "working" : Boolean(beltItem && !beltJammed),
           blocked: beltJammed,
-          disconnected: false,
+          disconnected: runtimeState === "disconnected",
         });
       }
       if (!isTransportType(data.type)) {
-        const powered = power.poweredByStructureId.get(id) ?? true;
+        const powered = worldState
+          ? worldState.powerSatisfaction >= 0.999
+          : legacyPower.poweredByStructureId.get(id) ?? true;
         applyGridVisualState(group, {
           time: this.elapsed,
           powered,
-          overloaded: power.overloaded && !powered,
-          supplyRatio: power.supplyMW > 0 ? power.servedMW / power.supplyMW : 0,
+          overloaded: overloaded && !powered,
+          supplyRatio: demandMW > 0 ? servedMW / demandMW : 1,
         });
       }
     });
@@ -1356,9 +1519,9 @@ export class FactoryRuntime {
       delta,
       generating: true,
       connected: true,
-      supplyRatio: power.supplyMW > 0 ? power.servedMW / power.supplyMW : 0,
-      loadRatio: power.supplyMW > 0 ? power.demandMW / power.supplyMW : 0,
-      overloaded: power.overloaded,
+      supplyRatio: demandMW > 0 ? servedMW / demandMW : 1,
+      loadRatio: supplyMW > 0 ? demandMW / supplyMW : 0,
+      overloaded,
     };
     animateFieldPowerCoreModel(this.powerCoreGroup, powerState);
     animateDistributionPoleModel(this.powerPoleGroup, powerState);
@@ -1392,17 +1555,32 @@ export class FactoryRuntime {
 
   private stepCampaignPower(delta: number) {
     const overrides: Record<string, PowerInstanceOverride> = {};
-    this.simulation.structures.forEach((structure, id) => {
+    this.simulation.structures.forEach((structure) => {
       if (!structure.worldInstanceId) return;
-      const state = this.simulation.machines.get(id);
+      const state = this.worldProduction.nodeState(structure.worldInstanceId);
       const definition = structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId) : null;
       const fuelItemId = definition?.generatorPolicy?.fuelItemId;
+      const powerNode = this.powerTopology.nodes.find(({ instanceId }) => instanceId === structure.worldInstanceId);
+      const powerZone = powerNode
+        ? this.powerTopology.zones.find(({ id }) => id === powerNode.gridId)
+        : null;
+      const connected = Boolean(powerNode?.connectionState === "connected" && powerZone && powerZone.generatorIds.length > 0);
       overrides[structure.worldInstanceId] = {
-        connected: true,
-        active: state?.working ?? isTransportType(structure.type),
+        connected,
+        active: state?.runtimeState === "working" || (isTransportType(structure.type) && state?.runtimeState !== "disconnected"),
+        ...(powerNode?.priority ? { priority: powerNode.priority } : {}),
         ...(fuelItemId ? {
-          fuelAvailable: Boolean(state && [...state.input, ...state.output, ...state.storedItems].includes(fuelItemId)),
+          fuelAvailable: Boolean(state && [...state.inputs, ...state.outputs]
+            .some(({ itemId, amount }) => itemId === fuelItemId && amount > 0)),
         } : {}),
+      };
+    });
+    this.powerTopology.nodes.forEach((powerNode) => {
+      const powerZone = this.powerTopology.zones.find(({ id }) => id === powerNode.gridId);
+      overrides[powerNode.instanceId] = {
+        ...overrides[powerNode.instanceId],
+        connected: Boolean(powerNode.connectionState === "connected" && powerZone && powerZone.generatorIds.length > 0),
+        ...(powerNode.priority ? { priority: powerNode.priority } : {}),
       };
     });
     const result = this.campaignWorld.stepPower(delta, overrides);
@@ -1506,7 +1684,15 @@ export class FactoryRuntime {
 
     this.stepCampaignPower(delta);
     this.simulation.update(delta);
-    this.worldProduction.advance(delta);
+    this.worldProduction.advance(delta, {
+      afterTick: (_tick, fixedDelta) => {
+        const accepted = this.dockFluidCommitter.advanceFixedTick(fixedDelta);
+        if (accepted > 0) {
+          this.publishConstructionState();
+          this.publishProject();
+        }
+      },
+    });
     if (this.elapsed - this.lastConnectionSyncTime >= 0.25) {
       this.lastConnectionSyncTime = this.elapsed;
       this.syncConnectionModels();
@@ -1515,12 +1701,13 @@ export class FactoryRuntime {
     this.publishPower();
     this.publishProject();
     this.syncItems(delta);
+    this.syncWorldConnectionItems(delta);
     this.animateMachines(delta);
     this.animateConnections();
     this.selectedUiClock += delta;
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;
-      this.callbacks.onSelected(this.simulation.getSelectedInfo(this.selectedId));
+      this.callbacks.onSelected(this.selectedInfo(this.selectedId));
     }
     const motors = this.simulation.getStoredComponents();
     if (motors !== this.lastMotorCount) {

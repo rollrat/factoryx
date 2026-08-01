@@ -375,7 +375,10 @@ export class FactorySimulation {
 
   private updateMachines(delta: number) {
     this.structures.forEach((data, id) => {
-      if (isTransport(data.type)) return;
+      // Registry-backed structures are simulated exclusively by
+      // WorldProductionSimulation. Keeping the legacy prototype runner active
+      // here would consume inputs and create outputs a second time.
+      if (isTransport(data.type) || data.worldInstanceId) return;
       const state = this.machines.get(id);
       if (!state) return;
       if (this.powerGrid.poweredByStructureId.get(id) === false) {
@@ -420,7 +423,7 @@ export class FactorySimulation {
 
   private dispatchMachineOutputs() {
     this.structures.forEach((data, id) => {
-      if (isTransport(data.type)) return;
+      if (isTransport(data.type) || data.worldInstanceId) return;
       const state = this.machines.get(id);
       if (!state) return;
       if (this.powerGrid.poweredByStructureId.get(id) === false) return;
@@ -446,6 +449,10 @@ export class FactorySimulation {
       if (this.beltItems.get(beltId) !== item) return;
       const belt = this.structures.get(beltId);
       if (!belt || !isTransport(belt.type)) {
+        this.beltItems.delete(beltId);
+        return;
+      }
+      if (belt.worldInstanceId) {
         this.beltItems.delete(beltId);
         return;
       }

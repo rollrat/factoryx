@@ -9,6 +9,7 @@ import { SIMULATION_TICK_SECONDS } from "./contracts.ts";
 import { PortInventory, type PortInventoryState } from "./inventory.ts";
 import { RecipeProcess, type RecipeProcessSnapshot } from "./process.ts";
 import type { PowerGridResult } from "./powerGrid.ts";
+import type { MachineRuntimeState } from "./contracts.ts";
 import type { DataDrivenWorld, WorldDemolitionResult, WorldPort } from "./world.ts";
 
 export type ProductionConnection = Readonly<{
@@ -36,6 +37,33 @@ export type WorldProductionSnapshot = Readonly<{
   clock: FixedStepClockSnapshot;
   powerSatisfaction: readonly Readonly<{ instanceId: string; satisfaction: number }>[];
   nodes: readonly WorldProductionNodeSnapshot[];
+}>;
+
+export type WorldProductionTickHooks = Readonly<{
+  beforeTick?: (tick: number, deltaSeconds: number) => void;
+  afterTick?: (tick: number, deltaSeconds: number) => void;
+}>;
+
+export type WorldProductionNodeState = Readonly<{
+  instanceId: string;
+  definitionId: string;
+  selectedRecipeId: RecipeId | null;
+  availableRecipeIds: readonly RecipeId[];
+  runtimeState: MachineRuntimeState;
+  progress: number;
+  powerSatisfaction: number;
+  connectedPortIds: readonly string[];
+  inputs: readonly PortInventoryState[];
+  outputs: readonly PortInventoryState[];
+  process: RecipeProcessSnapshot | null;
+}>;
+
+export type WorldProductionConnectionState = ProductionConnection & Readonly<{
+  itemId: ItemId | null;
+  sourceAmount: number;
+  targetAmount: number;
+  flowing: boolean;
+  blocked: boolean;
 }>;
 
 type RuntimeNode = {
@@ -110,9 +138,13 @@ export class WorldProductionSimulation {
 
   setPaused(paused: boolean): void { this.paused = paused; }
 
-  advance(deltaSeconds: number) {
+  advance(deltaSeconds: number, hooks: WorldProductionTickHooks = {}) {
     this.syncWorld();
-    return this.clock.advance(deltaSeconds, (_tick, fixedDelta) => this.step(fixedDelta));
+    return this.clock.advance(deltaSeconds, (tick, fixedDelta) => {
+      hooks.beforeTick?.(tick, fixedDelta);
+      this.step(fixedDelta);
+      hooks.afterTick?.(tick, fixedDelta);
+    });
   }
 
   selectRecipe(instanceId: string, recipeId: RecipeId): boolean {
@@ -123,7 +155,74 @@ export class WorldProductionSimulation {
     if ([...node.inputs.values(), ...node.outputs.values()].some(({ amount }) => amount > 0)) return false;
     node.selectedRecipeId = recipeId;
     node.process = new RecipeProcess(recipe);
+    this.syncRuntimeContents(node);
     return true;
+  }
+
+  cycleRecipe(instanceId: string): RecipeId | null {
+    const node = this.nodes.get(instanceId);
+    if (!node || node.definition.recipeIds.length < 2) return null;
+    const recipeIds = node.definition.recipeIds.filter((id) => this.world.registry.recipes.has(id));
+    const currentIndex = recipeIds.indexOf(node.selectedRecipeId ?? "");
+    for (let offset = 1; offset <= recipeIds.length; offset += 1) {
+      const candidate = recipeIds[((currentIndex >= 0 ? currentIndex : -1) + offset) % recipeIds.length];
+      if (this.selectRecipe(instanceId, candidate)) return candidate;
+    }
+    return null;
+  }
+
+  nodeState(instanceId: string): WorldProductionNodeState | null {
+    const node = this.nodes.get(instanceId);
+    if (!node) return null;
+    const connections = this.connections();
+    const connectedPortIds = [...new Set(connections.flatMap((connection) => {
+      if (connection.fromInstanceId === instanceId) return [connection.fromPortId];
+      if (connection.toInstanceId === instanceId) return [connection.toPortId];
+      return [];
+    }))].sort();
+    const process = node.process?.snapshot() ?? null;
+    const inventoryAmount = [...node.inputs.values(), ...node.outputs.values()]
+      .reduce((total, inventory) => total + inventory.amount, 0);
+    const runtimeState: MachineRuntimeState = process?.runtimeState
+      ?? (this.paused ? "paused"
+        : inventoryAmount > 0 ? "working"
+          : node.definition.ports.length > 0 && connectedPortIds.length === 0 ? "disconnected" : "idle");
+    return {
+      instanceId,
+      definitionId: node.definition.id,
+      selectedRecipeId: node.selectedRecipeId,
+      availableRecipeIds: node.definition.recipeIds.filter((id) => this.world.registry.recipes.has(id)),
+      runtimeState,
+      progress: process?.progress ?? 0,
+      powerSatisfaction: this.powerSatisfaction.get(instanceId) ?? 1,
+      connectedPortIds,
+      inputs: [...node.inputs.values()].map((inventory) => inventory.state()),
+      outputs: [...node.outputs.values()].map((inventory) => inventory.state()),
+      process,
+    };
+  }
+
+  allNodeStates(): readonly WorldProductionNodeState[] {
+    return [...this.nodes.keys()].sort().map((id) => this.nodeState(id)!);
+  }
+
+  connectionStates(): readonly WorldProductionConnectionState[] {
+    return this.connections().map((connection) => {
+      const source = this.nodes.get(connection.fromInstanceId)?.outputs.get(connection.fromPortId);
+      const target = this.nodes.get(connection.toInstanceId)?.inputs.get(connection.toPortId);
+      const itemId = source?.itemId ?? target?.itemId ?? null;
+      const sourceAmount = source?.amount ?? 0;
+      const targetAmount = target?.amount ?? 0;
+      const blocked = Boolean(source && source.availableAmount > 0 && target && target.availableCapacity <= 0);
+      return {
+        ...connection,
+        itemId,
+        sourceAmount,
+        targetAmount,
+        flowing: Boolean(itemId && !blocked && (sourceAmount > 0 || targetAmount > 0)),
+        blocked,
+      };
+    });
   }
 
   setPowerSatisfaction(instanceId: string, satisfaction: number): void {
@@ -343,6 +442,9 @@ export class WorldProductionSimulation {
       inputBuffersByPortId: stacks(node.inputs),
       outputBuffersByPortId: stacks(node.outputs),
       workInProgress: node.process?.snapshot().workInProgress?.inputs ?? [],
+      runtimeState: this.nodeState(node.instanceId)?.runtimeState ?? "idle",
+      progress: node.process?.snapshot().progress ?? 0,
+      selectedRecipeId: node.selectedRecipeId,
     });
   }
 

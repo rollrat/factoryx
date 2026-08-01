@@ -4,6 +4,7 @@ import type { FactorySimulation } from "../simulation.ts";
 import { FIELD_CORE_CAPACITY_MW, POWER_DEMAND_MW } from "../sim/power.ts";
 import type { ItemType, MachineType, StructureData } from "../types.ts";
 import type { LiveRuntimeState } from "./live.ts";
+import type { MachineRuntimeState } from "../sim/contracts.ts";
 
 export type RuntimeTopologyNode = Readonly<{
   id: string;
@@ -11,10 +12,16 @@ export type RuntimeTopologyNode = Readonly<{
   label: string;
   column: number;
   order: number;
-  structureId: number | null;
+  structureId: number | string | null;
+  instanceId?: string;
   buildingId: string | null;
   itemId?: string;
-  status: LiveRuntimeState | "storing";
+  recipeId?: string | null;
+  inputStock?: number;
+  outputStock?: number;
+  workInProgress?: number;
+  stopReason?: string | null;
+  status: MachineRuntimeState | "storing";
   statusLabel: string;
   progress: number;
   stock: number;
@@ -26,11 +33,11 @@ export type RuntimeTopologyEdge = Readonly<{
   source: string;
   target: string;
   kind: "physical" | "power";
-  medium: "solid" | "power";
+  medium: "solid" | "fluid" | "power";
   itemId: string;
   itemName: string;
   amount: number;
-  structureId: number | null;
+  structureId: number | string | null;
   connected: boolean;
   beltCount: number;
   jammed: boolean;
@@ -45,7 +52,7 @@ export type RuntimeTopology = Readonly<{
   }>;
   live: Readonly<{
     nodeStates: Readonly<Record<string, Readonly<{
-      status: LiveRuntimeState | "storing";
+      status: MachineRuntimeState | "storing";
       actualRatePerMinute?: number;
       stock?: number;
       capacity?: number;

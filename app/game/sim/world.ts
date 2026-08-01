@@ -63,6 +63,9 @@ type RuntimeContents = Readonly<{
   inputBuffersByPortId: Readonly<Record<string, readonly ItemStack[]>>;
   outputBuffersByPortId: Readonly<Record<string, readonly ItemStack[]>>;
   workInProgress: readonly ItemStack[];
+  runtimeState?: string;
+  progress?: number;
+  selectedRecipeId?: string | null;
 }>;
 
 const cellKey = ({ x, z }: GridCell) => `${x},${z}`;
@@ -266,12 +269,17 @@ export class DataDrivenWorld {
       ...Object.values(contents.outputBuffersByPortId).flat(),
       ...contents.workInProgress,
     ]);
-    this.instances.set(instanceId, {
+    const updated: BuildingInstance = {
       ...instance,
       inputBuffersByPortId: cloneBufferRecord(contents.inputBuffersByPortId),
       outputBuffersByPortId: cloneBufferRecord(contents.outputBuffersByPortId),
       workInProgress: cloneStacks(contents.workInProgress),
-    });
+      ...(contents.runtimeState !== undefined ? { runtimeState: contents.runtimeState } : {}),
+      ...(contents.progress !== undefined ? { progress: contents.progress } : {}),
+      ...(contents.selectedRecipeId ? { selectedRecipeId: contents.selectedRecipeId } : {}),
+    };
+    if (contents.selectedRecipeId === null) delete (updated as { selectedRecipeId?: string }).selectedRecipeId;
+    this.instances.set(instanceId, updated);
     return true;
   }
 

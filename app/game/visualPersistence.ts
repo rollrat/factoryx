@@ -14,6 +14,7 @@ export type FactoryRuntimeSnapshot = Readonly<{
   world?: WorldSnapshot;
   campaignWorld?: CampaignWorldSnapshot;
   worldProduction?: WorldProductionSnapshot;
+  dockFluidTransferCredit?: number;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -44,9 +45,11 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
   const expectedWithWorld = [...expected, "world"].sort();
   const expectedWithCampaign = [...expected, "world", "campaignWorld"].sort();
   const expectedWithProduction = [...expected, "world", "campaignWorld", "worldProduction"].sort();
+  const expectedWithFluidDelivery = [...expectedWithProduction, "dockFluidTransferCredit"].sort();
   const matches = (candidate: readonly string[]) => keys.length === candidate.length
     && keys.every((key, index) => key === candidate[index]);
-  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign) && !matches(expectedWithProduction)) return false;
+  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign)
+    && !matches(expectedWithProduction) && !matches(expectedWithFluidDelivery)) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -56,7 +59,9 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     || !isVector(value.cameraTarget)
     || !isVector(value.playerPosition)
     || !isFiniteNumber(value.firstPersonYaw)
-    || !isFiniteNumber(value.firstPersonPitch)) return false;
+    || !isFiniteNumber(value.firstPersonPitch)
+    || (value.dockFluidTransferCredit !== undefined
+      && (!isFiniteNumber(value.dockFluidTransferCredit) || value.dockFluidTransferCredit < 0 || value.dockFluidTransferCredit > 1 + Number.EPSILON))) return false;
   try {
     new FactorySimulation(24, value.simulation as FactorySimulationSnapshot);
     if (value.world !== undefined) {

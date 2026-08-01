@@ -52,6 +52,7 @@ test("visual runtime save preserves the integrated world, campaign, and power sn
     world: campaignWorld.world.snapshot(),
     campaignWorld: campaignWorld.snapshot(),
     worldProduction: worldProduction.snapshot(),
+    dockFluidTransferCredit: 0.5,
   };
   const decoded = factoryRuntimeSaveCodec.decode(factoryRuntimeSaveCodec.encode(integrated, { nowMs: 20 }));
   assert.equal(decoded.ok, true);

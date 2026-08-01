@@ -2,11 +2,13 @@ import * as THREE from "three";
 import type {
   BuildingDefinition,
   ConnectorProfile,
+  DefinitionRegistry,
   GridCell,
   PortDefinition,
   PortId,
   TransportMedium,
 } from "../domain/types.ts";
+import type { PowerCableRenderData } from "../sim/physicalPowerNetwork.ts";
 
 export type ConnectionMaterials = Readonly<{
   dark: THREE.Material;
@@ -444,6 +446,43 @@ export const createPortConnectionModel = (
   if (medium === "solid") addSolidConnection(group, mainPath, materials);
   else if (medium === "fluid") addFluidConnection(group, mainPath, branchPath, topology as Exclude<FluidConnectionTopology, "auto">, materials);
   else addPowerConnection(group, source, target, materials);
+  return group;
+};
+
+/** Builds cable geometry from a persisted physical PowerEdge render projection. */
+export const createPowerCableConnectionModel = (
+  cable: PowerCableRenderData,
+  registry: DefinitionRegistry,
+  materials: ConnectionMaterials,
+) => {
+  const sourceBuilding = registry.buildings.get(cable.source.definitionId);
+  const targetBuilding = registry.buildings.get(cable.target.definitionId);
+  if (!sourceBuilding) throw new Error(`Unknown power cable building: ${cable.source.definitionId}`);
+  if (!targetBuilding) throw new Error(`Unknown power cable building: ${cable.target.definitionId}`);
+  const source = resolveWorldPort({
+    building: sourceBuilding,
+    portId: cable.source.portId,
+    origin: cable.source.origin,
+    rotation: cable.source.rotation,
+  });
+  const target = resolveWorldPort({
+    building: targetBuilding,
+    portId: cable.target.portId,
+    origin: cable.target.origin,
+    rotation: cable.target.rotation,
+  });
+  if (source.port.connectorProfile !== cable.profile || target.port.connectorProfile !== cable.profile) {
+    throw new Error(`Power cable ${cable.id} render profile does not match its ports`);
+  }
+  const [from, to] = compatibleDirection(source.port, target.port)
+    ? [source, target]
+    : [target, source];
+  const group = createPortConnectionModel(from, to, materials);
+  group.name = `power-edge:${cable.id}`;
+  group.userData.powerEdgeId = cable.id;
+  group.userData.ownerIds = [cable.source.ownerId, cable.target.ownerId];
+  group.userData.gridId = cable.gridId;
+  group.userData.enabled = cable.enabled;
   return group;
 };
 

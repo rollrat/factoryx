@@ -90,6 +90,7 @@ const edgeState = (edge: ProductionLineageEdge) => {
   if (edge.connected === false) return { key: "disconnected", label: "끊김" } as const;
   if (edge.jammed) return { key: "jammed", label: "막힘" } as const;
   if (edge.medium === "power") return { key: "connected", label: "전력 연결" } as const;
+  if (edge.medium === "fluid") return { key: "connected", label: "파이프 연결" } as const;
   return { key: "connected", label: edge.beltCount === undefined ? "연결됨" : `벨트 ${edge.beltCount}칸` } as const;
 };
 
