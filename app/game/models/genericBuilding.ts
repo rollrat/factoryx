@@ -29,14 +29,60 @@ export type GenericBuildingRuntimeState =
   | "starved"
   | "blocked"
   | "disconnected"
-  | "paused";
+  | "paused"
+  | "manual_off"
+  | "tripped"
+  | "restoring";
 
 export type GenericBuildingVisualState = Readonly<{
   runtimeState: GenericBuildingRuntimeState;
   progress: number;
   activity: number;
   time: number;
+  storedRatio?: number;
 }>;
+
+const boxGeometryCache = new Map<string, THREE.BoxGeometry>();
+const cylinderGeometryCache = new Map<string, THREE.CylinderGeometry>();
+const sharedBoxGeometry = (size: readonly [number, number, number]) => {
+  const key = size.join(":");
+  let geometry = boxGeometryCache.get(key);
+  if (!geometry) {
+    geometry = new THREE.BoxGeometry(...size);
+    boxGeometryCache.set(key, geometry);
+  }
+  return geometry;
+};
+const sharedCylinderGeometry = (radius: number, height: number, segments: number) => {
+  const key = `${radius}:${height}:${segments}`;
+  let geometry = cylinderGeometryCache.get(key);
+  if (!geometry) {
+    geometry = new THREE.CylinderGeometry(radius, radius, height, segments);
+    cylinderGeometryCache.set(key, geometry);
+  }
+  return geometry;
+};
+
+/** Highest detail tier at which a role remains visible (0=near, 2=far). */
+export const genericRoleLodMaxTier = (role?: string): 0 | 1 | 2 => {
+  if (!role) return 1;
+  if ([
+    "foundation", "processHousing", "transportSurface", "fluidPath", "flareStack",
+    "storageBody", "storageTank", "tankBand", "generatorHousing", "exhaustStack",
+    "distributionMast", "distributionCrossarm", "switchgearCabinet", "infrastructureColumn",
+    "infrastructureGantry", "status", "powerCoreStatus", "distributionPoleStatus",
+  ].includes(role)) return 2;
+  if ([
+    "processCore", "processActuator", "transportRail", "transportLane", "routingGate",
+    "fluidBranch", "pumpHousing", "pumpRotor", "storageLift", "storageGauge",
+    "generatorRotor", "generatorCoil", "distributionBusbar", "accumulatorCell",
+    "batteryGauge", "transformerCoil", "coolingFan", "breakerLever", "breakerContact",
+    "priorityLever", "assemblyCradle", "controlPanel", "powerPulse", "powerCoreRotor",
+    "powerCoreFlywheel", "powerCoreGaugeNeedle", "distributionInsulator", "powerPort",
+    "inputPort", "outputPort", "bidirectionalPort", "fluidPortRing", "powerSocketRing",
+  ].includes(role)) return 1;
+  return 0;
+};
 
 const add = (
   group: THREE.Group,
@@ -49,9 +95,11 @@ const add = (
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(...position);
   mesh.rotation.set(...rotation);
-  mesh.castShadow = role !== "status" && role !== "powerPulse";
+  const lodMaxTier = genericRoleLodMaxTier(role);
+  mesh.castShadow = lodMaxTier > 0 && !["status", "powerPulse", "powerPort", "inputPort", "outputPort", "bidirectionalPort", "fluidPortRing", "powerSocketRing"].includes(role ?? "");
   mesh.receiveShadow = true;
   if (role) mesh.userData.animationRole = role;
+  mesh.userData.lodMaxTier = lodMaxTier;
   group.add(mesh);
   return mesh;
 };
@@ -63,7 +111,7 @@ const box = (
   material: THREE.Material,
   role?: string,
   rotation: [number, number, number] = [0, 0, 0],
-) => add(group, new THREE.BoxGeometry(...size), material, position, rotation, role);
+) => add(group, sharedBoxGeometry(size), material, position, rotation, role);
 
 const cylinder = (
   group: THREE.Group,
@@ -74,7 +122,7 @@ const cylinder = (
   material: THREE.Material,
   role?: string,
   rotation: [number, number, number] = [0, 0, 0],
-) => add(group, new THREE.CylinderGeometry(radius, radius, height, segments), material, position, rotation, role);
+) => add(group, sharedCylinderGeometry(radius, height, segments), material, position, rotation, role);
 
 const hashUnit = (value: string) => {
   let hash = 0;
@@ -86,8 +134,8 @@ export const genericBuildingCategory = (definition: BuildingDefinition): Generic
   if (definition.generatorPolicy) return "generator";
   if (definition.placementMode === "preplaced_unique") return "infrastructure";
   if (definition.distributionPolicy || definition.powerStoragePolicy) return "distribution";
-  if (definition.storagePolicy || definition.fluidStoragePolicy || definition.id === "fluid_tank") return "storage";
   if (definition.recipeIds.length > 0) return "production";
+  if (definition.storagePolicy || definition.id === "fluid_tank") return "storage";
   if (definition.transportPolicy || definition.id === "splitter" || definition.id === "merger") {
     return definition.ports.some(({ medium }) => medium === "fluid") ? "fluid" : "logistics";
   }
@@ -277,6 +325,30 @@ const addDistribution = (
     }
     if (definition.powerStoragePolicy) {
       for (const px of [-0.22, 0, 0.22]) cylinder(group, 0.1, 0.58, 10, [px, 0.48, 0], materials.dark, "accumulatorCell");
+      box(group, [0.08, 0.54, 0.1], [x * 0.25, 0.5, z * 0.34], materials.cyan, "batteryGauge");
+    }
+    if (definition.id === "substation") {
+      for (const zPos of [-z * 0.2, z * 0.2]) {
+        cylinder(group, 0.22, 0.62, 12, [-x * 0.12, 0.68, zPos], materials.copper ?? materials.orange, "transformerCoil");
+      }
+      cylinder(group, 0.16, 0.05, 10, [x * 0.22, 0.98, 0], materials.dark, "coolingFan", [Math.PI / 2, 0, 0]);
+    }
+    if (definition.id === "power_breaker") {
+      box(group, [x * 0.52, 0.07, 0.09], [0, 0.75, 0], materials.copper ?? materials.orange, "breakerContact");
+      box(group, [0.07, 0.52, 0.08], [0, 0.9, z * 0.26], materials.orange, "breakerLever", [0, 0, -0.55]);
+    }
+    if (definition.id === "priority_switchboard") {
+      for (let priority = 1; priority <= 4; priority += 1) {
+        const lever = box(
+          group,
+          [0.055, 0.34, 0.07],
+          [-x * 0.22 + (priority - 1) * x * 0.145, 0.92, z * 0.33],
+          materials.orange,
+          "priorityLever",
+          [0, 0, -0.42],
+        );
+        lever.userData.priority = priority;
+      }
     }
   }
   addStatus(group, definition, materials, tower ? 1.1 : 0.9);
@@ -356,6 +428,110 @@ const addPortMarker = (
   marker.userData.acceptedItemIds = [...port.acceptedItemIds];
 };
 
+/** Adds exact data-definition markers to dedicated models without duplicating existing markers. */
+export const attachDefinitionPortMarkers = (
+  group: THREE.Group,
+  definition: BuildingDefinition,
+  materials: GenericBuildingMaterials,
+) => {
+  const existing = new Set<string>();
+  group.traverse((part) => {
+    if (typeof part.userData.portId === "string") existing.add(part.userData.portId);
+  });
+  definition.ports.forEach((port, index) => {
+    if (!existing.has(port.id)) addPortMarker(group, port, index, materials);
+  });
+};
+
+/** Applies common collision, LOD, and performance metadata to generic and dedicated models. */
+export const decorateBuildingModel = (group: THREE.Group, definition: BuildingDefinition) => {
+  const { x, z } = definition.footprint;
+  group.userData.footprint = { ...definition.footprint };
+  group.userData.localCollisionAabb = { minX: -x / 2, maxX: x / 2, minZ: -z / 2, maxZ: z / 2 };
+  group.userData.lodManaged = true;
+  group.traverse((part) => {
+    if (!(part instanceof THREE.Mesh) || part.userData.lodMaxTier !== undefined) return;
+    const role = part.userData.animationRole as string | undefined;
+    if (role) {
+      part.userData.lodMaxTier = genericRoleLodMaxTier(role);
+      if (part.userData.lodMaxTier === 0 || role.includes("Status") || role.includes("Pulse") || role === "status") {
+        part.castShadow = false;
+      }
+      return;
+    }
+    if (!part.geometry.boundingBox) part.geometry.computeBoundingBox();
+    const size = part.geometry.boundingBox?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(1, 1, 1);
+    const maxDimension = Math.max(size.x * part.scale.x, size.y * part.scale.y, size.z * part.scale.z);
+    part.userData.lodMaxTier = maxDimension < 0.18 ? 0 : maxDimension < 0.5 ? 1 : 2;
+    if (part.userData.lodMaxTier === 0) part.castShadow = false;
+  });
+};
+
+export type BuildingModelAudit = Readonly<{
+  meshes: number;
+  triangles: number;
+  materials: number;
+  shadowMeshes: number;
+  movingRoles: readonly string[];
+  portIds: readonly string[];
+  lodMeshes: Readonly<Record<0 | 1 | 2, number>>;
+}>;
+
+export const auditBuildingModel = (group: THREE.Group): BuildingModelAudit => {
+  let meshCount = 0;
+  let triangles = 0;
+  let shadowMeshes = 0;
+  const materials = new Set<THREE.Material>();
+  const movingRoles = new Set<string>();
+  const portIds = new Set<string>();
+  const lodMeshes: Record<0 | 1 | 2, number> = { 0: 0, 1: 0, 2: 0 };
+  group.traverse((part) => {
+    if (!(part instanceof THREE.Mesh)) return;
+    meshCount += 1;
+    const instances = part instanceof THREE.InstancedMesh ? part.count : 1;
+    triangles += (part.geometry.index ? part.geometry.index.count : part.geometry.attributes.position.count) / 3 * instances;
+    (Array.isArray(part.material) ? part.material : [part.material]).forEach((material) => materials.add(material));
+    if (part.castShadow) shadowMeshes += 1;
+    const role = part.userData.animationRole;
+    if (typeof role === "string" && !["foundation", "supportFoot", "status", "controlPanel"].includes(role)) movingRoles.add(role);
+    if (typeof part.userData.portId === "string") portIds.add(part.userData.portId);
+    const tier = part.userData.lodMaxTier;
+    if (tier === 0 || tier === 1 || tier === 2) lodMeshes[tier] += 1;
+  });
+  return {
+    meshes: meshCount,
+    triangles: Math.round(triangles),
+    materials: materials.size,
+    shadowMeshes,
+    movingRoles: [...movingRoles].sort(),
+    portIds: [...portIds].sort(),
+    lodMeshes,
+  };
+};
+
+/** Applies the runtime-assigned group.userData.lodTier to decorated child meshes. */
+export const applyDecoratedBuildingLod = (
+  group: THREE.Group,
+  tier = group.userData.lodTier as 0 | 1 | 2 | null | undefined,
+) => {
+  if (tier === null || tier === undefined) return;
+  group.traverse((part) => {
+    if (!(part instanceof THREE.Mesh)) return;
+    const maxTier = part.userData.lodMaxTier;
+    if (typeof maxTier !== "number") return;
+    const allowed = tier <= maxTier;
+    const hidden = part.userData.hiddenByBuildingLod === true;
+    if (!allowed && !hidden) {
+      part.userData.visibleBeforeBuildingLod = part.visible;
+      part.userData.hiddenByBuildingLod = true;
+      part.visible = false;
+    } else if (allowed && hidden) {
+      part.visible = part.userData.visibleBeforeBuildingLod !== false;
+      part.userData.hiddenByBuildingLod = false;
+    }
+  });
+};
+
 export const createGenericBuildingModel = (
   definition: BuildingDefinition,
   materials: GenericBuildingMaterials,
@@ -380,7 +556,8 @@ export const createGenericBuildingModel = (
   else if (category === "storage") addStorage(group, definition, materials);
   else addInfrastructure(group, definition, materials);
 
-  definition.ports.forEach((port, index) => addPortMarker(group, port, index, materials));
+  attachDefinitionPortMarkers(group, definition, materials);
+  decorateBuildingModel(group, definition);
   return group;
 };
 
@@ -440,6 +617,12 @@ const animateStatus = (
     setStatusMaterial(part, 0xd96f32, 0x5f2410, 0.28);
   } else if (state === "paused") {
     setStatusMaterial(part, 0xa8bcc0, 0x263136, 0.12);
+  } else if (state === "manual_off") {
+    setStatusMaterial(part, 0xa8bcc0, 0x263136, 0);
+  } else if (state === "tripped") {
+    setStatusMaterial(part, 0xff5268, 0xa8172b, 1.8 + Math.sin(time * 7) * 0.3);
+  } else if (state === "restoring") {
+    setStatusMaterial(part, 0xffa94d, 0x9b480c, 0.55 + Math.sin(time * 2.5) * 0.22);
   } else {
     setStatusMaterial(part, 0x5d7b80, 0x163e3c, 0.24);
   }
@@ -537,6 +720,33 @@ export const animateGenericBuildingModel = (
       part.scale.set(base.scale[0] * busPulse, base.scale[1], base.scale[2]);
       return;
     }
+    if (role === "transformerCoil") {
+      const coilPulse = operating ? 1 + Math.sin(visual.time * 3.5) * 0.018 * activity : 1;
+      part.scale.set(base.scale[0] * coilPulse, base.scale[1], base.scale[2] * coilPulse);
+      return;
+    }
+    if (role === "coolingFan") {
+      part.rotation.z = base.rotation[2] + visual.time * 5.5 * motion;
+      return;
+    }
+    if (role === "breakerLever") {
+      const offset = visual.runtimeState === "tripped" ? 0.55
+        : visual.runtimeState === "manual_off" || visual.runtimeState === "disconnected" ? 1.1
+          : visual.runtimeState === "restoring" ? 0.25 : 0;
+      part.rotation.z = base.rotation[2] + offset;
+      return;
+    }
+    if (role === "breakerContact") {
+      part.visible = !["tripped", "manual_off", "disconnected"].includes(visual.runtimeState);
+      return;
+    }
+    if (role === "priorityLever") {
+      const offset = visual.runtimeState === "tripped" ? 0.72
+        : visual.runtimeState === "manual_off" || visual.runtimeState === "disconnected" ? 1.05
+          : visual.runtimeState === "restoring" ? 0.25 : 0;
+      part.rotation.z = base.rotation[2] + offset;
+      return;
+    }
     if (role === "storageLift") {
       part.position.y = base.position[1] + (operating ? Math.sin(progress * Math.PI) * 0.24 : 0);
       return;
@@ -546,8 +756,15 @@ export const animateGenericBuildingModel = (
       part.position.y = base.position[1] - (1 - Math.max(0.08, progress)) * 0.12;
       return;
     }
+    if (role === "batteryGauge") {
+      const storedRatio = THREE.MathUtils.clamp(visual.storedRatio ?? progress, 0, 1);
+      part.scale.y = base.scale[1] * Math.max(0.04, storedRatio);
+      part.position.y = base.position[1] - (1 - Math.max(0.04, storedRatio)) * 0.24;
+      return;
+    }
     if (role === "assemblyCradle") {
       part.rotation.y = base.rotation[1] + visual.time * 0.45 * motion;
     }
   });
+  applyDecoratedBuildingLod(group);
 };

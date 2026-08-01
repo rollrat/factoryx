@@ -4,17 +4,21 @@ import * as THREE from "three";
 
 import { START_BUILDINGS } from "../../app/game/data/buildings.ts";
 import type { BuildingDefinition } from "../../app/game/domain/types.ts";
+import { rotateLocalPosition } from "../../app/game/domain/placement.ts";
 import {
+  buildingModelRotationY,
   createBuildingModel,
   createBuildingModelFromDefinition,
   createFactoryMaterials,
 } from "../../app/game/models.ts";
 import {
   animateGenericBuildingModel,
+  auditBuildingModel,
   createGenericBuildingModel,
   genericBuildingCategory,
   type GenericBuildingMaterials,
 } from "../../app/game/models/genericBuilding.ts";
+import { animateDistributionPoleModel, animateFieldPowerCoreModel } from "../../app/game/models/power.ts";
 
 const material = (color: number) => new THREE.MeshStandardMaterial({ color });
 const materials: GenericBuildingMaterials = {
@@ -90,6 +94,51 @@ test("every definition port has a marker at its exact local position", () => {
       assert.deepEqual(marker.position.toArray(), [port.localPosition.x, port.localPosition.y, port.localPosition.z]);
       assert.equal(marker.userData.medium, port.medium);
       assert.equal(marker.userData.connectorProfile, port.connectorProfile);
+    }
+  }
+});
+
+const powerBuildingIds = [
+  "field_power_core", "solid_fuel_generator", "combined_fuel_turbine", "high_density_thermal_plant",
+  "distribution_pole_mk1", "distribution_pole_mk2", "high_voltage_tower", "substation",
+  "power_breaker", "priority_switchboard", "industrial_accumulator",
+] as const;
+
+test("actual routed power models use exact definition ports and LOD metadata", () => {
+  const factoryMaterials = createFactoryMaterials();
+  for (const id of powerBuildingIds) {
+    const definition = building(id);
+    const model = createBuildingModel(id, factoryMaterials);
+    const markers = meshes(model).filter((part) => typeof part.userData.portId === "string");
+    assert.equal(markers.length, definition.ports.length, `${id} marker count`);
+    definition.ports.forEach((port, index) => {
+      const marker = markers.find((part) => part.userData.portId === port.id);
+      assert.ok(marker, `${id}.${port.id}`);
+      assert.deepEqual(marker.position.toArray(), [port.localPosition.x, port.localPosition.y, port.localPosition.z]);
+      assert.equal(marker.userData.portIndex, index);
+      assert.deepEqual(marker.userData.localFacing, port.localFacing);
+    });
+    assert.deepEqual(model.userData.localCollisionAabb, {
+      minX: -definition.footprint.x / 2,
+      maxX: definition.footprint.x / 2,
+      minZ: -definition.footprint.z / 2,
+      maxZ: definition.footprint.z / 2,
+    });
+    assert.ok(meshes(model).every((part) => [0, 1, 2].includes(part.userData.lodMaxTier)), `${id} LOD metadata`);
+  }
+});
+
+test("model quarter-turn convention matches rotated ports and footprint collision", () => {
+  for (const id of powerBuildingIds) {
+    const definition = building(id);
+    for (const rotation of definition.allowedRotations) {
+      for (const port of definition.ports) {
+        const visual = new THREE.Vector3(port.localPosition.x, port.localPosition.y, port.localPosition.z)
+          .applyAxisAngle(new THREE.Vector3(0, 1, 0), buildingModelRotationY(rotation));
+        const logical = rotateLocalPosition(port.localPosition, rotation);
+        assert.ok(Math.abs(visual.x - logical.x) < 1e-9, `${id}.${port.id} rotation ${rotation} x`);
+        assert.ok(Math.abs(visual.z - logical.z) < 1e-9, `${id}.${port.id} rotation ${rotation} z`);
+      }
     }
   }
 });
@@ -217,6 +266,91 @@ test("pump, fluid, routing, and generator motion follows working activity", () =
   assert.equal(generatorRotor.rotation.x, safeGenerator);
 });
 
+test("transmission equipment exposes mechanical state poses instead of color-only changes", () => {
+  const substation = createGenericBuildingModel(building("substation"), materials);
+  const fan = rolePart(substation, "coolingFan");
+  const safeFan = fan.rotation.z;
+  animateGenericBuildingModel(substation, { runtimeState: "working", progress: 0.5, activity: 0.8, time: 2 });
+  assert.notEqual(fan.rotation.z, safeFan);
+  animateGenericBuildingModel(substation, { runtimeState: "disconnected", progress: 0.5, activity: 1, time: 5 });
+  assert.equal(fan.rotation.z, safeFan);
+
+  const breaker = createGenericBuildingModel(building("power_breaker"), materials);
+  const lever = rolePart(breaker, "breakerLever");
+  const contact = rolePart(breaker, "breakerContact");
+  const closedRotation = lever.rotation.z;
+  animateGenericBuildingModel(breaker, { runtimeState: "tripped", progress: 0, activity: 0, time: 1 });
+  assert.notEqual(lever.rotation.z, closedRotation);
+  assert.equal(contact.visible, false);
+  animateGenericBuildingModel(breaker, { runtimeState: "idle", progress: 0, activity: 0, time: 2 });
+  assert.equal(lever.rotation.z, closedRotation);
+  assert.equal(contact.visible, true);
+
+  const switchboard = createGenericBuildingModel(building("priority_switchboard"), materials);
+  assert.equal(meshes(switchboard).filter((part) => part.userData.animationRole === "priorityLever").length, 4);
+  const accumulator = createGenericBuildingModel(building("industrial_accumulator"), materials);
+  const gauge = rolePart(accumulator, "batteryGauge");
+  animateGenericBuildingModel(accumulator, { runtimeState: "idle", progress: 0, storedRatio: 0.5, activity: 0, time: 0 });
+  assert.equal(gauge.scale.y, 0.5);
+});
+
+test("generic geometry and non-indicator materials are shared across repeated models", () => {
+  const first = createGenericBuildingModel(building("solid_fuel_generator"), materials);
+  const second = createGenericBuildingModel(building("solid_fuel_generator"), materials);
+  const firstFoundation = rolePart(first, "foundation") as THREE.Mesh;
+  const secondFoundation = rolePart(second, "foundation") as THREE.Mesh;
+  assert.equal(firstFoundation.geometry, secondFoundation.geometry);
+  const sharedMaterials = new Set(Object.values(materials));
+  for (const part of meshes(first).filter((part) => part.userData.animationRole !== "status")) {
+    assert.ok(sharedMaterials.has(part.material as THREE.Material), `${part.userData.animationRole} should reuse the material palette`);
+  }
+});
+
+test("power blockouts expose auditable port, LOD, motion, material, triangle, and shadow budgets", () => {
+  const factoryMaterials = createFactoryMaterials();
+  for (const id of powerBuildingIds) {
+    const definition = building(id);
+    const model = createBuildingModel(id, factoryMaterials);
+    const audit = auditBuildingModel(model);
+    assert.deepEqual(audit.portIds, definition.ports.map(({ id: portId }) => portId).sort(), `${id} ports`);
+    assert.equal(audit.meshes, audit.lodMeshes[0] + audit.lodMeshes[1] + audit.lodMeshes[2], `${id} LOD coverage`);
+    assert.ok(audit.triangles <= 14_000, `${id} triangle budget: ${audit.triangles}`);
+    assert.ok(audit.materials <= Object.keys(factoryMaterials).length + 8, `${id} material budget: ${audit.materials}`);
+    assert.ok(audit.shadowMeshes < audit.meshes, `${id} should disable shadows on indicators or service detail`);
+    assert.ok(audit.movingRoles.length > 0, `${id} motion/state roles`);
+  }
+
+  for (const id of ["field_power_core", "distribution_pole_mk1"] as const) {
+    const model = createBuildingModel(id, factoryMaterials);
+    const pulseMaterials = meshes(model)
+      .filter((part) => String(part.userData.animationRole).toLowerCase().includes("pulse"))
+      .map((part) => part.material);
+    assert.ok(pulseMaterials.length > 1);
+    assert.equal(new Set(pulseMaterials).size, 1, `${id} pulse indicators share one material`);
+  }
+});
+
+test("runtime lodTier is enforced after generic and dedicated power animation", () => {
+  const generator = createGenericBuildingModel(building("solid_fuel_generator"), materials);
+  generator.userData.lodTier = 2;
+  animateGenericBuildingModel(generator, { runtimeState: "working", progress: 0.5, activity: 1, time: 1 });
+  assert.equal(rolePart(generator, "generatorRotor").visible, false);
+  assert.equal(rolePart(generator, "generatorHousing").visible, true);
+
+  const factoryMaterials = createFactoryMaterials();
+  const core = createBuildingModel("field_power_core", factoryMaterials);
+  core.userData.lodTier = 2;
+  animateFieldPowerCoreModel(core, { time: 1, delta: 1 / 60, generating: true, connected: true, supplyRatio: 1, loadRatio: 0.5, overloaded: false });
+  assert.ok(meshes(core).some((part) => part.userData.lodMaxTier === 0 && !part.visible));
+  assert.ok(meshes(core).some((part) => part.userData.lodMaxTier === 2 && part.visible));
+
+  const pole = createBuildingModel("distribution_pole_mk1", factoryMaterials);
+  pole.userData.lodTier = 1;
+  animateDistributionPoleModel(pole, { time: 1, delta: 1 / 60, generating: true, connected: true, supplyRatio: 1, loadRatio: 0.5, overloaded: false });
+  assert.ok(meshes(pole).some((part) => part.userData.lodMaxTier === 0 && !part.visible));
+  assert.ok(meshes(pole).some((part) => part.userData.lodMaxTier === 1 && part.visible));
+});
+
 test("status light encodes every generic runtime state without sharing material mutation", () => {
   const first = createGenericBuildingModel(building("industrial_winder"), materials);
   const second = createGenericBuildingModel(building("industrial_winder"), materials);
@@ -231,6 +365,9 @@ test("status light encodes every generic runtime state without sharing material 
     blocked: 0xffa94d,
     disconnected: 0xd96f32,
     paused: 0xa8bcc0,
+    manual_off: 0xa8bcc0,
+    tripped: 0xff5268,
+    restoring: 0xffa94d,
   } as const;
   for (const [runtimeState, color] of Object.entries(expected)) {
     animateGenericBuildingModel(first, {

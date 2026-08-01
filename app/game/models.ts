@@ -9,7 +9,11 @@ import { createStorageModel } from "./models/storage.ts";
 import { createMergerModel, createSplitterModel } from "./models/logistics.ts";
 import { createCrusherModel } from "./models/crusher.ts";
 import { createRegisteredItemModel } from "./models/item.ts";
-import { createGenericBuildingModel } from "./models/genericBuilding.ts";
+import {
+  attachDefinitionPortMarkers,
+  createGenericBuildingModel,
+  decorateBuildingModel,
+} from "./models/genericBuilding.ts";
 import { createDistributionPoleModel, createFieldPowerCoreModel } from "./models/power.ts";
 import { createProjectDockModel } from "./models/projectDock.ts";
 
@@ -165,11 +169,18 @@ export const createBuildingModelFromDefinition = (
   const modelKey = definition.modelKey ?? definition.id;
   const dedicated = dedicatedBuildingModel(modelKey, materials);
   const group = dedicated ?? createGenericBuildingModel(definition, materials);
+  if (dedicated) attachDefinitionPortMarkers(group, definition, materials);
+  decorateBuildingModel(group, definition);
   group.userData.buildingId = definition.id;
   group.userData.modelKey = modelKey;
   group.userData.modelSource = dedicated ? "dedicated" : "generic";
   return group;
 };
+
+/** Matches domain rotateLocalPosition: quarter-turn 1 maps local +X to world +Z. */
+export const buildingModelRotationY = (rotation: number) => (
+  -(((Math.trunc(rotation) % 4) + 4) % 4) * Math.PI / 2
+);
 
 /** Creates any campaign building by registry id without changing the legacy BuildType API. */
 export const createBuildingModel = (

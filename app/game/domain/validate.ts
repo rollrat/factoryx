@@ -120,6 +120,12 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     if (building.transportPolicy && building.transportPolicy.throughputPerMinute <= 0) {
       issues.push({ code: "invalid_transport_rate", path: `${basePath}.transportPolicy.throughputPerMinute`, message: "Transport throughput must be positive" });
     }
+    if (building.fluidStoragePolicy && (
+      building.fluidStoragePolicy.capacityM3 <= 0
+      || building.fluidStoragePolicy.throughputM3PerMinute <= 0
+    )) {
+      issues.push({ code: "invalid_fluid_storage", path: `${basePath}.fluidStoragePolicy`, message: "Fluid capacity and throughput must be positive" });
+    }
     if (building.generatorPolicy) {
       const generator = building.generatorPolicy;
       if (generator.capacityMW <= 0 || generator.minimumLoadRatio < 0 || generator.minimumLoadRatio > 1) {
@@ -154,6 +160,9 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
     const portIds = new Set<string>();
     building.ports.forEach((port, portIndex) => {
       const portPath = `${basePath}.ports[${portIndex}]`;
+      if (port.medium === "fluid" && port.bufferSlots <= 0 && !building.fluidStoragePolicy) {
+        issues.push({ code: "missing_fluid_capacity", path: portPath, message: `${building.id}.${port.id} requires fluid storage capacity` });
+      }
       if (portIds.has(port.id)) {
         issues.push({ code: "duplicate_port_id", path: `${portPath}.id`, message: `Duplicate port id on ${building.id}: ${port.id}` });
       }
@@ -167,6 +176,14 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
         || port.connectionCell.z >= building.footprint.z;
       if (!outsideFootprint) {
         issues.push({ code: "port_inside_footprint", path: `${portPath}.connectionCell`, message: `${building.id}.${port.id} must connect outside the occupied footprint` });
+      }
+      const cardinalFacing = Math.abs(port.localFacing.x) + Math.abs(port.localFacing.z) === 1;
+      const facesOutside = (port.connectionCell.x < 0 && port.localFacing.x === -1)
+        || (port.connectionCell.x >= building.footprint.x && port.localFacing.x === 1)
+        || (port.connectionCell.z < 0 && port.localFacing.z === -1)
+        || (port.connectionCell.z >= building.footprint.z && port.localFacing.z === 1);
+      if (!cardinalFacing || !facesOutside) {
+        issues.push({ code: "invalid_port_facing", path: `${portPath}.localFacing`, message: `${building.id}.${port.id} must face outward on one cardinal axis` });
       }
       port.acceptedItemIds.forEach((itemId, acceptedIndex) => {
         const item = items.get(itemId);

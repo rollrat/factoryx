@@ -11,6 +11,8 @@ import type {
 import { CampaignWorldRuntime } from "../../app/game/sim/campaignWorld.ts";
 import { WorldProductionSimulation } from "../../app/game/sim/worldProduction.ts";
 import { buildWorldRuntimeTopology } from "../../app/game/telemetry/worldTopology.ts";
+import { inferAdjacentPowerEdges } from "../../app/game/sim/physicalPowerNetwork.ts";
+import { PhysicalPowerRuntime } from "../../app/game/sim/physicalPowerRuntime.ts";
 
 const ore: ItemDefinition = {
   id: "ore", name: "시험 광석", category: "resource", medium: "solid", unit: "item",
@@ -131,4 +133,18 @@ test("Atlas exposes actual recipe, buffers, progress, and stop reasons", () => {
   assert.equal(isolated?.status, "disconnected");
   assert.equal(isolated?.stopReason, "필수 포트 연결 없음");
   assert.equal(topology.live.nodeStates[`world:${ids.consumer}`]?.status, "blocked");
+});
+
+test("Atlas power edges and machine state use the live physical component results", () => {
+  const { campaign, production, ids } = setup();
+  const power = new PhysicalPowerRuntime({ world: campaign.world, edges: inferAdjacentPowerEdges(campaign.world) });
+  const result = power.step(1, { [ids.consumer]: { active: true } });
+  const topology = buildWorldRuntimeTopology(campaign, production, {
+    topology: result.topology,
+    results: result.grids,
+  });
+  const edge = topology.graph.edges.find(({ medium }) => medium === "power");
+  assert.equal(edge?.amount, 8);
+  assert.equal(edge?.itemName, "8 MW 전력");
+  assert.equal(topology.graph.nodes.find(({ instanceId }) => instanceId === ids.consumer)?.status, "working");
 });

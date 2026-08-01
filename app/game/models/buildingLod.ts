@@ -1,6 +1,7 @@
 import { rotatedFootprintSize } from "../domain/placement.ts";
 import type { BuildingDefinition, BuildingInstance } from "../domain/types.ts";
 import type { DataDrivenWorld } from "../sim/world.ts";
+import type * as THREE from "three";
 
 export type LodPoint3 = Readonly<{ x: number; y: number; z: number }>;
 export type FrustumPlane = Readonly<{ normal: LodPoint3; constant: number }>;
@@ -29,6 +30,8 @@ export type BuildingLodOptions = Readonly<{
   maxDistance?: number;
   frustumPlanes?: readonly FrustumPlane[];
 }>;
+
+export type BuildingLodModel = THREE.Object3D;
 
 const validateRadius = (radius: number) => {
   if (!Number.isFinite(radius) || radius < 0) throw new RangeError("LOD subject radius must be finite and non-negative");
@@ -118,6 +121,40 @@ export const classifyBuildingLods = (
 export const visibleBuildingLods = (decisions: readonly BuildingLodDecision[]) => (
   decisions.filter(({ visible }) => visible)
 );
+
+/** Applies a decision after animation; hidden parts remember their prior state for the next tier. */
+export const applyBuildingLodDecision = (
+  model: BuildingLodModel,
+  decision: BuildingLodDecision,
+) => {
+  model.visible = decision.visible;
+  model.userData.lodDetailTier = decision.detailTier;
+  model.userData.lodDistance = decision.distance;
+  if (!decision.visible || decision.detailTier === null) return;
+  model.traverse((part) => {
+    if (part === model) return;
+    const maxTier = part.userData.lodMaxTier;
+    if (typeof maxTier !== "number") return;
+    const allowed = decision.detailTier! <= maxTier;
+    const hiddenByLod = part.userData.hiddenByBuildingLod === true;
+    if (!allowed && !hiddenByLod) {
+      part.userData.visibleBeforeBuildingLod = part.visible;
+      part.userData.hiddenByBuildingLod = true;
+      part.visible = false;
+    } else if (allowed && hiddenByLod) {
+      part.visible = part.userData.visibleBeforeBuildingLod !== false;
+      part.userData.hiddenByBuildingLod = false;
+    }
+  });
+};
+
+export const applyBuildingLodDecisions = (
+  modelsByInstanceId: ReadonlyMap<string, BuildingLodModel>,
+  decisions: readonly BuildingLodDecision[],
+) => decisions.forEach((decision) => {
+  const model = modelsByInstanceId.get(decision.instanceId);
+  if (model) applyBuildingLodDecision(model, decision);
+});
 
 /** Extracts six normalized planes from a column-major projection-view matrix. */
 export const frustumPlanesFromMatrix = (elements: readonly number[]): readonly FrustumPlane[] => {

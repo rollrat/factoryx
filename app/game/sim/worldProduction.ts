@@ -120,7 +120,10 @@ export class WorldProductionSimulation {
       const makeInventory = (port: PortDefinition) => {
         if (sharedBidirectional.has(port.id)) return sharedBidirectional.get(port.id)!;
         const stackSize = Math.max(1, ...port.acceptedItemIds.map((id) => this.world.registry.items.get(id)?.stackSize ?? 1));
-        const inventory = new PortInventory(port.id, port.bufferSlots * stackSize);
+        const capacity = port.medium === "fluid"
+          ? definition.fluidStoragePolicy?.capacityM3 ?? port.bufferSlots * stackSize
+          : port.bufferSlots * stackSize;
+        const inventory = new PortInventory(port.id, capacity);
         if (port.direction === "bidirectional") sharedBidirectional.set(port.id, inventory);
         return inventory;
       };

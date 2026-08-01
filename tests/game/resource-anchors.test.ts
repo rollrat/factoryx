@@ -5,6 +5,7 @@ import { RESOURCE_ANCHORS, getResourceAnchorAt } from "../../app/game/data/resou
 import type { BuildingDefinition, DefinitionRegistry, ItemDefinition, RecipeDefinition } from "../../app/game/domain/types.ts";
 import { DataDrivenWorld } from "../../app/game/sim/world.ts";
 import { WorldProductionSimulation } from "../../app/game/sim/worldProduction.ts";
+import { START_REGISTRY } from "../../app/game/data/index.ts";
 
 const itemIds = ["iron_ore", "copper_ore", "limestone", "coal", "quartz", "crude_oil", "bauxite", "tungsten_ore"] as const;
 const items = itemIds.map((id) => ({
@@ -53,6 +54,18 @@ test("all eight document resources expose stable anchors for world and visual lo
   assert.deepEqual(RESOURCE_ANCHORS.map(({ itemId }) => itemId), itemIds);
   assert.equal(new Set(RESOURCE_ANCHORS.map(({ position }) => `${position.x},${position.z}`)).size, 8);
   RESOURCE_ANCHORS.forEach((anchor) => assert.equal(getResourceAnchorAt(anchor.position)?.id, anchor.id));
+});
+
+test("every shipped anchor can fit its full-size extraction building inside the playable map", () => {
+  for (const anchor of RESOURCE_ANCHORS) {
+    const world = new DataDrivenWorld({ registry: START_REGISTRY, bounds: { minX: -12, maxX: 12, minZ: -12, maxZ: 12 } });
+    (["phase_1_complete", "phase_2_complete", "phase_3_complete", "chemistry_stable", "thermal_verified"] as const)
+      .forEach((unlockId) => world.unlock(unlockId));
+    const definition = START_REGISTRY.buildings.get(anchor.extractionBuildingId)!;
+    world.grantItems(definition.buildCost);
+    const placed = world.place({ buildingId: anchor.extractionBuildingId, position: anchor.position, rotation: 0 });
+    assert.equal(placed.ok, true, `${anchor.itemId} extractor must fit its authored anchor`);
+  }
 });
 
 test("locked anchors reject extraction, then activate with their milestone", () => {

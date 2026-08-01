@@ -364,7 +364,7 @@ export default function GameHud({
         {cameraMode === "firstPerson" ? (
           <><span><kbd>클릭</kbd> 시점 고정</span><span><kbd>WASD</kbd> 이동</span><span><kbd>SHIFT</kbd> 달리기</span></>
         ) : (
-          <><span><kbd>WASD</kbd> 이동</span><span><kbd>휠</kbd> 줌</span><span><kbd>Q E</kbd> 회전</span><span><kbd>{toolKeyRange}</kbd> 도구</span></>
+          <><span><kbd>WASD</kbd> 이동</span><span><kbd>휠</kbd> 줌</span><span><kbd>Q E</kbd> 회전</span><span><kbd>L</kbd> 전력 케이블</span><span><kbd>{toolKeyRange}</kbd> 도구</span></>
         )}
       </div>
 

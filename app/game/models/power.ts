@@ -6,6 +6,7 @@ import {
   createIndicatorMaterial,
   setIndicator,
 } from "./shared.ts";
+import { applyDecoratedBuildingLod } from "./genericBuilding.ts";
 
 export type PowerMaterials = {
   dark: THREE.Material;
@@ -27,23 +28,6 @@ export type PowerVisualState = Readonly<{
   loadRatio: number;
   overloaded: boolean;
 }>;
-
-const addPowerPort = (
-  group: THREE.Group,
-  position: [number, number, number],
-  index: number,
-  material: THREE.Material,
-) => {
-  const socket = new THREE.Group();
-  socket.position.set(...position);
-  socket.userData.animationRole = "powerPort";
-  socket.userData.portIndex = index;
-  const body = addCylinder(socket, 0.095, 0.12, 0.14, [0, 0, 0], material, 10);
-  body.rotation.z = Math.PI / 2;
-  const contact = addCylinder(socket, 0.035, 0.035, 0.16, [0.08, 0, 0], material, 8);
-  contact.rotation.z = Math.PI / 2;
-  group.add(socket);
-};
 
 const addCoreFoundation = (group: THREE.Group, materials: PowerMaterials) => {
   addBox(group, [1.78, 0.17, 1.76], [0, 0.085, 0], materials.dark);
@@ -140,12 +124,11 @@ const addCoreBus = (group: THREE.Group, materials: PowerMaterials) => {
   const conductor = materials.copper ?? materials.orange;
   addBox(group, [0.84, 0.09, 0.1], [0.38, 1.58, -0.12], conductor);
   addBox(group, [0.1, 0.48, 0.1], [0.76, 1.36, -0.12], conductor);
-  addPowerPort(group, [0.83, 0.57, -0.36], 0, materials.dark);
-  addPowerPort(group, [0.83, 0.57, 0.12], 1, materials.dark);
+  const pulseMaterial = createIndicatorMaterial(0x5de4d1, 0x1a8f82, 1.4);
   for (let index = 0; index < 4; index += 1) {
     const pulse = new THREE.Mesh(
       new THREE.SphereGeometry(0.035, 7, 5),
-      createIndicatorMaterial(0x5de4d1, 0x1a8f82, 1.4),
+      pulseMaterial,
     );
     pulse.userData.animationRole = "powerCorePulse";
     pulse.userData.phase = index / 4;
@@ -210,13 +193,11 @@ const addPoleService = (group: THREE.Group, materials: PowerMaterials) => {
   status.userData.animationRole = "distributionPoleStatus";
   group.add(status);
   addBox(group, [0.2, 0.04, 0.03], [0.18, 0.88, 0.42], materials.orange, false);
-  addPowerPort(group, [0.39, 0.58, 0.18], 0, materials.dark);
-  addPowerPort(group, [-0.39, 0.58, 0.18], 1, materials.dark);
-
+  const pulseMaterial = createIndicatorMaterial(0x5de4d1, 0x1a8f82, 1.3);
   for (let index = 0; index < 5; index += 1) {
     const pulse = new THREE.Mesh(
       new THREE.SphereGeometry(0.032, 7, 5),
-      createIndicatorMaterial(0x5de4d1, 0x1a8f82, 1.3),
+      pulseMaterial,
     );
     pulse.userData.animationRole = "distributionPowerPulse";
     pulse.userData.phase = index / 5;
@@ -274,6 +255,7 @@ export const animateFieldPowerCoreModel = (group: THREE.Group, state: PowerVisua
     }
     if (role === "powerCoreStatus") setPowerStatus(part, state);
   });
+  applyDecoratedBuildingLod(group);
 };
 
 export const animateDistributionPoleModel = (group: THREE.Group, state: PowerVisualState) => {
@@ -293,4 +275,5 @@ export const animateDistributionPoleModel = (group: THREE.Group, state: PowerVis
     }
     if (role === "distributionPoleStatus") setPowerStatus(part, state);
   });
+  applyDecoratedBuildingLod(group);
 };

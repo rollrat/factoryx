@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyBuildingLodDecision,
+  applyBuildingLodDecisions,
   classifyBuildingLods,
   createWorldBuildingLodSubjects,
   frustumPlanesFromMatrix,
   visibleBuildingLods,
   type BuildingLodSubject,
 } from "../../app/game/models/buildingLod.ts";
+import { createGenericBuildingModel, type GenericBuildingMaterials } from "../../app/game/models/genericBuilding.ts";
+import * as THREE from "three";
 import type { BuildingDefinition, DefinitionRegistry } from "../../app/game/domain/types.ts";
 import { DataDrivenWorld } from "../../app/game/sim/world.ts";
 
@@ -78,4 +82,56 @@ test("DataDrivenWorld instances produce rotation-aware conservative bounding sph
 test("invalid LOD thresholds and matrices fail fast", () => {
   assert.throws(() => classifyBuildingLods([], { x: 0, y: 0, z: 0 }, { nearDistance: 45, farDistance: 18 }), /LOD distances/);
   assert.throws(() => frustumPlanesFromMatrix([1, 2, 3]), /16 finite elements/);
+});
+
+const material = () => new THREE.MeshBasicMaterial();
+const materials: GenericBuildingMaterials = {
+  dark: material(), steel: material(), pale: material(), cyan: material(), amber: material(),
+  orange: material(), rubber: material(), belt: material(), beltRib: material(), copper: material(),
+};
+
+test("LOD decisions actually hide service detail while preserving silhouette and representative state", () => {
+  const definition: BuildingDefinition = {
+    id: "generator", name: "Generator", unlockId: "start", placementMode: "buildable",
+    footprint: { x: 3, z: 3 }, allowedRotations: [0], ports: [], recipeIds: [], buildCost: [],
+    generatorPolicy: { capacityMW: 72, minimumLoadRatio: 0, dispatchPriority: 1 },
+  };
+  const model = createGenericBuildingModel(definition, materials);
+  const byRole = (role: string) => {
+    let found: THREE.Object3D | null = null;
+    model.traverse((part) => { if (!found && part.userData.animationRole === role) found = part; });
+    assert.ok(found, role);
+    return found;
+  };
+  const foot = byRole("supportFoot");
+  const rotor = byRole("generatorRotor");
+  const housing = byRole("generatorHousing");
+  const status = byRole("status");
+
+  applyBuildingLodDecision(model, {
+    instanceId: "generator-1", definitionId: "generator", visible: true,
+    detailTier: 2, detail: "silhouette", distance: 60,
+  });
+  assert.equal(foot.visible, false);
+  assert.equal(rotor.visible, false);
+  assert.equal(housing.visible, true);
+  assert.equal(status.visible, true);
+
+  applyBuildingLodDecision(model, {
+    instanceId: "generator-1", definitionId: "generator", visible: true,
+    detailTier: 1, detail: "operational", distance: 30,
+  });
+  assert.equal(rotor.visible, true);
+  assert.equal(foot.visible, false);
+  applyBuildingLodDecision(model, {
+    instanceId: "generator-1", definitionId: "generator", visible: true,
+    detailTier: 0, detail: "full", distance: 5,
+  });
+  assert.equal(foot.visible, true);
+
+  applyBuildingLodDecisions(new Map([["generator-1", model]]), [{
+    instanceId: "generator-1", definitionId: "generator", visible: false,
+    detailTier: null, detail: "culled", distance: 100, culledReason: "distance",
+  }]);
+  assert.equal(model.visible, false);
 });

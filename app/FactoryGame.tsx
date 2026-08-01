@@ -10,6 +10,8 @@ import { FactoryRuntime, type RuntimePowerControlSnapshot } from "./game/runtime
 import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.ts";
 import type { CampaignSnapshot } from "./game/sim/campaign.ts";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
+import { START_DEFINITIONS } from "./game/data/index.ts";
+import { buildDefinitionLineageGraph } from "./game/telemetry/definitionLineage.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
@@ -24,10 +26,12 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
   graph: { title: "실제 공장 생산 계보", nodes: [], edges: [] },
   live: { nodeStates: {}, updatedAt: 0 },
 };
+const DEFINITION_LINEAGE_GRAPH = buildDefinitionLineageGraph(START_DEFINITIONS);
 
 const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
 const INITIAL_POWER_CONTROL: RuntimePowerControlSnapshot = {
   capacityMW: 0, dispatchableMW: 0, requestedMW: 0, servedMW: 0, storedMWh: 0,
+  maxConsumptionMW: 0, nameplateReserveMW: 0, operatingReserveMW: 0,
   mainBreakerTripped: false, zones: [], breakers: [], switchboards: [],
 };
 const START_UNLOCKS: readonly UnlockId[] = ["start"];
@@ -57,7 +61,9 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
     nodes: topology.graph.nodes.map((node) => ({
       id: node.id,
       label: node.label,
-      kind: node.kind === "item" || node.kind === "contract"
+      kind: node.kind === "contract"
+        ? "project" as const
+        : node.kind === "item"
         ? "resource" as const
         : node.buildingId === "project_dock"
           ? "project" as const
@@ -81,6 +87,17 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
     })),
   },
   live: topology.live,
+  definitionLive: {
+    updatedAt: topology.live.updatedAt,
+    nodeStates: Object.fromEntries(Object.entries(topology.live.itemMetrics ?? {}).map(([itemId, metric]) => [
+      `item:${itemId}`,
+      {
+        status: metric.collecting ? "idle" as const : metric.producedPerMinute > 0 ? "working" as const : "idle" as const,
+        actualRatePerMinute: metric.producedPerMinute,
+        stock: metric.stock,
+      },
+    ])),
+  },
 });
 
 export type FactoryGameProps = Readonly<{
@@ -306,6 +323,7 @@ export default function FactoryGame({
       <ProductionLineageOverlay
         open={lineageOpen}
         onClose={() => setLineageOpen(false)}
+        definitionGraph={DEFINITION_LINEAGE_GRAPH}
         {...topologyForOverlay(topology)}
       />
     </main>

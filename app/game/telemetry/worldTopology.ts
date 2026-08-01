@@ -2,6 +2,7 @@ import type { BuildingInstance, PortDefinition } from "../domain/types.ts";
 import type { CampaignWorldRuntime } from "../sim/campaignWorld.ts";
 import type { MachineRuntimeState } from "../sim/contracts.ts";
 import type { PowerGridResult } from "../sim/powerGrid.ts";
+import type { PhysicalPowerTopology } from "../sim/physicalPowerNetwork.ts";
 import type {
   ProductionConnection,
   WorldProductionConnectionState,
@@ -10,6 +11,7 @@ import type {
 } from "../sim/worldProduction.ts";
 import type { WorldPort } from "../sim/world.ts";
 import type { RuntimeTopology, RuntimeTopologyEdge, RuntimeTopologyNode } from "./topology.ts";
+import type { ProductionMetric } from "./productionMetrics.ts";
 
 type TelemetryStatus = MachineRuntimeState | "storing";
 
@@ -55,10 +57,11 @@ const connectionsByInstance = (connections: readonly ProductionConnection[]) => 
   return result;
 };
 
-const powerStateFor = (power: PowerGridResult | null, instanceId: string) => {
-  const consumer = power?.consumers.find(({ id }) => id === instanceId);
-  const generator = power?.generators.find(({ id }) => id === instanceId);
-  const battery = power?.batteries.find(({ id }) => id === instanceId);
+const powerStateFor = (power: PowerGridResult | readonly PowerGridResult[] | null, instanceId: string) => {
+  const grids = Array.isArray(power) ? power : power ? [power] : [];
+  const consumer = grids.flatMap(({ consumers }) => consumers).find(({ id }) => id === instanceId);
+  const generator = grids.flatMap(({ generators }) => generators).find(({ id }) => id === instanceId);
+  const battery = grids.flatMap(({ batteries }) => batteries).find(({ id }) => id === instanceId);
   return { consumer, generator, battery };
 };
 
@@ -66,7 +69,7 @@ const stateForNode = (
   node: WorldProductionNodeSnapshot,
   instance: BuildingInstance,
   portConnections: ReadonlySet<string>,
-  power: PowerGridResult | null,
+  power: PowerGridResult | readonly PowerGridResult[] | null,
 ): Readonly<{ status: TelemetryStatus; reason: string }> => {
   const definitionHasPorts = uniqueInventories(node).length > 0;
   const powerState = powerStateFor(power, instance.id);
@@ -156,7 +159,30 @@ const opposing = (source: WorldPort, target: WorldPort) => (
 );
 
 /** Finds only physically adjacent power ports; it never invents a grid/core node. */
-const actualPowerEdges = (campaign: CampaignWorldRuntime): RuntimeTopologyEdge[] => {
+const actualPowerEdges = (
+  campaign: CampaignWorldRuntime,
+  physical?: Readonly<{ topology: PhysicalPowerTopology; results: readonly PowerGridResult[] }>,
+): RuntimeTopologyEdge[] => {
+  if (physical) return physical.topology.cables.map((cable) => {
+    const result = physical.results.find(({ gridId }) => gridId === cable.gridId);
+    const targetConsumer = result?.consumers.find(({ id }) => id === cable.target.ownerId);
+    const amount = targetConsumer?.servedMW ?? 0;
+    return {
+      id: `world-power:${cable.id}`,
+      source: nodeId(cable.source.ownerId),
+      target: nodeId(cable.target.ownerId),
+      kind: "power" as const,
+      medium: "power" as const,
+      itemId: "power",
+      itemName: `${amount} MW 전력`,
+      amount,
+      structureId: cable.source.ownerId,
+      connected: cable.enabled,
+      beltCount: 0,
+      jammed: !cable.enabled || result?.mainBreakerTripped === true,
+      beltIds: [],
+    };
+  });
   const endpoints: PortEndpoint[] = campaign.world.allInstances().flatMap((instance) => (
     campaign.world.portsFor(instance.id).map((port) => ({ instance, port }))
   ));
@@ -202,14 +228,16 @@ const actualPowerEdges = (campaign: CampaignWorldRuntime): RuntimeTopologyEdge[]
 export function buildWorldRuntimeTopology(
   campaign: CampaignWorldRuntime,
   production: WorldProductionSimulation,
+  physical?: Readonly<{ topology: PhysicalPowerTopology; results: readonly PowerGridResult[] }>,
+  metrics?: ReadonlyMap<string, ProductionMetric>,
 ): RuntimeTopology {
   production.syncWorld();
   const snapshot = production.snapshot();
   const productionNodes = new Map(snapshot.nodes.map((node) => [node.instanceId, node]));
   const connections = production.connectionStates();
   const connectedPorts = connectionsByInstance(connections);
-  const power = campaign.powerResult();
-  const edges = [...physicalEdges(campaign, productionNodes, connections), ...actualPowerEdges(campaign)];
+  const power = physical?.results ?? campaign.powerResult();
+  const edges = [...physicalEdges(campaign, productionNodes, connections), ...actualPowerEdges(campaign, physical)];
   edges.forEach((edge) => {
     connectedPorts.set(edge.source.slice("world:".length), new Set([
       ...(connectedPorts.get(edge.source.slice("world:".length)) ?? []), edge.id,
@@ -283,6 +311,17 @@ export function buildWorldRuntimeTopology(
 
   return {
     graph: { title: "실제 공장 생산 Atlas", nodes, edges },
-    live: { nodeStates, updatedAt: snapshot.clock.elapsedSeconds * 1_000 },
+    live: {
+      nodeStates,
+      updatedAt: snapshot.clock.elapsedSeconds * 1_000,
+      ...(metrics ? {
+        itemMetrics: Object.fromEntries([...metrics].map(([itemId, metric]) => [itemId, {
+          producedPerMinute: metric.producedPerMinute,
+          consumedPerMinute: metric.consumedPerMinute,
+          stock: metric.storedStock + metric.bufferStock + metric.inTransit + metric.workInProgress,
+          collecting: metric.collecting,
+        }])),
+      } : {}),
+    },
   };
 }

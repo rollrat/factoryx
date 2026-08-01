@@ -99,6 +99,27 @@ test("validator rejects missing references and a wrong port direction", () => {
   assert.ok(issueCodes.has("port_direction_mismatch"));
 });
 
+test("validator rejects zero or inward port facings that cannot match rotated model connectors", () => {
+  const source = validDefinitions();
+  const zeroFacing: DefinitionSource = {
+    ...source,
+    buildings: [{
+      ...source.buildings[0],
+      ports: [{ ...source.buildings[0].ports[0], localFacing: { x: 0, z: 0 } }, source.buildings[0].ports[1]],
+    }],
+  };
+  assert.ok(validateDefinitions(zeroFacing).some(({ code }) => code === "invalid_port_facing"));
+
+  const inwardFacing: DefinitionSource = {
+    ...source,
+    buildings: [{
+      ...source.buildings[0],
+      ports: [{ ...source.buildings[0].ports[0], localFacing: { x: 1, z: 0 } }, source.buildings[0].ports[1]],
+    }],
+  };
+  assert.ok(validateDefinitions(inwardFacing).some(({ code }) => code === "invalid_port_facing"));
+});
+
 test("validator enforces item units and preplaced world policies", () => {
   const source = validDefinitions();
   const invalid: DefinitionSource = {

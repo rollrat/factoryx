@@ -5,6 +5,7 @@ import {
   createFactoryMaterials,
   createItemModel,
   createStructureModel,
+  buildingModelRotationY,
 } from "./models";
 import { animateMinerModel } from "./models/miner";
 import { animateSmelterModel } from "./models/smelter";
@@ -32,8 +33,10 @@ import type { DataDrivenWorld } from "./sim/world.ts";
 import { CampaignWorldRuntime } from "./sim/campaignWorld.ts";
 import { ProjectDockDeliveryCommitter } from "./sim/projectDockCommitter.ts";
 import {
+  buildPhysicalPowerTopology,
   inferAdjacentPowerEdges,
   type PhysicalPowerTopology,
+  type PowerEdge,
   type PowerInstanceRuntime,
 } from "./sim/physicalPowerNetwork.ts";
 import { PhysicalPowerRuntime } from "./sim/physicalPowerRuntime.ts";
@@ -46,6 +49,7 @@ import {
   createWorldBuildingLodSubjects,
   frustumPlanesFromMatrix,
 } from "./models/buildingLod.ts";
+import { ProductionMetricCollector } from "./telemetry/productionMetrics.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
@@ -108,6 +112,9 @@ export type RuntimePowerControlSnapshot = Readonly<{
   requestedMW: number;
   servedMW: number;
   storedMWh: number;
+  maxConsumptionMW: number;
+  nameplateReserveMW: number;
+  operatingReserveMW: number;
   mainBreakerTripped: boolean;
   zones: readonly Readonly<{
     id: string;
@@ -147,6 +154,7 @@ export class FactoryRuntime {
   private powerTopology: PhysicalPowerTopology;
   private collisionIndex: WorldCollisionIndex;
   private readonly powerControls: MutablePowerControls;
+  private readonly manualPowerEdges: PowerEdge[];
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
@@ -155,6 +163,7 @@ export class FactoryRuntime {
   private readonly resourceGroups = new Map<string, THREE.Group>();
   private readonly history: HistoryEntry[] = [];
   private readonly worldHistory = new WorldCommandHistory(120);
+  private readonly productionMetrics = new ProductionMetricCollector(60, 15);
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -197,6 +206,7 @@ export class FactoryRuntime {
   private nextId = 1;
   private credits = 1200;
   private selectedId: number | null = null;
+  private powerCableStartId: string | null = null;
   private activeTool: Tool = "inspect";
   private rotation = 0;
   private currentCell: Cell = { x: 0, z: 0 };
@@ -270,9 +280,12 @@ export class FactoryRuntime {
       switchboardOutputs: Object.fromEntries(Object.entries(restored?.powerControls?.switchboardOutputs ?? {})
         .map(([id, outputs]) => [id, { ...outputs }])),
     };
+    this.manualPowerEdges = (restored?.physicalPower?.edges ?? [])
+      .filter(({ id }) => id.startsWith("manual-power:"))
+      .map((edge) => ({ ...edge, from: { ...edge.from }, to: { ...edge.to } }));
     this.physicalPower = new PhysicalPowerRuntime({
       world: this.world,
-      edges: inferAdjacentPowerEdges(this.world),
+      edges: [...inferAdjacentPowerEdges(this.world), ...this.manualPowerEdges],
       controls: this.powerControls,
       ...(restored?.physicalPower ? { snapshot: restored.physicalPower } : {}),
     });
@@ -400,7 +413,10 @@ export class FactoryRuntime {
   }
 
   getProductionTopology() {
-    return buildWorldRuntimeTopology(this.campaignWorld, this.worldProduction);
+    return buildWorldRuntimeTopology(this.campaignWorld, this.worldProduction, {
+      topology: this.powerTopology,
+      results: this.physicalPower.powerResults(),
+    }, this.productionMetrics.sample(this.worldProduction));
   }
 
   getCampaignSnapshot() {
@@ -436,6 +452,9 @@ export class FactoryRuntime {
       requestedMW: grids.reduce((sum, grid) => sum + grid.requestedMW, 0),
       servedMW: grids.reduce((sum, grid) => sum + grid.servedMW, 0),
       storedMWh: grids.reduce((sum, grid) => sum + grid.storedMWh, 0),
+      maxConsumptionMW: grids.reduce((sum, grid) => sum + grid.maxConsumptionMW, 0),
+      nameplateReserveMW: grids.reduce((sum, grid) => sum + grid.nameplateReserveMW, 0),
+      operatingReserveMW: grids.reduce((sum, grid) => sum + grid.operatingReserveMW, 0),
       mainBreakerTripped: grids.some((grid) => grid.mainBreakerTripped),
       zones: this.powerTopology.zones.map((zone) => ({
         id: zone.id,
@@ -480,6 +499,77 @@ export class FactoryRuntime {
     this.physicalPower.powerResults().filter(({ mainBreakerTripped }) => mainBreakerTripped)
       .forEach(({ gridId }) => this.physicalPower.requestSequentialRestart(gridId));
     this.callbacks.onToast("전력망 순차 재기동을 시작했습니다");
+  }
+
+  private connectSelectedPowerCable() {
+    const selected = this.selectedId === null ? null : this.simulation.structures.get(this.selectedId);
+    const targetId = selected?.worldInstanceId ?? null;
+    const targetPorts = targetId ? this.world.portsFor(targetId).filter(({ definition }) => definition.medium === "power") : [];
+    if (!targetId || targetPorts.length === 0) {
+      this.callbacks.onToast("전력 포트가 있는 설비를 먼저 선택하세요");
+      return;
+    }
+    if (!this.powerCableStartId) {
+      this.powerCableStartId = targetId;
+      this.callbacks.onToast("케이블 시작점 지정 · 다른 전력 설비를 선택하고 L");
+      return;
+    }
+    const sourceId = this.powerCableStartId;
+    this.powerCableStartId = null;
+    if (sourceId === targetId) {
+      this.callbacks.onToast("케이블 연결을 취소했습니다");
+      return;
+    }
+    const existingIndex = this.manualPowerEdges.findIndex(({ from, to }) => (
+      (from.ownerId === sourceId && to.ownerId === targetId)
+      || (from.ownerId === targetId && to.ownerId === sourceId)
+    ));
+    if (existingIndex >= 0) {
+      this.manualPowerEdges.splice(existingIndex, 1);
+      this.syncConnectionModels();
+      this.callbacks.onToast("수동 전력 케이블을 해제했습니다");
+      return;
+    }
+    const sourcePorts = this.world.portsFor(sourceId).filter(({ definition }) => definition.medium === "power");
+    const pair = sourcePorts.flatMap((source) => targetPorts.flatMap((target) => {
+      if (source.definition.connectorProfile !== target.definition.connectorProfile) return [];
+      const direct = source.definition.direction !== "input" && target.definition.direction !== "output";
+      const reverse = target.definition.direction !== "input" && source.definition.direction !== "output";
+      if (!direct && !reverse) return [];
+      const distance = Math.hypot(source.localPosition.x - target.localPosition.x, source.localPosition.z - target.localPosition.z);
+      const maxDistance = source.definition.connectorProfile === "power_high_voltage" ? 24 : 8;
+      if (distance > maxDistance) return [];
+      return [{ source, target, reverse, distance }];
+    })).sort((a, b) => a.distance - b.distance)[0];
+    if (!pair) {
+      this.callbacks.onToast("호환되는 전력 포트가 없거나 케이블 거리가 너무 멉니다");
+      return;
+    }
+    const from = pair.reverse
+      ? { ownerId: targetId, portId: pair.target.definition.id }
+      : { ownerId: sourceId, portId: pair.source.definition.id };
+    const to = pair.reverse
+      ? { ownerId: sourceId, portId: pair.source.definition.id }
+      : { ownerId: targetId, portId: pair.target.definition.id };
+    const edge: PowerEdge = {
+      id: `manual-power:${[`${from.ownerId}:${from.portId}`, `${to.ownerId}:${to.portId}`].sort().join("|")}`,
+      from,
+      to,
+      cableType: pair.source.definition.connectorProfile,
+      enabled: true,
+    };
+    const proposed = [...inferAdjacentPowerEdges(this.world), ...this.manualPowerEdges, edge];
+    try {
+      const beforeZones = this.powerTopology.zones.length;
+      const preview = buildPhysicalPowerTopology(this.world, proposed, this.powerControls);
+      this.manualPowerEdges.push(edge);
+      this.physicalPower.setEdges(proposed);
+      this.powerTopology = this.physicalPower.topology();
+      this.syncConnectionModels();
+      this.callbacks.onToast(`전력 케이블 연결 · 전력 구역 ${beforeZones} → ${preview.zones.length}`);
+    } catch {
+      this.callbacks.onToast("해당 포트에는 케이블을 연결할 수 없습니다");
+    }
   }
 
   cycleSelectedRecipe() {
@@ -663,7 +753,9 @@ export class FactoryRuntime {
     group.position.copy(definition
       ? new THREE.Vector3(data.x + definition.footprint.x / 2, 0, data.z + definition.footprint.z / 2)
       : modelPosition(data.type, data.x, data.z));
-    group.rotation.y = data.rotation * (Math.PI / 2);
+    group.rotation.y = data.buildingId
+      ? buildingModelRotationY(data.rotation)
+      : data.rotation * (Math.PI / 2);
     group.userData.structureId = data.id;
     group.traverse((child) => {
       child.userData.structureId = data.id;
@@ -793,7 +885,12 @@ export class FactoryRuntime {
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
-    this.physicalPower.setEdges(inferAdjacentPowerEdges(this.world));
+    const liveIds = new Set(this.world.allInstances().map(({ id }) => id));
+    for (let index = this.manualPowerEdges.length - 1; index >= 0; index -= 1) {
+      const edge = this.manualPowerEdges[index];
+      if (!liveIds.has(edge.from.ownerId) || !liveIds.has(edge.to.ownerId)) this.manualPowerEdges.splice(index, 1);
+    }
+    this.physicalPower.setEdges([...inferAdjacentPowerEdges(this.world), ...this.manualPowerEdges]);
     this.powerTopology = this.physicalPower.topology();
     this.powerTopology.cables.forEach((cable) => {
       const key = `power:${cable.id}`;
@@ -972,7 +1069,9 @@ export class FactoryRuntime {
     this.ghost.position.copy(definition
       ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
       : modelPosition(type, this.currentCell.x, this.currentCell.z));
-    this.ghost.rotation.y = this.rotation * (Math.PI / 2);
+    this.ghost.rotation.y = this.selectedBuildingId
+      ? buildingModelRotationY(this.rotation)
+      : this.rotation * (Math.PI / 2);
     this.recolorGhost(this.ghost, this.ghostValid);
   }
 
@@ -1483,6 +1582,10 @@ export class FactoryRuntime {
       this.cycleSelectedRecipe();
       return;
     }
+    if (key === "l" && this.activeTool === "inspect") {
+      this.connectSelectedPowerCable();
+      return;
+    }
     if (key === "r") {
       this.rotation = (this.rotation + 1) % 4;
       if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(this.currentCell, false);
@@ -1840,7 +1943,11 @@ export class FactoryRuntime {
       };
     });
     const projectDock = this.world.allInstances().find(({ definitionId }) => definitionId === "project_dock");
-    if (projectDock) overrides[projectDock.id] = { ...overrides[projectDock.id], active: activePoweredStage !== undefined };
+    if (projectDock) overrides[projectDock.id] = {
+      ...overrides[projectDock.id],
+      active: activePoweredStage !== undefined,
+      requestedMW: activePoweredStage !== undefined ? activePoweredStage.requiredPowerMW ?? 32 : 0,
+    };
     this.powerTopology.nodes.filter(({ roles }) => roles.includes("generator")).forEach(({ instanceId }) => {
       const fuel = this.physicalPower.generatorFuelState(instanceId);
       if (!fuel || fuel.buffered >= fuel.capacity) return;

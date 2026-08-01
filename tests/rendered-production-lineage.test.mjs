@@ -57,10 +57,52 @@ test("renders the three-mode shell, filters, and keyboard-selectable actual node
   assert.match(html, />공장 현황</);
   assert.match(html, />전력망</);
   assert.match(html, /노드명 또는 ID 검색/);
+  assert.match(html, /aria-label="그래프 표시 방식"/);
+  assert.match(html, />그래프</);
+  assert.match(html, />계층 목록</);
+  assert.match(html, /빈 공간을 드래그해 이동하고 휠로 확대 또는 축소합니다/);
+  assert.match(html, /data-node-id="miner"/);
   assert.match(html, />전체 상태</);
   assert.match(html, />전체 단계</);
   assert.match(html, /role="button"[^>]*tabindex="0"/);
   assert.match(html, /노드를 선택하세요/);
+});
+
+test("pure graph controls preserve the pointer anchor, navigate neighbors, and cap comparisons", async () => {
+  const { zoomViewportAtPoint, adjacentLineageNodeId, toggleComparedNode } = await loadLineage();
+  const before = { x: 20, y: -10, scale: 1 };
+  const pointer = { x: 180, y: 90 };
+  const after = zoomViewportAtPoint(before, pointer, 1.5);
+  assert.equal(after.scale, 1.5);
+  assert.equal((pointer.x - before.x) / before.scale, (pointer.x - after.x) / after.scale);
+  assert.equal((pointer.y - before.y) / before.scale, (pointer.y - after.y) / after.scale);
+  assert.equal(zoomViewportAtPoint(before, pointer, 99).scale, 1.8);
+  assert.equal(zoomViewportAtPoint(before, pointer, 0).scale, 0.55);
+
+  assert.equal(adjacentLineageNodeId(graph.nodes, "miner", "left"), "core");
+  assert.equal(adjacentLineageNodeId(graph.nodes, "miner", "right"), "ore");
+  assert.equal(adjacentLineageNodeId(graph.nodes, "core", "left"), "core");
+  assert.equal(adjacentLineageNodeId([], "missing", "right"), null);
+
+  assert.deepEqual(toggleComparedNode([], "core"), ["core"]);
+  assert.deepEqual(toggleComparedNode(["core"], "miner"), ["core", "miner"]);
+  assert.deepEqual(toggleComparedNode(["core", "miner"], "ore"), ["miner", "ore"]);
+  assert.deepEqual(toggleComparedNode(["miner", "ore"], "miner"), ["ore"]);
+});
+
+test("definition lineage mode reads its own live state instead of factory telemetry", async () => {
+  const lineageModule = await loadLineage();
+  const definitionGraph = { title: "정의 계보", nodes: [graph.nodes[1]], edges: [] };
+  const html = renderToStaticMarkup(React.createElement(lineageModule.default, {
+    open: true,
+    onClose() {},
+    graph,
+    live,
+    definitionGraph,
+    definitionLive: { nodeStates: { miner: { status: "starved" } }, updatedAt: 2_000 },
+  }));
+  assert.match(html, /factory-status-starved/);
+  assert.doesNotMatch(html, /factory-status-working[^>]*data-node-id="miner"/);
 });
 
 test("mode derivation uses only supplied edge endpoints and never creates facilities", async () => {

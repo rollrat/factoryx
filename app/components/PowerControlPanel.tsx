@@ -35,6 +35,9 @@ export default function PowerControlPanel({
         <div><span>가용 발전</span><strong>{number(snapshot.dispatchableMW)} MW</strong></div>
         <div><span>이름표 용량</span><strong>{number(snapshot.capacityMW)} MW</strong></div>
         <div><span>축전량</span><strong>{number(snapshot.storedMWh)} MWh</strong></div>
+        <div><span>최대 예상 소비</span><strong>{number(snapshot.maxConsumptionMW)} MW</strong></div>
+        <div><span>이름표 예비력</span><strong>{number(snapshot.nameplateReserveMW)} MW</strong></div>
+        <div><span>운전 예비력</span><strong>{number(snapshot.operatingReserveMW)} MW</strong></div>
         <div><span>만족도</span><strong>{Math.round(satisfaction * 100)}%</strong></div>
       </div>
 

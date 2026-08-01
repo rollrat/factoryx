@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import "../production-lineage.css";
 
 export type ProductionLineageStatus =
@@ -48,12 +48,17 @@ export type ProductionLineageLiveSnapshot = Readonly<{
 }>;
 
 export type LineageMode = "lineage" | "factory" | "power";
+export type LineageLayout = "graph" | "list";
+export type NavigationDirection = "left" | "right" | "up" | "down";
+export type GraphViewport = Readonly<{ x: number; y: number; scale: number }>;
 
 export type ProductionLineageOverlayProps = Readonly<{
   open: boolean;
   onClose: () => void;
   graph: ProductionLineageGraph;
+  definitionGraph?: ProductionLineageGraph;
   live: ProductionLineageLiveSnapshot;
+  definitionLive?: ProductionLineageLiveSnapshot;
   initialMode?: LineageMode;
 }>;
 
@@ -70,6 +75,60 @@ const MODE_LABEL: Record<LineageMode, Readonly<{ label: string; eyebrow: string;
   power: { label: "전력망", eyebrow: "POWER GRID", description: "실제 전력 연결 요소" },
 };
 const MODE_ORDER: readonly LineageMode[] = ["lineage", "factory", "power"];
+const MIN_SCALE = 0.55;
+const MAX_SCALE = 1.8;
+
+export const zoomViewportAtPoint = (
+  viewport: GraphViewport,
+  point: Readonly<{ x: number; y: number }>,
+  requestedScale: number,
+): GraphViewport => {
+  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, requestedScale));
+  const ratio = scale / viewport.scale;
+  return {
+    scale,
+    x: point.x - (point.x - viewport.x) * ratio,
+    y: point.y - (point.y - viewport.y) * ratio,
+  };
+};
+
+export const adjacentLineageNodeId = (
+  nodes: readonly ProductionLineageNode[],
+  currentId: string,
+  direction: NavigationDirection,
+  edges: readonly ProductionLineageEdge[] = [],
+): string | null => {
+  const derived = edges.length > 0 ? groupNodesByColumn(nodes, edges) : [];
+  const coordinates = new Map<string, Readonly<{ column: number; row: number }>>();
+  derived.forEach(([column, columnNodes]) => columnNodes.forEach((node, row) => coordinates.set(node.id, { column, row })));
+  nodes.forEach((node) => {
+    if (!coordinates.has(node.id)) coordinates.set(node.id, { column: node.column ?? 0, row: node.order ?? 0 });
+  });
+  const ordered = [...nodes].sort((a, b) => (coordinates.get(a.id)?.column ?? 0) - (coordinates.get(b.id)?.column ?? 0)
+    || (coordinates.get(a.id)?.row ?? 0) - (coordinates.get(b.id)?.row ?? 0) || a.label.localeCompare(b.label, "ko"));
+  const current = ordered.find((node) => node.id === currentId);
+  if (!current) return ordered[0]?.id ?? null;
+  const column = coordinates.get(current.id)?.column ?? 0;
+  const row = coordinates.get(current.id)?.row ?? 0;
+  if (direction === "up" || direction === "down") {
+    const peers = ordered.filter((node) => (coordinates.get(node.id)?.column ?? 0) === column);
+    const index = peers.findIndex((node) => node.id === currentId);
+    return peers[index + (direction === "up" ? -1 : 1)]?.id ?? currentId;
+  }
+  const candidateColumns = [...new Set(ordered.map((node) => coordinates.get(node.id)?.column ?? 0))]
+    .filter((candidate) => direction === "left" ? candidate < column : candidate > column)
+    .sort((a, b) => direction === "left" ? b - a : a - b);
+  const targetColumn = candidateColumns[0];
+  if (targetColumn === undefined) return currentId;
+  return ordered.filter((node) => (coordinates.get(node.id)?.column ?? 0) === targetColumn)
+    .sort((a, b) => Math.abs((coordinates.get(a.id)?.row ?? 0) - row) - Math.abs((coordinates.get(b.id)?.row ?? 0) - row)
+      || (coordinates.get(a.id)?.row ?? 0) - (coordinates.get(b.id)?.row ?? 0))[0]?.id ?? currentId;
+};
+
+export const toggleComparedNode = (ids: readonly string[], nodeId: string): readonly string[] => {
+  if (ids.includes(nodeId)) return ids.filter((id) => id !== nodeId);
+  return [...ids.slice(-1), nodeId];
+};
 
 type GraphFilter = "all" | "facility" | "item" | "problem";
 const FILTER_LABEL: Record<GraphFilter, string> = { all: "전체", facility: "설비", item: "품목", problem: "문제" };
@@ -149,7 +208,7 @@ function EdgeSummary({ edge, peer, direction }: Readonly<{
   );
 }
 
-function FactoryNodeCard({ node, live, inputs, outputs, nodeById, bottleneck, disconnected, selected, onSelect }: Readonly<{
+function FactoryNodeCard({ node, live, inputs, outputs, nodeById, bottleneck, disconnected, selected, compared, nodeRef, onSelect, onFocusRequest }: Readonly<{
   node: ProductionLineageNode;
   live?: ProductionLineageNodeLiveState;
   inputs: readonly ProductionLineageEdge[];
@@ -158,23 +217,40 @@ function FactoryNodeCard({ node, live, inputs, outputs, nodeById, bottleneck, di
   bottleneck: boolean;
   disconnected: boolean;
   selected: boolean;
-  onSelect: () => void;
+  compared: boolean;
+  nodeRef: (element: HTMLElement | null) => void;
+  onSelect: (shiftKey: boolean) => void;
+  onFocusRequest: (direction: NavigationDirection | "center") => void;
 }>) {
   const status = live?.status ?? (disconnected ? "disconnected" : "idle");
   const progress = Number.isFinite(live?.progress) ? Math.max(0, Math.min(100, (live?.progress ?? 0) * 100)) : null;
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onSelect();
+    const direction: Partial<Record<string, NavigationDirection>> = {
+      ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+    };
+    if (direction[event.key]) {
+      event.preventDefault();
+      onFocusRequest(direction[event.key]!);
+    } else if (event.key === "f" || event.key === "F") {
+      event.preventDefault();
+      onFocusRequest("center");
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(event.shiftKey);
+    }
   };
   return (
     <article
-      className={`factory-node factory-node-${node.kind} factory-status-${status} ${bottleneck ? "is-bottleneck" : ""} ${disconnected ? "is-disconnected" : ""} ${selected ? "is-selected" : ""}`}
+      ref={nodeRef}
+      className={`factory-node factory-node-${node.kind} factory-status-${status} ${bottleneck ? "is-bottleneck" : ""} ${disconnected ? "is-disconnected" : ""} ${selected ? "is-selected" : ""} ${compared ? "is-compared" : ""}`}
       role="button"
+      data-node-id={node.id}
       tabIndex={0}
       aria-pressed={selected}
+      aria-describedby={compared ? "factory-comparison-status" : undefined}
       aria-label={`${node.instanceLabel ?? node.label}, ${STATUS_LABEL[status]}, 상세 보기`}
-      onClick={onSelect}
+      onClick={(event) => onSelect(event.shiftKey)}
+      onDoubleClick={() => onFocusRequest("center")}
       onKeyDown={handleKeyDown}
     >
       <header><span>{KIND_LABEL[node.kind]}</span><em><i aria-hidden="true" />{STATUS_LABEL[status]}</em></header>
@@ -224,8 +300,26 @@ function NodeDetail({ node, live, inputs, outputs, nodeById, onClear }: Readonly
   );
 }
 
-export default function ProductionLineageOverlay({ open, onClose, graph, live, initialMode = "factory" }: ProductionLineageOverlayProps) {
+function ComparisonDetail({ nodes, live, onClear }: Readonly<{
+  nodes: readonly ProductionLineageNode[];
+  live: ProductionLineageLiveSnapshot;
+  onClear: () => void;
+}>) {
+  if (nodes.length === 0) return null;
+  return <section className="factory-node-comparison" aria-label="고정 노드 비교" id="factory-comparison-status">
+    <header><span>PINNED COMPARISON · {nodes.length}/2</span><button type="button" onClick={onClear}>비교 해제</button></header>
+    <div>{nodes.map((node) => {
+      const state = live.nodeStates[node.id];
+      return <article key={node.id}><em>{node.instanceLabel ?? KIND_LABEL[node.kind]}</em><strong>{node.label}</strong><dl><div><dt>상태</dt><dd>{STATUS_LABEL[state?.status ?? "idle"]}</dd></div><div><dt>실측</dt><dd>{formatRate(state?.actualRatePerMinute)}</dd></div><div><dt>재고</dt><dd>{state?.stock?.toLocaleString("ko-KR") ?? "—"}</dd></div></dl></article>;
+    })}</div>
+  </section>;
+}
+
+export default function ProductionLineageOverlay({ open, onClose, graph, definitionGraph, live, definitionLive, initialMode = "lineage" }: ProductionLineageOverlayProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef(new Map<string, HTMLElement>());
+  const dragRef = useRef<Readonly<{ pointerId: number; x: number; y: number; originX: number; originY: number }> | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const modeRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [mode, setMode] = useState<LineageMode>(initialMode);
@@ -234,7 +328,14 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live, i
   const [statusFilter, setStatusFilter] = useState<ProductionLineageStatus | "all">("all");
   const [stageFilter, setStageFilter] = useState<number | "all">("all");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const modeGraph = useMemo(() => graphForLineageMode(graph, mode), [graph, mode]);
+  const [comparedNodeIds, setComparedNodeIds] = useState<readonly string[]>([]);
+  const [layout, setLayout] = useState<LineageLayout>("graph");
+  const [viewport, setViewport] = useState<GraphViewport>({ x: 0, y: 0, scale: 1 });
+  const modeGraph = useMemo(
+    () => mode === "lineage" && definitionGraph ? definitionGraph : graphForLineageMode(graph, mode),
+    [definitionGraph, graph, mode],
+  );
+  const activeLive = mode === "lineage" && definitionLive ? definitionLive : live;
   const nodeById = useMemo(() => new Map(modeGraph.nodes.map((node) => [node.id, node])), [modeGraph.nodes]);
   const inputsByNode = useMemo(() => {
     const grouped = new Map<string, ProductionLineageEdge[]>();
@@ -249,30 +350,31 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live, i
   const disconnectedNodeIds = useMemo(() => {
     const ids = new Set<string>();
     modeGraph.edges.forEach((edge) => { if (edge.connected === false) { ids.add(edge.from); ids.add(edge.to); } });
-    modeGraph.nodes.forEach((node) => { if (live.nodeStates[node.id]?.status === "disconnected") ids.add(node.id); });
+    modeGraph.nodes.forEach((node) => { if (activeLive.nodeStates[node.id]?.status === "disconnected") ids.add(node.id); });
     return ids;
-  }, [live.nodeStates, modeGraph.edges, modeGraph.nodes]);
+  }, [activeLive.nodeStates, modeGraph.edges, modeGraph.nodes]);
   const bottleneckNodeIds = useMemo(() => {
     const ids = new Set<string>();
     modeGraph.edges.forEach((edge) => { if (edge.jammed) { ids.add(edge.from); ids.add(edge.to); } });
-    modeGraph.nodes.forEach((node) => { const status = live.nodeStates[node.id]?.status; if (status === "blocked" || status === "starved") ids.add(node.id); });
+    modeGraph.nodes.forEach((node) => { const status = activeLive.nodeStates[node.id]?.status; if (status === "blocked" || status === "starved") ids.add(node.id); });
     return ids;
-  }, [live.nodeStates, modeGraph.edges, modeGraph.nodes]);
+  }, [activeLive.nodeStates, modeGraph.edges, modeGraph.nodes]);
   const problemNodeIds = useMemo(() => new Set([...disconnectedNodeIds, ...bottleneckNodeIds]), [bottleneckNodeIds, disconnectedNodeIds]);
   const stages = useMemo(() => [...new Set(modeGraph.nodes.map((node) => Math.max(0, node.column ?? 0)))].sort((a, b) => a - b), [modeGraph.nodes]);
   const visibleNodes = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
     return modeGraph.nodes.filter((node) => {
-      const status = effectiveStatus(node, live, disconnectedNodeIds);
+      const status = effectiveStatus(node, activeLive, disconnectedNodeIds);
       const matchesQuery = normalizedQuery.length === 0 || [node.id, node.label, node.instanceLabel, node.detail].some((value) => value?.toLocaleLowerCase("ko-KR").includes(normalizedQuery));
       const matchesKind = filter === "all" || (filter === "facility" && node.kind !== "resource") || (filter === "item" && node.kind === "resource") || (filter === "problem" && problemNodeIds.has(node.id));
       return matchesQuery && matchesKind && (statusFilter === "all" || status === statusFilter) && (stageFilter === "all" || Math.max(0, node.column ?? 0) === stageFilter);
     });
-  }, [disconnectedNodeIds, filter, live, modeGraph.nodes, problemNodeIds, query, stageFilter, statusFilter]);
+  }, [activeLive, disconnectedNodeIds, filter, modeGraph.nodes, problemNodeIds, query, stageFilter, statusFilter]);
   const columns = useMemo(() => groupNodesByColumn(visibleNodes, modeGraph.edges), [modeGraph.edges, visibleNodes]);
   const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) : undefined;
+  const comparedNodes = comparedNodeIds.map((id) => nodeById.get(id)).filter((node): node is ProductionLineageNode => Boolean(node));
   const facilityNodes = modeGraph.nodes.filter((node) => node.kind !== "resource");
-  const activeCount = facilityNodes.filter((node) => ["working", "storing"].includes(live.nodeStates[node.id]?.status ?? "")).length;
+  const activeCount = facilityNodes.filter((node) => ["working", "storing"].includes(activeLive.nodeStates[node.id]?.status ?? "")).length;
   const disconnectedCount = modeGraph.edges.filter((edge) => edge.connected === false).length;
   const bottleneckCount = bottleneckNodeIds.size;
 
@@ -286,34 +388,120 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live, i
     event.preventDefault();
     setMode(MODE_ORDER[next]);
     setSelectedNodeId(null);
+    setComparedNodeIds([]);
+    setViewport({ x: 0, y: 0, scale: 1 });
     modeRefs.current[next]?.focus();
+  };
+
+  const centerNode = useCallback((nodeId: string) => {
+    if (layout !== "graph") return;
+    const container = viewportRef.current;
+    const node = nodeRefs.current.get(nodeId);
+    if (!container || !node) return;
+    const containerRect = container.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    setViewport((current) => ({
+      ...current,
+      x: current.x + containerRect.left + containerRect.width / 2 - (nodeRect.left + nodeRect.width / 2),
+      y: current.y + containerRect.top + containerRect.height / 2 - (nodeRect.top + nodeRect.height / 2),
+    }));
+  }, [layout]);
+
+  const moveNodeFocus = (currentId: string, direction: NavigationDirection | "center") => {
+    if (direction === "center") {
+      setSelectedNodeId(currentId);
+      centerNode(currentId);
+      return;
+    }
+    const nextId = adjacentLineageNodeId(visibleNodes, currentId, direction, modeGraph.edges);
+    if (!nextId) return;
+    setSelectedNodeId(nextId);
+    nodeRefs.current.get(nextId)?.focus();
+  };
+
+  const selectNode = (nodeId: string, compare: boolean) => {
+    setSelectedNodeId(nodeId);
+    if (compare) setComparedNodeIds((ids) => toggleComparedNode(ids, nodeId));
+  };
+  const closeOverlay = useCallback(() => {
+    setSelectedNodeId(null);
+    setComparedNodeIds([]);
+    onClose();
+  }, [onClose]);
+
+  const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (layout !== "graph" || event.button !== 0 || (event.target as HTMLElement).closest("[data-node-id], button, input, select")) return;
+    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX: viewport.x, originY: viewport.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.classList.add("is-panning");
+  };
+  const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setViewport((current) => ({ ...current, x: drag.originX + event.clientX - drag.x, y: drag.originY + event.clientY - drag.y }));
+  };
+  const endPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.classList.remove("is-panning");
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const zoomAtPointer = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (layout !== "graph") return;
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const factor = Math.exp(-event.deltaY * 0.0012);
+    setViewport((current) => zoomViewportAtPoint(
+      current,
+      { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+      current.scale * factor,
+    ));
   };
 
   useEffect(() => {
     if (!open) return;
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const frame = requestAnimationFrame(() => dialogRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
+    const frame = requestAnimationFrame(() => {
+      dialogRef.current?.focus();
+      if (window.matchMedia("(max-width: 760px)").matches) setLayout("list");
+    });
+    return () => { cancelAnimationFrame(frame); previousFocusRef.current?.focus(); };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (selectedNodeId) {
+          setSelectedNodeId(null);
+        } else closeOverlay();
+      } else if ((event.key === "f" || event.key === "F") && selectedNodeId
+        && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
+        event.preventDefault();
+        centerNode(selectedNodeId);
+      }
+    };
     window.addEventListener("keydown", handleKeyDown);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener("keydown", handleKeyDown); previousFocusRef.current?.focus(); };
-  }, [open, onClose]);
+    return () => { window.removeEventListener("keydown", handleKeyDown); };
+  }, [centerNode, closeOverlay, open, selectedNodeId]);
 
   if (!open) return null;
   const modeMeta = MODE_LABEL[mode];
   return (
-    <div className="factory-graph-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="factory-graph-overlay" onMouseDown={(event) => event.target === event.currentTarget && closeOverlay()}>
       <div ref={dialogRef} className="factory-graph-dialog" role="dialog" aria-modal="true" aria-labelledby="factory-graph-title" tabIndex={-1}>
         <header className="factory-graph-header">
           <div className="factory-graph-mark" aria-hidden="true">FX</div>
           <div><span>{modeMeta.eyebrow} / ACTUAL DATA</span><h2 id="factory-graph-title">{modeMeta.label} · {graph.title ?? "생산 계보"}</h2><p>{modeMeta.description}</p></div>
-          <div className="factory-graph-live"><i aria-hidden="true" />{formatUpdatedAt(live.updatedAt)}</div>
-          <button type="button" className="factory-graph-close" onClick={onClose} aria-label="생산 계보 창 닫기"><span>닫기</span><kbd>ESC</kbd></button>
+          <div className="factory-graph-live"><i aria-hidden="true" />{formatUpdatedAt(activeLive.updatedAt)}</div>
+          <button type="button" className="factory-graph-close" onClick={closeOverlay} aria-label="생산 계보 창 닫기"><span>닫기</span><kbd>ESC</kbd></button>
         </header>
 
         <nav className="factory-graph-modes" role="tablist" aria-label="생산 계보 보기 모드">
           {MODE_ORDER.map((option, index) => {
             const count = graphForLineageMode(graph, option).nodes.length;
-            return <button key={option} ref={(element) => { modeRefs.current[index] = element; }} type="button" role="tab" aria-selected={mode === option} tabIndex={mode === option ? 0 : -1} onClick={() => { setMode(option); setSelectedNodeId(null); }} onKeyDown={(event) => changeModeByKey(event, index)}><span>{MODE_LABEL[option].label}</span><small>{count}</small></button>;
+            return <button key={option} ref={(element) => { modeRefs.current[index] = element; }} type="button" role="tab" aria-selected={mode === option} tabIndex={mode === option ? 0 : -1} onClick={() => { setMode(option); setSelectedNodeId(null); setComparedNodeIds([]); setViewport({ x: 0, y: 0, scale: 1 }); }} onKeyDown={(event) => changeModeByKey(event, index)}><span>{MODE_LABEL[option].label}</span><small>{count}</small></button>;
           })}
         </nav>
 
@@ -329,26 +517,46 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live, i
           <div className="factory-graph-filters" role="group" aria-label="노드 표시 범위">{(Object.keys(FILTER_LABEL) as GraphFilter[]).map((option) => <button type="button" key={option} className={filter === option ? "is-active" : ""} aria-pressed={filter === option} onClick={() => setFilter(option)}>{FILTER_LABEL[option]}{option === "problem" && problemNodeIds.size > 0 ? ` ${problemNodeIds.size}` : ""}</button>)}</div>
           <label className="factory-graph-select"><span>상태</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ProductionLineageStatus | "all")}><option value="all">전체 상태</option>{(Object.keys(STATUS_LABEL) as ProductionLineageStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}</select></label>
           <label className="factory-graph-select"><span>단계</span><select value={stageFilter} onChange={(event) => setStageFilter(event.target.value === "all" ? "all" : Number(event.target.value))}><option value="all">전체 단계</option>{stages.map((stage) => <option key={stage} value={stage}>단계 {stage + 1}</option>)}</select></label>
+          <div className="factory-layout-toggle" role="group" aria-label="그래프 표시 방식">
+            <button type="button" aria-pressed={layout === "graph"} onClick={() => setLayout("graph")}>그래프</button>
+            <button type="button" aria-pressed={layout === "list"} onClick={() => setLayout("list")}>계층 목록</button>
+          </div>
+          {layout === "graph" ? <div className="factory-zoom-status" aria-label={`확대율 ${Math.round(viewport.scale * 100)}퍼센트`}><button type="button" onClick={() => setViewport((current) => zoomViewportAtPoint(current, { x: 0, y: 0 }, current.scale / 1.15))} aria-label="축소">−</button><span>{Math.round(viewport.scale * 100)}%</span><button type="button" onClick={() => setViewport((current) => zoomViewportAtPoint(current, { x: 0, y: 0 }, current.scale * 1.15))} aria-label="확대">＋</button></div> : null}
           <output aria-live="polite">{visibleNodes.length} / {nodeById.size} 노드</output>
         </section>
 
         <div className="factory-graph-main">
-          <div className="factory-graph-workspace">
-            <section className="factory-columns" aria-label={`${modeMeta.label} 실제 흐름`} role="list">
+          <div className={`factory-graph-workspace is-${layout}`}>
+            <div
+              ref={viewportRef}
+              className="factory-graph-viewport"
+              tabIndex={0}
+              aria-label={layout === "graph" ? `${modeMeta.label} 그래프. 빈 공간을 드래그해 이동하고 휠로 확대 또는 축소합니다.` : `${modeMeta.label} 계층형 목록`}
+              onPointerDown={beginPan}
+              onPointerMove={movePan}
+              onPointerUp={endPan}
+              onPointerCancel={endPan}
+              onWheel={zoomAtPointer}
+            >
+            <section className="factory-columns" aria-label={`${modeMeta.label} 실제 흐름`} role="list" style={layout === "graph" ? { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` } : undefined}>
               {columns.length === 0 ? <p className="factory-graph-empty">{modeGraph.nodes.length === 0 ? `${modeMeta.label}에 표시할 실제 연결 데이터가 없습니다.` : "검색 또는 필터 조건에 맞는 노드가 없습니다."}</p> : null}
-              {columns.map(([column, nodes], index) => <section className="factory-column" key={column} aria-labelledby={`factory-column-${mode}-${column}`}><header><span>STEP {String(index + 1).padStart(2, "0")}</span><strong id={`factory-column-${mode}-${column}`}>생산 단계 {column + 1}</strong><em>{nodes.length} 노드</em></header><div>{nodes.map((node) => <FactoryNodeCard key={node.id} node={node} live={live.nodeStates[node.id]} inputs={inputsByNode.get(node.id) ?? []} outputs={outputsByNode.get(node.id) ?? []} nodeById={nodeById} bottleneck={bottleneckNodeIds.has(node.id)} disconnected={disconnectedNodeIds.has(node.id)} selected={selectedNodeId === node.id} onSelect={() => setSelectedNodeId(node.id)} />)}</div></section>)}
+              {columns.map(([column, nodes], index) => <section className="factory-column" key={column} aria-labelledby={`factory-column-${mode}-${column}`}><header><span>STEP {String(index + 1).padStart(2, "0")}</span><strong id={`factory-column-${mode}-${column}`}>생산 단계 {column + 1}</strong><em>{nodes.length} 노드</em></header><div>{nodes.map((node) => <FactoryNodeCard key={node.id} node={node} nodeRef={(element) => { if (element) nodeRefs.current.set(node.id, element); else nodeRefs.current.delete(node.id); }} live={activeLive.nodeStates[node.id]} inputs={inputsByNode.get(node.id) ?? []} outputs={outputsByNode.get(node.id) ?? []} nodeById={nodeById} bottleneck={bottleneckNodeIds.has(node.id)} disconnected={disconnectedNodeIds.has(node.id)} selected={selectedNodeId === node.id} compared={comparedNodeIds.includes(node.id)} onSelect={(shiftKey) => selectNode(node.id, shiftKey)} onFocusRequest={(direction) => moveNodeFocus(node.id, direction)} />)}</div></section>)}
             </section>
+            </div>
+            <div className="factory-detail-stack">
             <NodeDetail
               node={selectedNode}
               live={selectedNode ? {
-                ...(live.nodeStates[selectedNode.id] ?? {}),
-                status: effectiveStatus(selectedNode, live, disconnectedNodeIds),
+                ...(activeLive.nodeStates[selectedNode.id] ?? {}),
+                status: effectiveStatus(selectedNode, activeLive, disconnectedNodeIds),
               } : undefined}
               inputs={selectedNode ? inputsByNode.get(selectedNode.id) ?? [] : []}
               outputs={selectedNode ? outputsByNode.get(selectedNode.id) ?? [] : []}
               nodeById={nodeById}
               onClear={() => setSelectedNodeId(null)}
             />
+            <ComparisonDetail nodes={comparedNodes} live={activeLive} onClear={() => setComparedNodeIds([])} />
+            </div>
           </div>
           <aside className="factory-graph-legend" aria-label="연결 및 설비 상태 범례"><span>STATUS</span><div className="legend-working"><i aria-hidden="true" />가동·연결</div><div className="legend-starved"><i aria-hidden="true" />원료 부족</div><div className="legend-jammed"><i aria-hidden="true" />흐름 막힘</div><div className="legend-disconnected"><i aria-hidden="true" />연결 끊김</div></aside>
         </div>

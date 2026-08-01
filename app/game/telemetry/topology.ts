@@ -59,6 +59,12 @@ export type RuntimeTopology = Readonly<{
       progress?: number;
     }>>>;
     updatedAt: number;
+    itemMetrics?: Readonly<Record<string, Readonly<{
+      producedPerMinute: number;
+      consumedPerMinute: number;
+      stock: number;
+      collecting: boolean;
+    }>>>;
   }>;
 }>;
 
