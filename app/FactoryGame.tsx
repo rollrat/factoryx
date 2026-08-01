@@ -947,7 +947,7 @@ export default function FactoryGame() {
           const role = part.userData.animationRole as string | undefined;
 
           if (role === "beltRoller") {
-            part.rotation.y = elapsed * 9;
+            part.rotation.x = -elapsed * 9;
           }
 
           if (role === "beltIndicator") {
