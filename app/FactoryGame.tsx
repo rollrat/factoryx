@@ -110,7 +110,7 @@ export default function FactoryGame() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.setAttribute("aria-label", "Factory X 3D 건설 영역");
     renderer.domElement.tabIndex = 0;
@@ -273,12 +273,15 @@ export default function FactoryGame() {
           const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.76, 10), materials.steel);
           roller.position.set(0, 0.25, z);
           roller.rotation.z = Math.PI / 2;
+          roller.userData.animationRole = "beltRoller";
           roller.castShadow = true;
           group.add(roller);
         }
         const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.28, 3), materials.cyan);
         arrow.position.set(0, 0.29, 0.08);
         arrow.rotation.x = Math.PI / 2;
+        arrow.userData.animationRole = "beltIndicator";
+        arrow.userData.baseZ = arrow.position.z;
         group.add(arrow);
         return group;
       }
@@ -289,13 +292,36 @@ export default function FactoryGame() {
       addPort(group, 0.96, 0, 0xffa94d, 0);
 
       if (type === "miner") {
-        addBox(group, [1.05, 0.78, 1.05], [0, 0.77, 0], materials.pale);
-        addBox(group, [1.3, 0.16, 0.32], [0, 1.13, 0], materials.dark);
-        const drill = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.1, 1.08, 8), materials.steel);
-        drill.position.set(0, 0.45, 0);
-        drill.castShadow = true;
-        group.add(drill);
-        addBox(group, [0.44, 0.22, 0.08], [0, 0.83, 0.56], materials.cyan, false);
+        addBox(group, [0.28, 0.98, 0.34], [-0.57, 0.82, 0], materials.pale);
+        addBox(group, [0.28, 0.98, 0.34], [0.57, 0.82, 0], materials.pale);
+        addBox(group, [1.38, 0.22, 0.42], [0, 1.32, 0], materials.dark);
+        addBox(group, [0.46, 0.24, 0.46], [0, 1.18, 0], materials.steel);
+
+        const drillAssembly = new THREE.Group();
+        drillAssembly.position.set(0, 0.2, 0);
+        drillAssembly.userData.animationRole = "minerDrill";
+        drillAssembly.userData.baseY = drillAssembly.position.y;
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.9, 8), materials.steel);
+        shaft.position.y = 0.55;
+        shaft.castShadow = true;
+        drillAssembly.add(shaft);
+        const bit = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.44, 8), materials.dark);
+        bit.position.y = 0.02;
+        bit.rotation.x = Math.PI;
+        bit.castShadow = true;
+        drillAssembly.add(bit);
+        const collar = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.055, 6, 12), materials.amber);
+        collar.position.y = 0.84;
+        collar.rotation.x = Math.PI / 2;
+        drillAssembly.add(collar);
+        group.add(drillAssembly);
+
+        const driveGear = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.085, 6, 12), materials.steel);
+        driveGear.position.set(0, 1.18, 0.26);
+        driveGear.userData.animationRole = "minerGear";
+        group.add(driveGear);
+        addBox(group, [0.48, 0.18, 0.08], [0, 0.84, 0.58], materials.cyan, false).userData.animationRole =
+          "statusLight";
       }
 
       if (type === "smelter") {
@@ -312,22 +338,89 @@ export default function FactoryGame() {
           }),
         );
         furnace.position.set(0, 0.72, 0.68);
+        furnace.userData.animationRole = "smelterGlow";
         group.add(furnace);
+
+        const heatRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.66, 0.045, 6, 18),
+          new THREE.MeshStandardMaterial({
+            color: 0xff9b42,
+            emissive: 0xff5218,
+            emissiveIntensity: 1.8,
+            transparent: true,
+            opacity: 0.7,
+          }),
+        );
+        heatRing.position.y = 1.12;
+        heatRing.rotation.x = Math.PI / 2;
+        heatRing.userData.animationRole = "smelterHeatRing";
+        group.add(heatRing);
+
+        const fan = new THREE.Group();
+        fan.position.set(-0.43, 0.92, 0.64);
+        fan.userData.animationRole = "smelterFan";
+        const fanHub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 10), materials.dark);
+        fanHub.rotation.x = Math.PI / 2;
+        fan.add(fanHub);
+        for (let index = 0; index < 3; index += 1) {
+          const blade = addBox(fan, [0.08, 0.31, 0.055], [0, 0.16, 0], materials.steel, false);
+          blade.rotation.z = index * ((Math.PI * 2) / 3);
+        }
+        group.add(fan);
+
         const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.85, 8), materials.dark);
         chimney.position.set(0.34, 1.65, -0.15);
         chimney.castShadow = true;
         group.add(chimney);
+        for (let index = 0; index < 3; index += 1) {
+          const smokeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8fa2a5,
+            transparent: true,
+            opacity: 0.2,
+            roughness: 1,
+            depthWrite: false,
+          });
+          const smoke = new THREE.Mesh(new THREE.IcosahedronGeometry(0.14, 1), smokeMaterial);
+          smoke.position.set(0.34, 2.12, -0.15);
+          smoke.userData.animationRole = "smelterSmoke";
+          smoke.userData.offset = index / 3;
+          smoke.userData.baseY = smoke.position.y;
+          group.add(smoke);
+        }
       }
 
       if (type === "assembler") {
-        addBox(group, [1.35, 0.72, 1.28], [0, 0.73, 0], materials.pale);
-        addBox(group, [1.08, 0.08, 0.82], [0, 1.13, 0.05], materials.cyan, false);
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.55, 10), materials.dark);
-        hub.position.set(0, 1.42, 0);
-        hub.rotation.z = Math.PI / 2;
-        hub.castShadow = true;
-        group.add(hub);
-        addBox(group, [1.45, 0.16, 0.16], [0, 1.42, 0], materials.steel);
+        addBox(group, [1.42, 0.46, 1.3], [0, 0.56, 0], materials.pale);
+        addBox(group, [0.22, 1.08, 0.22], [-0.65, 1.08, 0], materials.dark);
+        addBox(group, [0.22, 1.08, 0.22], [0.65, 1.08, 0], materials.dark);
+        addBox(group, [1.48, 0.18, 0.28], [0, 1.58, 0], materials.steel);
+
+        const turntable = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.58, 0.12, 12), materials.dark);
+        turntable.position.y = 0.86;
+        turntable.userData.animationRole = "assemblerTurntable";
+        turntable.castShadow = true;
+        group.add(turntable);
+        const workpiece = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.24, 0.36), materials.copper);
+        workpiece.position.y = 1.02;
+        workpiece.userData.animationRole = "assemblerWorkpiece";
+        group.add(workpiece);
+
+        [-0.36, 0.36].forEach((x, index) => {
+          const arm = new THREE.Group();
+          arm.position.set(x, 1.1, 0);
+          arm.userData.animationRole = "assemblerArm";
+          arm.userData.baseY = arm.position.y;
+          arm.userData.phase = index * 0.5;
+          const piston = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.58, 8), materials.steel);
+          piston.position.y = 0.24;
+          piston.castShadow = true;
+          arm.add(piston);
+          const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.18, 0.3), index === 0 ? materials.cyan : materials.amber);
+          head.position.y = -0.08;
+          head.castShadow = true;
+          arm.add(head);
+          group.add(arm);
+        });
       }
 
       if (type === "storage") {
@@ -335,7 +428,8 @@ export default function FactoryGame() {
         for (const y of [0.48, 0.86, 1.24]) {
           addBox(group, [1.5, 0.07, 1.43], [0, y, 0], materials.dark);
         }
-        addBox(group, [0.58, 0.18, 0.07], [0, 1.12, 0.72], materials.amber, false);
+        addBox(group, [0.58, 0.18, 0.07], [0, 1.12, 0.72], materials.amber, false).userData.animationRole =
+          "statusLight";
       }
 
       return group;
@@ -813,11 +907,12 @@ export default function FactoryGame() {
     let animationId = 0;
     let lastTime = performance.now();
     let productionClock = 0;
-    const clock = new THREE.Clock();
+    let elapsed = 0;
     const animate = (time: number) => {
       animationId = requestAnimationFrame(animate);
       const delta = Math.min((time - lastTime) / 1000, 0.05);
       lastTime = time;
+      elapsed += delta;
       const angularDistance = desiredCameraAngle - cameraAngle;
       cameraAngularVelocity += angularDistance * 90 * delta;
       cameraAngularVelocity *= Math.exp(-18 * delta);
@@ -834,7 +929,6 @@ export default function FactoryGame() {
       cameraTarget.lerp(desiredTarget, 1 - Math.exp(-delta * 11));
       updateCamera();
 
-      const elapsed = clock.getElapsedTime();
       movingItems.forEach((item) => {
         const phase = (elapsed * 0.12 + item.userData.offset) % 1;
         if (phase < 0.56) {
@@ -848,10 +942,76 @@ export default function FactoryGame() {
       });
 
       structures.forEach((record) => {
-        if (record.data.type === "miner") {
-          const drill = record.group.children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CylinderGeometry);
-          if (drill) drill.rotation.y = elapsed * 3.2;
-        }
+        const machinePhase = elapsed + record.data.id * 0.17;
+        record.group.traverse((part) => {
+          const role = part.userData.animationRole as string | undefined;
+
+          if (role === "beltRoller") {
+            part.rotation.y = elapsed * 9;
+          }
+
+          if (role === "beltIndicator") {
+            const baseZ = part.userData.baseZ as number;
+            part.position.z = baseZ + (((elapsed * 1.7) % 1) - 0.5) * 0.16;
+          }
+
+          if (role === "minerDrill") {
+            const baseY = part.userData.baseY as number;
+            const stroke = Math.pow((Math.sin(machinePhase * 4.1) + 1) * 0.5, 2);
+            part.position.y = baseY - stroke * 0.22;
+            part.rotation.y = elapsed * 7.5;
+          }
+
+          if (role === "minerGear") {
+            part.rotation.z = -elapsed * 4.8;
+          }
+
+          if (role === "smelterGlow" && part instanceof THREE.Mesh) {
+            const material = part.material;
+            if (material instanceof THREE.MeshStandardMaterial) {
+              material.emissiveIntensity = 2.2 + Math.sin(machinePhase * 5.4) * 0.75;
+            }
+          }
+
+          if (role === "smelterHeatRing" && part instanceof THREE.Mesh) {
+            const heat = 1 + Math.sin(machinePhase * 5.4) * 0.035;
+            part.scale.setScalar(heat);
+            const material = part.material;
+            if (material instanceof THREE.MeshStandardMaterial) {
+              material.opacity = 0.58 + Math.sin(machinePhase * 5.4) * 0.16;
+            }
+          }
+
+          if (role === "smelterFan") {
+            part.rotation.z = -elapsed * 5.6;
+          }
+
+          if (role === "smelterSmoke" && part instanceof THREE.Mesh) {
+            const smokePhase = (elapsed * 0.34 + (part.userData.offset as number)) % 1;
+            part.position.y = (part.userData.baseY as number) + smokePhase * 0.92;
+            part.position.x = 0.34 + Math.sin(smokePhase * Math.PI * 2) * 0.08;
+            const smokeScale = 0.55 + smokePhase * 1.25;
+            part.scale.setScalar(smokeScale);
+            const material = part.material;
+            if (material instanceof THREE.MeshStandardMaterial) material.opacity = (1 - smokePhase) * 0.24;
+          }
+
+          if (role === "assemblerTurntable") {
+            part.rotation.y = elapsed * 1.55;
+          }
+
+          if (role === "assemblerWorkpiece") {
+            part.rotation.y = -elapsed * 1.55;
+            part.position.y = 1.02 + Math.sin(machinePhase * 6.2) * 0.025;
+          }
+
+          if (role === "assemblerArm") {
+            const baseY = part.userData.baseY as number;
+            const phase = machinePhase * 0.72 + (part.userData.phase as number);
+            const press = Math.pow(Math.max(0, Math.sin(phase * Math.PI * 2)), 5);
+            part.position.y = baseY - press * 0.39;
+          }
+        });
       });
 
       productionClock += delta;
