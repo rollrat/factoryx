@@ -12,6 +12,7 @@ import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
+import { buildRuntimeTopology } from "./telemetry/topology.ts";
 import type {
   BuildType,
   CameraMode,
@@ -156,6 +157,10 @@ export class FactoryRuntime {
 
   getLiveTelemetry() {
     return buildLiveTelemetry(this.simulation);
+  }
+
+  getProductionTopology() {
+    return buildRuntimeTopology(this.simulation);
   }
 
   toggleCameraMode() {

@@ -17,6 +17,9 @@ export type ProductionLineageNode = Readonly<{
   label: string;
   kind: "resource" | "building" | "storage" | "project";
   detail?: string;
+  column?: number;
+  order?: number;
+  instanceLabel?: string;
 }>;
 
 export type ProductionLineageEdge = Readonly<{
@@ -26,6 +29,9 @@ export type ProductionLineageEdge = Readonly<{
   itemName: string;
   medium?: "solid" | "fluid";
   plannedRatePerMinute?: number;
+  connected?: boolean;
+  beltCount?: number;
+  jammed?: boolean;
 }>;
 
 export type ProductionLineageGraph = Readonly<{
@@ -71,16 +77,6 @@ const KIND_LABEL: Record<ProductionLineageNode["kind"], string> = {
   project: "PROJECT",
 };
 
-const statusRank: Record<ProductionLineageStatus, number> = {
-  disconnected: 6,
-  blocked: 5,
-  starved: 4,
-  paused: 3,
-  storing: 2,
-  working: 1,
-  idle: 0,
-};
-
 const formatRate = (value?: number) => Number.isFinite(value) ? `${value!.toLocaleString("ko-KR")} /분` : "—";
 
 const formatUpdatedAt = (value?: string | number | Date) => {
@@ -89,48 +85,111 @@ const formatUpdatedAt = (value?: string | number | Date) => {
   return Number.isNaN(date.getTime()) ? "실시간 연결" : `${date.toLocaleTimeString("ko-KR")} 갱신`;
 };
 
-function LineageNodeCard({
+const edgeState = (edge: ProductionLineageEdge) => {
+  if (edge.connected === false) return { key: "disconnected", label: "끊김" } as const;
+  if (edge.jammed) return { key: "jammed", label: "막힘" } as const;
+  return {
+    key: "connected",
+    label: edge.beltCount === undefined ? "연결됨" : `벨트 ${edge.beltCount}칸`,
+  } as const;
+};
+
+const groupNodesByColumn = (nodes: readonly ProductionLineageNode[], edges: readonly ProductionLineageEdge[]) => {
+  const uniqueNodes = [...new Map(nodes.map((node) => [node.id, node])).values()];
+  const explicit = new Set(uniqueNodes.filter((node) => node.column !== undefined).map((node) => node.id));
+  const columns = new Map(uniqueNodes.map((node) => [node.id, node.column]));
+  const incomingCount = new Map(uniqueNodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(uniqueNodes.map((node) => [node.id, [] as string[]]));
+
+  edges.forEach((edge) => {
+    if (!incomingCount.has(edge.to) || !outgoing.has(edge.from)) return;
+    incomingCount.set(edge.to, (incomingCount.get(edge.to) ?? 0) + 1);
+    outgoing.get(edge.from)?.push(edge.to);
+  });
+
+  const queue = uniqueNodes.filter((node) => incomingCount.get(node.id) === 0).map((node) => node.id);
+  queue.forEach((id) => { if (columns.get(id) === undefined) columns.set(id, 0); });
+  while (queue.length > 0) {
+    const sourceId = queue.shift()!;
+    const sourceColumn = columns.get(sourceId) ?? 0;
+    outgoing.get(sourceId)?.forEach((targetId) => {
+      if (!explicit.has(targetId)) columns.set(targetId, Math.max(columns.get(targetId) ?? 0, sourceColumn + 1));
+      incomingCount.set(targetId, (incomingCount.get(targetId) ?? 1) - 1);
+      if (incomingCount.get(targetId) === 0) queue.push(targetId);
+    });
+  }
+
+  const grouped = new Map<number, ProductionLineageNode[]>();
+  uniqueNodes.forEach((node) => {
+    const column = Math.max(0, columns.get(node.id) ?? 0);
+    grouped.set(column, [...(grouped.get(column) ?? []), node]);
+  });
+  grouped.forEach((columnNodes) => columnNodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.label.localeCompare(b.label, "ko")));
+  return [...grouped.entries()].sort(([a], [b]) => a - b);
+};
+
+function EdgeSummary({ edge, peer, direction }: Readonly<{
+  edge: ProductionLineageEdge;
+  peer?: ProductionLineageNode;
+  direction: "input" | "output";
+}>) {
+  const state = edgeState(edge);
+  return (
+    <li className={`factory-edge factory-edge-${state.key}`}>
+      <i aria-hidden="true" />
+      <div>
+        <span>{direction === "input" ? "←" : "→"} {peer?.instanceLabel ?? peer?.label ?? "알 수 없는 설비"}</span>
+        <strong>{edge.itemName}</strong>
+      </div>
+      <em>{state.label}</em>
+    </li>
+  );
+}
+
+function FactoryNodeCard({
   node,
   live,
-  port,
+  inputs,
+  outputs,
+  nodeById,
 }: Readonly<{
   node: ProductionLineageNode;
   live?: ProductionLineageNodeLiveState;
-  port?: "input" | "output";
+  inputs: readonly ProductionLineageEdge[];
+  outputs: readonly ProductionLineageEdge[];
+  nodeById: ReadonlyMap<string, ProductionLineageNode>;
 }>) {
-  const status = live?.status ?? "idle";
-  const progress = Number.isFinite(live?.progress)
-    ? Math.max(0, Math.min(100, (live?.progress ?? 0) * 100))
-    : null;
-
+  const status = live?.status ?? (inputs.some((edge) => edge.connected === false) ? "disconnected" : "idle");
+  const progress = Number.isFinite(live?.progress) ? Math.max(0, Math.min(100, (live?.progress ?? 0) * 100)) : null;
   return (
-    <section className={`lineage-node lineage-node-${node.kind} lineage-status-${status} ${port ? `lineage-port-${port}` : ""}`}>
-      <div className="lineage-node-heading">
+    <article className={`factory-node factory-node-${node.kind} factory-status-${status}`} role="listitem">
+      <header>
         <span>{KIND_LABEL[node.kind]}</span>
         <em><i aria-hidden="true" />{STATUS_LABEL[status]}</em>
-      </div>
-      <strong>{node.label}</strong>
+      </header>
+      {node.instanceLabel ? <div className="factory-instance">{node.instanceLabel}</div> : null}
+      <h3>{node.label}</h3>
       {node.detail ? <p>{node.detail}</p> : null}
-      <dl>
+      <dl className="factory-node-metrics">
         <div><dt>실측</dt><dd>{formatRate(live?.actualRatePerMinute)}</dd></div>
-        {live?.stock !== undefined ? (
-          <div>
-            <dt>재고</dt>
-            <dd>{live.stock.toLocaleString("ko-KR")}{live.capacity !== undefined ? ` / ${live.capacity.toLocaleString("ko-KR")}` : ""}</dd>
-          </div>
-        ) : null}
+        {live?.stock !== undefined ? <div><dt>재고</dt><dd>{live.stock.toLocaleString("ko-KR")}{live.capacity !== undefined ? ` / ${live.capacity.toLocaleString("ko-KR")}` : ""}</dd></div> : null}
       </dl>
       {progress !== null ? (
-        <div
-          className="lineage-node-progress"
-          role="progressbar"
-          aria-label={`${node.label} 진행률`}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(progress)}
-        ><i style={{ width: `${progress}%` }} /></div>
+        <div className="factory-node-progress" role="progressbar" aria-label={`${node.label} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+          <i style={{ width: `${progress}%` }} />
+        </div>
       ) : null}
-    </section>
+      <div className="factory-node-ports">
+        <section aria-label={`${node.label} 입력 연결`}>
+          <h4>INPUT <b>{inputs.length}</b></h4>
+          {inputs.length > 0 ? <ul>{inputs.map((edge) => <EdgeSummary key={edge.id} edge={edge} peer={nodeById.get(edge.from)} direction="input" />)}</ul> : <p>직접 공급 또는 입력 없음</p>}
+        </section>
+        <section aria-label={`${node.label} 출력 연결`}>
+          <h4>OUTPUT <b>{outputs.length}</b></h4>
+          {outputs.length > 0 ? <ul>{outputs.map((edge) => <EdgeSummary key={edge.id} edge={edge} peer={nodeById.get(edge.to)} direction="output" />)}</ul> : <p>최종 소비처 또는 출력 없음</p>}
+        </section>
+      </div>
+    </article>
   );
 }
 
@@ -138,12 +197,24 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live }:
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const nodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
-  const liveStates = Object.values(live.nodeStates).filter((state): state is ProductionLineageNodeLiveState => Boolean(state));
-  const activeCount = liveStates.filter((state) => state.status === "working" || state.status === "storing").length;
-  const problemCount = liveStates.filter((state) => statusRank[state.status] >= statusRank.starved).length;
-  const totalRate = liveStates.reduce((sum, state) => sum + (state.actualRatePerMinute ?? 0), 0);
-  const totalStock = liveStates.reduce((sum, state) => sum + (state.stock ?? 0), 0);
-  const isolatedNodes = graph.nodes.filter((node) => !graph.edges.some((edge) => edge.from === node.id || edge.to === node.id));
+  const columns = useMemo(() => groupNodesByColumn(graph.nodes, graph.edges), [graph.nodes, graph.edges]);
+  const inputsByNode = useMemo(() => {
+    const grouped = new Map<string, ProductionLineageEdge[]>();
+    graph.edges.forEach((edge) => grouped.set(edge.to, [...(grouped.get(edge.to) ?? []), edge]));
+    return grouped;
+  }, [graph.edges]);
+  const outputsByNode = useMemo(() => {
+    const grouped = new Map<string, ProductionLineageEdge[]>();
+    graph.edges.forEach((edge) => grouped.set(edge.from, [...(grouped.get(edge.from) ?? []), edge]));
+    return grouped;
+  }, [graph.edges]);
+  const facilityNodes = graph.nodes.filter((node) => node.kind !== "resource");
+  const activeCount = facilityNodes.filter((node) => {
+    const state = live.nodeStates[node.id];
+    return state?.status === "working" || state?.status === "storing";
+  }).length;
+  const disconnectedCount = graph.edges.filter((edge) => edge.connected === false).length;
+  const jammedCount = graph.edges.filter((edge) => edge.jammed).length;
 
   useEffect(() => {
     if (!open) return;
@@ -165,73 +236,50 @@ export default function ProductionLineageOverlay({ open, onClose, graph, live }:
   if (!open) return null;
 
   return (
-    <div className="lineage-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div
-        ref={dialogRef}
-        className="lineage-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="lineage-title"
-        tabIndex={-1}
-      >
-        <header className="lineage-header">
-          <div className="lineage-heading-mark" aria-hidden="true">FX</div>
-          <div>
-            <span>PRODUCTION ATLAS / LIVE</span>
-            <h2 id="lineage-title">{graph.title ?? "생산 계보"}</h2>
-          </div>
-          <div className="lineage-live"><i aria-hidden="true" />{formatUpdatedAt(live.updatedAt)}</div>
-          <button type="button" className="lineage-close" onClick={onClose} aria-label="생산 계보 닫기">
-            <span>닫기</span><kbd>ESC</kbd>
-          </button>
+    <div className="factory-graph-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div ref={dialogRef} className="factory-graph-dialog" role="dialog" aria-modal="true" aria-labelledby="factory-graph-title" tabIndex={-1}>
+        <header className="factory-graph-header">
+          <div className="factory-graph-mark" aria-hidden="true">FX</div>
+          <div><span>LIVE FACTORY / PHYSICAL CONNECTIONS</span><h2 id="factory-graph-title">{graph.title ?? "실제 공장 생산 계보"}</h2></div>
+          <div className="factory-graph-live"><i aria-hidden="true" />{formatUpdatedAt(live.updatedAt)}</div>
+          <button type="button" className="factory-graph-close" onClick={onClose} aria-label="실제 공장 생산 계보 닫기"><span>닫기</span><kbd>ESC</kbd></button>
         </header>
 
-        <section className="lineage-summary" aria-label="생산 계보 요약">
-          <div><span>가동 설비</span><strong>{activeCount}</strong><small> / {graph.nodes.length}</small></div>
-          <div className={problemCount > 0 ? "is-warning" : ""}><span>병목·이상</span><strong>{problemCount}</strong><small> NODE</small></div>
-          <div><span>실측 흐름</span><strong>{totalRate.toLocaleString("ko-KR")}</strong><small> /분</small></div>
-          <div><span>총 재고</span><strong>{totalStock.toLocaleString("ko-KR")}</strong><small> ITEM</small></div>
+        <section className="factory-graph-summary" aria-label="실제 공장 연결 요약">
+          <div><span>실제 설비</span><strong>{facilityNodes.length}</strong><small> NODE</small></div>
+          <div><span>가동 설비</span><strong>{activeCount}</strong><small> LIVE</small></div>
+          <div className={disconnectedCount > 0 ? "is-danger" : ""}><span>끊긴 연결</span><strong>{disconnectedCount}</strong><small> EDGE</small></div>
+          <div className={jammedCount > 0 ? "is-warning" : ""}><span>막힌 벨트</span><strong>{jammedCount}</strong><small> EDGE</small></div>
         </section>
 
-        <div className="lineage-main">
-          <section className="lineage-board" aria-label="생산 흐름 연결 목록">
-            <div className="lineage-board-label">
-              <span>INPUT</span><strong>연결 흐름</strong><span>OUTPUT</span>
-            </div>
-            {graph.edges.length === 0 ? <p className="lineage-empty">표시할 생산 연결이 없습니다.</p> : null}
-            {graph.edges.map((edge) => {
-              const source = nodeById.get(edge.from);
-              const target = nodeById.get(edge.to);
-              if (!source || !target) return null;
-              const sourceLive = live.nodeStates[source.id];
-              const targetLive = live.nodeStates[target.id];
-              const flowStatus = [sourceLive?.status, targetLive?.status]
-                .filter((status): status is ProductionLineageStatus => Boolean(status))
-                .sort((a, b) => statusRank[b] - statusRank[a])[0] ?? "idle";
-              return (
-                <article className={`lineage-flow-row lineage-flow-${flowStatus}`} key={edge.id}>
-                  <LineageNodeCard node={source} live={sourceLive} port="output" />
-                  <div className="lineage-connection" aria-label={`${source.label}에서 ${target.label}로 ${edge.itemName} 운송`}>
-                    <span className="lineage-connection-line" aria-hidden="true"><i /><i /><i /></span>
-                    <strong>{edge.itemName}</strong>
-                    <small>{edge.medium === "fluid" ? "PIPE" : "BELT"} · {formatRate(edge.plannedRatePerMinute)}</small>
-                  </div>
-                  <LineageNodeCard node={target} live={targetLive} port="input" />
-                </article>
-              );
-            })}
-            {isolatedNodes.length > 0 ? (
-              <div className="lineage-isolated" aria-label="연결되지 않은 노드">
-                {isolatedNodes.map((node) => <LineageNodeCard key={node.id} node={node} live={live.nodeStates[node.id]} />)}
-              </div>
-            ) : null}
+        <div className="factory-graph-main">
+          <section className="factory-columns" aria-label="실제 공장 가로 생산 흐름" role="list">
+            {columns.length === 0 ? <p className="factory-graph-empty">배치된 실제 설비가 없습니다.</p> : null}
+            {columns.map(([column, nodes], index) => (
+              <section className="factory-column" key={column} aria-labelledby={`factory-column-${column}`}>
+                <header><span>STEP {String(index + 1).padStart(2, "0")}</span><strong id={`factory-column-${column}`}>생산 단계 {index + 1}</strong><em>{nodes.length} 설비</em></header>
+                <div>
+                  {nodes.map((node) => (
+                    <FactoryNodeCard
+                      key={node.id}
+                      node={node}
+                      live={live.nodeStates[node.id]}
+                      inputs={inputsByNode.get(node.id) ?? []}
+                      outputs={outputsByNode.get(node.id) ?? []}
+                      nodeById={nodeById}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
           </section>
 
-          <aside className="lineage-legend" aria-label="설비 상태 범례">
-            <span>STATUS LEGEND</span>
-            {(Object.keys(STATUS_LABEL) as ProductionLineageStatus[]).map((status) => (
-              <div className={`lineage-legend-${status}`} key={status}><i aria-hidden="true" />{STATUS_LABEL[status]}</div>
-            ))}
+          <aside className="factory-graph-legend" aria-label="연결 및 설비 상태 범례">
+            <span>STATUS</span>
+            <div className="legend-working"><i aria-hidden="true" />가동·연결</div>
+            <div className="legend-starved"><i aria-hidden="true" />원료 부족</div>
+            <div className="legend-jammed"><i aria-hidden="true" />벨트 막힘</div>
+            <div className="legend-disconnected"><i aria-hidden="true" />연결 끊김</div>
           </aside>
         </div>
       </div>

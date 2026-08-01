@@ -1,13 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import GameHud from "./components/GameHud";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
-import { START_DEFINITIONS } from "./game/data/index.ts";
 import { FactoryRuntime } from "./game/runtime";
-import { buildLineageGraph } from "./game/telemetry/lineage.ts";
-import type { LiveFactoryTelemetry } from "./game/telemetry/live.ts";
-import { buildLineageView } from "./game/telemetry/presentation.ts";
+import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "./game/types";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
@@ -18,7 +15,40 @@ const IDLE_BELT_BUILD: BeltBuildInfo = {
   connectedStart: false,
 };
 
-const PRODUCTION_LINEAGE = buildLineageGraph(START_DEFINITIONS);
+const EMPTY_TOPOLOGY: RuntimeTopology = {
+  graph: { title: "실제 공장 생산 계보", nodes: [], edges: [] },
+  live: { nodeStates: {}, updatedAt: 0 },
+};
+
+const topologyForOverlay = (topology: RuntimeTopology) => ({
+  graph: {
+    title: topology.graph.title,
+    nodes: topology.graph.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      kind: node.kind === "item"
+        ? "resource" as const
+        : node.buildingId === "small_storage"
+          ? "storage" as const
+          : "building" as const,
+      detail: node.kind === "item" ? "현재 공장 내 실재고" : node.statusLabel,
+      column: node.column,
+      order: node.order,
+      instanceLabel: node.structureId === null ? undefined : `설비 #${node.structureId}`,
+    })),
+    edges: topology.graph.edges.map((edge) => ({
+      id: edge.id,
+      from: edge.source,
+      to: edge.target,
+      itemName: edge.itemName,
+      medium: "solid" as const,
+      connected: edge.connected,
+      beltCount: edge.beltCount,
+      jammed: edge.jammed,
+    })),
+  },
+  live: topology.live,
+});
 
 export default function FactoryGame() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -34,11 +64,7 @@ export default function FactoryGame() {
   const [toast, setToast] = useState("출력 포트에서 벨트를 연결하세요");
   const [toastVisible, setToastVisible] = useState(true);
   const [lineageOpen, setLineageOpen] = useState(false);
-  const [telemetry, setTelemetry] = useState<LiveFactoryTelemetry | null>(null);
-  const lineageView = useMemo(
-    () => buildLineageView(PRODUCTION_LINEAGE, START_DEFINITIONS, telemetry),
-    [telemetry],
-  );
+  const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -61,8 +87,8 @@ export default function FactoryGame() {
       onBeltBuildInfo: setBeltBuildInfo,
     });
     runtimeRef.current = runtime;
-    setTelemetry(runtime.getLiveTelemetry());
-    const telemetryTimer = window.setInterval(() => setTelemetry(runtime.getLiveTelemetry()), 250);
+    setTopology(runtime.getProductionTopology());
+    const telemetryTimer = window.setInterval(() => setTopology(runtime.getProductionTopology()), 250);
     return () => {
       window.clearInterval(telemetryTimer);
       runtime.dispose();
@@ -109,8 +135,7 @@ export default function FactoryGame() {
       <ProductionLineageOverlay
         open={lineageOpen}
         onClose={() => setLineageOpen(false)}
-        graph={lineageView.graph}
-        live={lineageView.live}
+        {...topologyForOverlay(topology)}
       />
     </main>
   );
