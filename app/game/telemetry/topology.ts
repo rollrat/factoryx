@@ -89,6 +89,9 @@ const STATUS_LABEL: Record<LiveRuntimeState | "storing", string> = {
 const machineNodeId = (id: number) => `structure:${id}`;
 const itemNodeId = (item: ItemType) => `item:${ITEM_INFO[item].id}`;
 const distance = (a: StructureData, b: StructureData) => Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+const isTransportStructure = (structure: StructureData | null): structure is StructureData => Boolean(
+  structure && (structure.type === "belt" || structure.type === "splitter" || structure.type === "merger"),
+);
 
 const findTarget = (structures: readonly StructureData[], source: StructureData, targetType: MachineType) =>
   structures
@@ -101,31 +104,40 @@ const traceBelts = (
   expectedTarget: StructureData,
 ) => {
   const sourcePorts = machinePorts(source);
-  let belt = simulation.getStructureAt(sourcePorts.output.x, sourcePorts.output.z);
+  const first = simulation.getStructureAt(sourcePorts.output.x, sourcePorts.output.z);
   const beltIds: number[] = [];
   const visited = new Set<number>();
-  let jammed = false;
 
-  if (!belt || belt.type !== "belt" || !sameDirection(directionForRotation(belt.rotation), sourcePorts.flow)) {
-    return { connected: false, beltIds, jammed };
+  if (!isTransportStructure(first) || !sameDirection(directionForRotation(first.rotation), sourcePorts.flow)) {
+    return { connected: false, beltIds, jammed: false };
   }
 
-  while (belt?.type === "belt" && !visited.has(belt.id)) {
+  const queue = [{ transport: first, path: [] as number[], jammed: false }];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const belt = current.transport;
+    if (visited.has(belt.id)) continue;
     visited.add(belt.id);
-    beltIds.push(belt.id);
+    const path = [...current.path, belt.id];
     const item = simulation.beltItems.get(belt.id);
-    if (item && item.progress >= 0.979) jammed = true;
+    const jammed = current.jammed || Boolean(item && item.progress >= 0.979);
     const direction = directionForRotation(belt.rotation);
     const targetPorts = machinePorts(expectedTarget);
-    if (targetPorts.inputs.some((input) => input.x === belt!.x && input.z === belt!.z)
+    if (targetPorts.inputs.some((input) => input.x === belt.x && input.z === belt.z)
       && sameDirection(targetPorts.flow, direction)) {
-      return { connected: true, beltIds, jammed };
+      return { connected: true, beltIds: path, jammed };
     }
-    const next = simulation.getStructureAt(belt.x + direction.x, belt.z + direction.z);
-    if (!next || next.type !== "belt") break;
-    belt = next;
+    const left = { x: direction.z, z: -direction.x };
+    const right = { x: -direction.z, z: direction.x };
+    const directions = belt.type === "splitter" ? [direction, left, right] : [direction];
+    directions.forEach((outgoing) => {
+      const next = simulation.getStructureAt(belt.x + outgoing.x, belt.z + outgoing.z);
+      if (isTransportStructure(next) && sameDirection(directionForRotation(next.rotation), outgoing)) {
+        queue.push({ transport: next, path, jammed });
+      }
+    });
   }
-  return { connected: false, beltIds, jammed };
+  return { connected: false, beltIds: [...visited], jammed: false };
 };
 
 const runtimeStateFor = (simulation: FactorySimulation, structure: StructureData) => {
@@ -157,7 +169,9 @@ const outputItemFor = (simulation: FactorySimulation, structure: StructureData &
 /** Builds the graph from placed structure instances and their current belt paths only. */
 export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopology {
   const structures = [...simulation.structures.values()];
-  const machines = structures.filter((structure): structure is StructureData & { type: MachineType } => structure.type !== "belt");
+  const machines = structures.filter((structure): structure is StructureData & { type: MachineType } => (
+    structure.type !== "belt" && structure.type !== "splitter" && structure.type !== "merger"
+  ));
   const nodes: RuntimeTopologyNode[] = [];
   const nodeStates: Record<string, RuntimeTopology["live"]["nodeStates"][string]> = {};
   const usedItems = new Set<ItemType>();

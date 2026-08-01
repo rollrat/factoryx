@@ -111,9 +111,18 @@ export default function GameHud({
   const selectedProgress = selectedDetails && Number.isFinite(selectedDetails.progress)
     ? Math.max(0, Math.min(100, selectedDetails.progress * 100))
     : 0;
-  const progressLabel = selectedDetails?.type === "storage"
+  const selectedType = selectedDetails?.type as string | undefined;
+  const isSplitter = selectedType === "splitter";
+  const isMerger = selectedType === "merger";
+  const progressLabel = isSplitter
+    ? "분배 흐름"
+    : isMerger ? "병합 흐름" : selectedDetails?.type === "storage"
     ? "저장 용량"
     : selectedDetails?.type === "belt" ? "운송 진행" : "공정 진행";
+  const flowInputLabel = isMerger ? "병합 입력" : selected?.type === "storage" ? "보관" : "입력";
+  const flowOutputLabel = isSplitter ? "분배 출력" : "출력";
+  const equipmentMode = selectedDetails?.recipeName
+    ?? (isSplitter ? "연결된 출력으로 균등 분배" : isMerger ? "준비된 입력을 순차 병합" : null);
 
   return (
     <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
@@ -170,7 +179,7 @@ export default function GameHud({
             </div>
           </div>
 
-          {selectedDetails?.recipeName ? <div className="equipment-recipe">{selectedDetails.recipeName}</div> : null}
+          {equipmentMode ? <div className="equipment-recipe">{equipmentMode}</div> : null}
 
           <div className="process-meter">
             <div className="process-meter-head">
@@ -194,7 +203,7 @@ export default function GameHud({
             aria-label={`입력 ${itemSummary(selectedDetails?.inputItems, selected?.inputCount ?? 0)}, 출력 ${itemSummary(selectedDetails?.outputItems, selected?.outputCount ?? 0)}`}
           >
             <div className="flow-node flow-input">
-              <span>{selected?.type === "storage" ? "보관" : "입력"}</span>
+              <span>{flowInputLabel}</span>
               <FlowContents
                 items={selectedDetails?.inputItems}
                 count={selected?.inputCount ?? 0}
@@ -205,7 +214,7 @@ export default function GameHud({
               <i /><i /><i />
             </div>
             <div className="flow-node flow-output">
-              <span>출력</span>
+              <span>{flowOutputLabel}</span>
               <FlowContents
                 items={selectedDetails?.outputItems}
                 count={selected?.outputCount ?? 0}

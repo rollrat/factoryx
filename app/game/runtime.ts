@@ -10,6 +10,7 @@ import { animateMinerModel } from "./models/miner";
 import { animateSmelterModel } from "./models/smelter";
 import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
+import { animateLogisticsModel } from "./models/logistics";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildRuntimeTopology } from "./telemetry/topology.ts";
@@ -23,8 +24,12 @@ import type {
   Tool,
 } from "./types";
 
+const isTransportType = (type: BuildType) => type === "belt" || type === "splitter" || type === "merger";
+
 const modelPosition = (type: BuildType, x: number, z: number) =>
-  type === "belt" ? new THREE.Vector3(x, 0, z) : new THREE.Vector3(x + 0.5, 0, z + 0.5);
+  isTransportType(type)
+    ? new THREE.Vector3(x, 0, z)
+    : new THREE.Vector3(x + 0.5, 0, z + 0.5);
 
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
@@ -488,7 +493,7 @@ export class FactoryRuntime {
   private updateBeltBuildInfo(dragging: boolean) {
     const first = this.beltPreviewCells[0];
     const connectedStart = Boolean(first && Array.from(this.simulation.structures.values()).some((machine) => {
-      if (machine.type === "belt" || machine.type === "storage") return false;
+      if (isTransportType(machine.type) || machine.type === "storage") return false;
       const ports = machinePorts(machine);
       return ports.output.x === first.x
         && ports.output.z === first.z
@@ -585,7 +590,7 @@ export class FactoryRuntime {
     this.changeCredits(this.credits - cost);
     const connected = added.some((belt) =>
       Array.from(this.simulation.structures.values()).some(
-        (machine) => machine.type !== "belt"
+        (machine) => !isTransportType(machine.type)
           && machine.type !== "storage"
           && machinePorts(machine).output.x === belt.x
           && machinePorts(machine).output.z === belt.z,
@@ -729,6 +734,8 @@ export class FactoryRuntime {
       "4": "smelter",
       "5": "assembler",
       "6": "storage",
+      "7": "splitter",
+      "8": "merger",
       x: "demolish",
     };
     if (tools[key]) this.setTool(tools[key]);
@@ -810,9 +817,9 @@ export class FactoryRuntime {
       const machineTime = (state?.animationTime ?? this.elapsed) + id * 0.17;
       const activity = state?.activity ?? 1;
       const outputQueued = (state?.output.length ?? 0) > 0;
-      const inputConnections = data.type === "belt" ? [] : this.simulation.getInputConnections(data);
+      const inputConnections = isTransportType(data.type) ? [] : this.simulation.getInputConnections(data);
       const hasInputConnection = inputConnections.some(Boolean);
-      const hasOutputConnection = data.type !== "belt" && this.simulation.hasOutputConnection(data);
+      const hasOutputConnection = !isTransportType(data.type) && this.simulation.hasOutputConnection(data);
       if (data.type === "miner") {
         animateMinerModel(group, {
           time: machineTime,
@@ -860,7 +867,7 @@ export class FactoryRuntime {
           inputConnected: hasInputConnection,
         });
       }
-      const beltItem = data.type === "belt" ? this.simulation.beltItems.get(id) : undefined;
+      const beltItem = isTransportType(data.type) ? this.simulation.beltItems.get(id) : undefined;
       const beltJammed = Boolean(beltItem && beltItem.progress >= 0.979);
       const beltSpeed = beltJammed ? 0 : 1;
       const beltTravel = ((group.userData.beltTravel as number | undefined) ?? 0) + delta * beltSpeed;
@@ -879,7 +886,7 @@ export class FactoryRuntime {
             material.emissiveIntensity = beltJammed ? 1.8 + Math.sin(this.elapsed * 5) * 0.5 : 1.5;
           }
         }
-        if ((role === "inputPort" || role === "outputPort") && part instanceof THREE.Mesh && data.type !== "belt") {
+        if ((role === "inputPort" || role === "outputPort") && part instanceof THREE.Mesh && !isTransportType(data.type)) {
           const inputIndex = (part.userData.inputIndex as number | undefined) ?? 0;
           const connected = role === "inputPort"
             ? (inputConnections[inputIndex] ?? false)
@@ -888,6 +895,15 @@ export class FactoryRuntime {
           if (material instanceof THREE.MeshStandardMaterial) material.emissiveIntensity = connected ? 1.6 : 0.15;
         }
       });
+      if (data.type === "splitter" || data.type === "merger") {
+        animateLogisticsModel(group, {
+          time: this.elapsed,
+          activity: beltItem ? 1 : 0,
+          working: Boolean(beltItem && !beltJammed),
+          blocked: beltJammed,
+          disconnected: false,
+        });
+      }
     });
   }
 

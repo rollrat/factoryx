@@ -13,11 +13,15 @@ export const TOOL_INFO: Array<{
   { id: "smelter", name: "제련기", glyph: "S", key: "4", cost: 180 },
   { id: "assembler", name: "성형기", glyph: "F", key: "5", cost: 260 },
   { id: "storage", name: "창고", glyph: "▣", key: "6", cost: 90 },
+  { id: "splitter", name: "분배기", glyph: "⑂", key: "7", cost: 45 },
+  { id: "merger", name: "병합기", glyph: "⑃", key: "8", cost: 45 },
   { id: "demolish", name: "철거", glyph: "×", key: "X" },
 ];
 
 export const COST: Record<BuildType, number> = {
   belt: 8,
+  splitter: 45,
+  merger: 45,
   miner: 120,
   smelter: 180,
   assembler: 260,
@@ -26,6 +30,8 @@ export const COST: Record<BuildType, number> = {
 
 export const TYPE_NAME: Record<BuildType, string> = {
   belt: "컨베이어 Mk.1",
+  splitter: "스마트 분배기",
+  merger: "라인 병합기",
   miner: "철 채굴기",
   smelter: "아크 제련기",
   assembler: "유압 성형기",
@@ -36,6 +42,8 @@ export const STORAGE_CAPACITY = 400;
 
 export const TYPE_RATE: Record<BuildType, string> = {
   belt: "52 /분",
+  splitter: "52 /분",
+  merger: "52 /분",
   miner: "24 /분",
   smelter: "18 /분",
   assembler: "30 /분",
@@ -57,7 +65,7 @@ export const directionForRotation = (rotation: number): Direction => {
 };
 
 export const footprint = (type: BuildType, x: number, z: number) => {
-  if (type === "belt") return [cellKey(x, z)];
+  if (type === "belt" || type === "splitter" || type === "merger") return [cellKey(x, z)];
   return [cellKey(x, z), cellKey(x + 1, z), cellKey(x, z + 1), cellKey(x + 1, z + 1)];
 };
 

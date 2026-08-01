@@ -8,9 +8,12 @@ import {
   sameDirection,
 } from "./config.ts";
 import { FixedStepClock } from "./sim/clock.ts";
+import { MergerRouter, SplitterRouter } from "./sim/junction.ts";
 import { START_REGISTRY } from "./data/index.ts";
 import { getRuntimeRecipe, resolveRuntimeRecipe, type RuntimeRecipe } from "./recipes/runtimeRecipes.ts";
-import type { BeltItem, BuildType, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
+import type { BeltItem, BuildType, Direction, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
+
+const isTransport = (type: BuildType) => type === "belt" || type === "splitter" || type === "merger";
 
 const aggregateItems = (items: readonly ItemType[]) => {
   const counts = new Map<ItemType, number>();
@@ -41,13 +44,15 @@ export class FactorySimulation {
   readonly beltItems = new Map<number, BeltItem>();
 
   private readonly clock = new FixedStepClock();
+  private readonly splitterRouters = new Map<number, SplitterRouter<ItemType>>();
+  private readonly mergerRouters = new Map<number, MergerRouter<ItemType>>();
   private nextItemId = 1;
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
 
   addStructure(data: StructureData) {
     this.structures.set(data.id, { ...data });
     footprint(data.type, data.x, data.z).forEach((cell) => this.occupancy.set(cell, data.id));
-    if (data.type !== "belt") {
+    if (!isTransport(data.type)) {
       const initialRecipe = data.type === "miner"
         ? resolveRuntimeRecipe({ type: "miner", x: data.x, z: data.z })
         : data.type === "assembler"
@@ -66,6 +71,8 @@ export class FactorySimulation {
         intakePulse: 0,
       });
     }
+    if (data.type === "splitter") this.splitterRouters.set(data.id, new SplitterRouter<ItemType>());
+    if (data.type === "merger") this.mergerRouters.set(data.id, new MergerRouter<ItemType>());
     this.rebuildPorts();
   }
 
@@ -76,6 +83,8 @@ export class FactorySimulation {
     this.structures.delete(id);
     this.machines.delete(id);
     this.beltItems.delete(id);
+    this.splitterRouters.delete(id);
+    this.mergerRouters.delete(id);
     this.rebuildPorts();
     return { ...data };
   }
@@ -97,23 +106,23 @@ export class FactorySimulation {
   }
 
   hasOutputConnection(data: StructureData) {
-    if (data.type === "belt" || data.type === "storage") return false;
+    if (isTransport(data.type)) return false;
     const ports = machinePorts(data);
     const belt = this.getStructureAt(ports.output.x, ports.output.z);
-    return belt?.type === "belt" && sameDirection(directionForRotation(belt.rotation), ports.flow);
+    return Boolean(belt && isTransport(belt.type) && sameDirection(directionForRotation(belt.rotation), ports.flow));
   }
 
   hasInputConnection(data: StructureData) {
-    if (data.type === "belt") return false;
+    if (isTransport(data.type)) return false;
     return this.getInputConnections(data).some(Boolean);
   }
 
   getInputConnections(data: StructureData) {
-    if (data.type === "belt") return [];
+    if (isTransport(data.type)) return [];
     const ports = machinePorts(data);
     return ports.inputs.map((input) => {
       const belt = this.getStructureAt(input.x, input.z);
-      return belt?.type === "belt" && sameDirection(directionForRotation(belt.rotation), ports.flow);
+      return Boolean(belt && isTransport(belt.type) && sameDirection(directionForRotation(belt.rotation), ports.flow));
     });
   }
 
@@ -130,7 +139,7 @@ export class FactorySimulation {
   getSelectedInfo(id: number): SelectedInfo {
     const data = this.structures.get(id);
     if (!data) return null;
-    if (data.type === "belt") {
+    if (isTransport(data.type)) {
       const item = this.beltItems.get(id);
       const jammed = Boolean(item && item.progress >= 0.979);
       return {
@@ -138,7 +147,7 @@ export class FactorySimulation {
         type: data.type,
         status: jammed ? "출력 막힘" : item ? "운송 중" : "가동 대기",
         runtimeState: jammed ? "blocked" : item ? "working" : "idle",
-        recipeName: "단일 품목 운송",
+        recipeName: data.type === "splitter" ? "라운드로빈 분배" : data.type === "merger" ? "공정 병합" : "단일 품목 운송",
         progress: item?.progress ?? 0,
         inputCount: item ? 1 : 0,
         inputCapacity: 1,
@@ -208,7 +217,7 @@ export class FactorySimulation {
 
   private updateMachines(delta: number) {
     this.structures.forEach((data, id) => {
-      if (data.type === "belt") return;
+      if (isTransport(data.type)) return;
       const state = this.machines.get(id);
       if (!state) return;
       if (data.type === "storage") {
@@ -249,27 +258,31 @@ export class FactorySimulation {
 
   private dispatchMachineOutputs() {
     this.structures.forEach((data, id) => {
-      if (data.type === "belt" || data.type === "storage") return;
+      if (isTransport(data.type)) return;
       const state = this.machines.get(id);
-      if (!state?.output.length) return;
+      if (!state) return;
+      const outputItems = data.type === "storage" ? state.storedItems : state.output;
+      if (!outputItems.length) return;
       const ports = machinePorts(data);
       const belt = this.getStructureAt(ports.output.x, ports.output.z);
-      if (!belt || belt.type !== "belt" || this.beltItems.has(belt.id)) return;
+      if (!belt || !isTransport(belt.type) || this.beltItems.has(belt.id)) return;
       if (!sameDirection(directionForRotation(belt.rotation), ports.flow)) return;
       this.beltItems.set(belt.id, {
         id: this.nextItemId++,
-        type: state.output.shift() as ItemType,
+        type: outputItems.shift() as ItemType,
         progress: 0,
       });
+      if (data.type === "storage") state.stored = state.storedItems.length;
     });
   }
 
   private updateBelts(delta: number) {
     const snapshot = Array.from(this.beltItems.entries());
+    const mergerCandidates = new Map<number, Array<{ beltId: number; item: BeltItem; portId: string; direction: Direction }>>();
     snapshot.forEach(([beltId, item]) => {
       if (this.beltItems.get(beltId) !== item) return;
       const belt = this.structures.get(beltId);
-      if (!belt || belt.type !== "belt") {
+      if (!belt || !isTransport(belt.type)) {
         this.beltItems.delete(beltId);
         return;
       }
@@ -288,7 +301,38 @@ export class FactorySimulation {
       }
 
       const next = this.getStructureAt(belt.x + direction.x, belt.z + direction.z);
-      if (next?.type === "belt" && !this.beltItems.has(next.id)) {
+      if (belt.type === "splitter") {
+        const left = { x: direction.z, z: -direction.x };
+        const right = { x: -direction.z, z: direction.x };
+        const directions = [direction, left, right];
+        const candidates = directions.map((candidateDirection, index) => {
+          const target = this.getStructureAt(belt.x + candidateDirection.x, belt.z + candidateDirection.z);
+          return {
+            portId: ["forward", "left", "right"][index],
+            connected: Boolean(target && isTransport(target.type)
+              && sameDirection(directionForRotation(target.rotation), candidateDirection)),
+            blocked: !target || !isTransport(target.type) || this.beltItems.has(target.id),
+            target,
+            direction: candidateDirection,
+          };
+        });
+        const decision = this.splitterRouters.get(belt.id)?.selectOutput(item.type, candidates);
+        const chosen = candidates.find((candidate) => candidate.portId === decision?.portId);
+        if (chosen?.target && isTransport(chosen.target.type)) {
+          this.beltItems.delete(beltId);
+          item.progress -= 1;
+          item.incoming = chosen.direction;
+          this.beltItems.set(chosen.target.id, item);
+          return;
+        }
+        item.progress = 0.98;
+        return;
+      }
+      if (next?.type === "merger" && !this.beltItems.has(next.id)) {
+        const candidates = mergerCandidates.get(next.id) ?? [];
+        candidates.push({ beltId, item, portId: `${belt.x},${belt.z}`, direction });
+        mergerCandidates.set(next.id, candidates);
+      } else if (next && isTransport(next.type) && !this.beltItems.has(next.id)) {
         this.beltItems.delete(beltId);
         item.progress -= 1;
         item.incoming = direction;
@@ -296,6 +340,30 @@ export class FactorySimulation {
       } else {
         item.progress = 0.98;
       }
+    });
+
+    mergerCandidates.forEach((candidates, mergerId) => {
+      if (this.beltItems.has(mergerId)) {
+        candidates.forEach(({ item }) => { item.progress = 0.98; });
+        return;
+      }
+      const decision = this.mergerRouters.get(mergerId)?.selectInput(candidates.map((candidate) => ({
+        portId: candidate.portId,
+        connected: true,
+        item: candidate.item.type,
+      })));
+      const chosen = candidates.find((candidate) => candidate.portId === decision?.portId);
+      if (!chosen || this.beltItems.get(chosen.beltId) !== chosen.item) {
+        candidates.forEach(({ item }) => { item.progress = 0.98; });
+        return;
+      }
+      candidates.forEach(({ item }) => {
+        if (item !== chosen.item) item.progress = 0.98;
+      });
+      this.beltItems.delete(chosen.beltId);
+      chosen.item.progress = 0;
+      chosen.item.incoming = chosen.direction;
+      this.beltItems.set(mergerId, chosen.item);
     });
   }
 
@@ -328,7 +396,7 @@ export class FactorySimulation {
   private rebuildPorts() {
     this.inputPorts.clear();
     this.structures.forEach((data) => {
-      if (data.type === "belt" || data.type === "miner") return;
+      if (isTransport(data.type) || data.type === "miner") return;
       machinePorts(data).inputs.forEach((input, inputIndex) => {
         this.inputPorts.set(cellKey(input.x, input.z), { machineId: data.id, inputIndex });
       });

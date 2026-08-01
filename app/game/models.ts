@@ -4,6 +4,7 @@ import { createMinerModel } from "./models/miner";
 import { createSmelterModel } from "./models/smelter";
 import { createAssemblerModel } from "./models/assembler";
 import { createStorageModel } from "./models/storage";
+import { createMergerModel, createSplitterModel } from "./models/logistics";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -116,6 +117,9 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
     group.add(status);
     return group;
   }
+
+  if (type === "splitter") return createSplitterModel(materials);
+  if (type === "merger") return createMergerModel(materials);
 
   if (type === "miner") return createMinerModel(materials);
   if (type === "smelter") return createSmelterModel(materials);

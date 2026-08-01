@@ -565,13 +565,16 @@ button {
   bottom: 14px;
   display: flex;
   align-items: stretch;
+  width: max-content;
   max-width: calc(100vw - 32px);
+  overflow: hidden;
   transform: translateX(-50%);
   pointer-events: auto;
 }
 
 .active-tool-readout {
   width: 104px;
+  flex: 0 0 104px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -602,16 +605,24 @@ button {
 }
 
 .toolbar {
+  min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   align-items: stretch;
   overflow-x: auto;
   padding: 4px;
-  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-color: #526062 #151b1c;
+  scrollbar-width: thin;
 }
 
 .toolbar::-webkit-scrollbar {
-  display: none;
+  height: 3px;
 }
+
+.toolbar::-webkit-scrollbar-track { background: #151b1c; }
+.toolbar::-webkit-scrollbar-thumb { background: #526062; }
 
 .tool-button {
   position: relative;
@@ -628,6 +639,7 @@ button {
   border-radius: 0;
   background: #151b1c;
   cursor: pointer;
+  scroll-snap-align: nearest;
   transition: background 90ms linear, border-color 90ms linear, transform 80ms ease-out;
 }
 
@@ -639,6 +651,12 @@ button {
   z-index: 1;
   border-color: #687475;
   background: #202829;
+}
+
+.tool-button:focus-visible {
+  z-index: 3;
+  outline: 2px solid var(--cyan);
+  outline-offset: -3px;
 }
 
 .tool-button:active {
@@ -671,8 +689,13 @@ button {
   position: absolute;
   top: 4px;
   left: 5px;
+  z-index: 2;
+  min-width: 13px;
+  padding: 2px;
+  background: rgba(8, 12, 13, 0.72);
   color: #7c8889;
   font: 800 7px/1 var(--font-geist-mono), monospace;
+  text-align: center;
 }
 
 .tool-cost {

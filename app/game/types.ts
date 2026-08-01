@@ -5,6 +5,8 @@ import type { RecipeId } from "./domain/types.ts";
 export type Tool =
   | "inspect"
   | "belt"
+  | "splitter"
+  | "merger"
   | "miner"
   | "smelter"
   | "assembler"
@@ -14,7 +16,8 @@ export type Tool =
 export type CameraMode = "overview" | "firstPerson";
 
 export type BuildType = Exclude<Tool, "inspect" | "demolish">;
-export type MachineType = Exclude<BuildType, "belt">;
+export type MachineType = Exclude<BuildType, "belt" | "splitter" | "merger">;
+export type LogisticsType = Extract<BuildType, "belt" | "splitter" | "merger">;
 export type ItemType = RuntimeItemId;
 
 export type StructureData = {
