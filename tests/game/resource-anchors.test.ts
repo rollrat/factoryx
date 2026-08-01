@@ -53,7 +53,8 @@ const createWorld = () => new DataDrivenWorld({
 test("all eight document resources expose stable anchors for world and visual lookup", () => {
   assert.deepEqual(RESOURCE_ANCHORS.map(({ itemId }) => itemId), itemIds);
   assert.equal(new Set(RESOURCE_ANCHORS.map(({ position }) => `${position.x},${position.z}`)).size, 8);
-  RESOURCE_ANCHORS.forEach((anchor) => assert.equal(getResourceAnchorAt(anchor.position)?.id, anchor.id));
+  RESOURCE_ANCHORS.forEach((anchor) => assert.equal(getResourceAnchorAt(anchor.position, anchor.stratumId)?.id, anchor.id));
+  assert.equal(getResourceAnchorAt(RESOURCE_ANCHORS.at(-1)!.position, "surface"), null);
 });
 
 test("every shipped anchor can fit its full-size extraction building inside the playable map", () => {
@@ -63,7 +64,13 @@ test("every shipped anchor can fit its full-size extraction building inside the 
       .forEach((unlockId) => world.unlock(unlockId));
     const definition = START_REGISTRY.buildings.get(anchor.extractionBuildingId)!;
     world.grantItems(definition.buildCost);
-    const placed = world.place({ buildingId: anchor.extractionBuildingId, position: anchor.position, rotation: 0 });
+    const placed = world.place({
+      buildingId: anchor.extractionBuildingId,
+      position: anchor.position,
+      rotation: 0,
+      stratumId: anchor.stratumId,
+      elevation: anchor.elevation,
+    });
     assert.equal(placed.ok, true, `${anchor.itemId} extractor must fit its authored anchor`);
   }
 });

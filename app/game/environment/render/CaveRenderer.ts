@@ -9,6 +9,15 @@ const cylinderBetween = (from: THREE.Vector3, to: THREE.Vector3, radius: number,
   return mesh;
 };
 
+const floorBetween = (from: THREE.Vector3, to: THREE.Vector3, width: number, material: THREE.Material) => {
+  const delta = to.clone().sub(from);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(width * 2, 0.24, delta.length()), material);
+  floor.position.copy(from).add(to).multiplyScalar(0.5).add(new THREE.Vector3(0, -0.12, 0));
+  floor.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), delta.normalize());
+  floor.receiveShadow = true;
+  return floor;
+};
+
 export class CaveRenderer {
   readonly root = new THREE.Group();
   readonly interactionRoot = new THREE.Group();
@@ -35,7 +44,23 @@ export class CaveRenderer {
         const tunnel = cylinderBetween(points[index - 1], points[index], 3.1, rock);
         tunnel.receiveShadow = true;
         zoneGroup.add(tunnel);
+        const corridorFloor = floorBetween(points[index - 1], points[index], 3, floor);
+        corridorFloor.userData.caveFloor = true;
+        corridorFloor.userData.stratumId = zone.stratumId;
+        this.interactionRoot.add(corridorFloor);
       }
+      zone.corridors.forEach((corridor) => {
+        const from = zone.rooms.find(({ id }) => id === corridor.fromRoomId)?.center;
+        const to = zone.rooms.find(({ id }) => id === corridor.toRoomId)?.center;
+        if (!from || !to) return;
+        const fromPoint = new THREE.Vector3(from.x, from.y, from.z);
+        const toPoint = new THREE.Vector3(to.x, to.y, to.z);
+        zoneGroup.add(cylinderBetween(fromPoint, toPoint, corridor.width, rock));
+        const shortcutFloor = floorBetween(fromPoint, toPoint, corridor.width * 0.9, floor);
+        shortcutFloor.userData.caveFloor = true;
+        shortcutFloor.userData.stratumId = zone.stratumId;
+        this.interactionRoot.add(shortcutFloor);
+      });
       zone.rooms.forEach((room, roomIndex) => {
         const chamber = new THREE.Mesh(new THREE.SphereGeometry(room.radius, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), rock);
         chamber.scale.y = room.clearance / room.radius;

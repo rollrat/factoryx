@@ -1,13 +1,16 @@
 import * as THREE from "three";
 import type { EnvironmentQuality } from "../types.ts";
 
-export type WeatherKind = "clear" | "mineral_wind" | "mist";
+export type WeatherKind = "clear" | "mineral_wind" | "mist" | "electrical_storm";
 
 export class WeatherSystem {
   readonly root = new THREE.Group();
   private readonly particles: THREE.Points;
+  private readonly stormLight = new THREE.PointLight(0xb8d9ff, 0, 95, 2);
   private weather: WeatherKind = "mineral_wind";
   private strength = 0.34;
+  private displayedStrength = 0.34;
+  private phase = 0;
   private readonly positions: Float32Array;
   private readonly scene: THREE.Scene;
 
@@ -31,16 +34,14 @@ export class WeatherSystem {
     );
     this.particles.frustumCulled = false;
     this.root.add(this.particles);
+    this.stormLight.position.set(0, 34, 0);
+    this.root.add(this.stormLight);
     this.scene.add(this.root);
   }
 
   setWeather(kind: WeatherKind, strength = this.strength) {
     this.weather = kind;
     this.strength = THREE.MathUtils.clamp(strength, 0, 1);
-    const material = this.particles.material as THREE.PointsMaterial;
-    material.color.setHex(kind === "mist" ? 0x9eb9b6 : 0xc0ad8e);
-    material.opacity = kind === "clear" ? 0 : 0.08 + this.strength * 0.48;
-    material.size = kind === "mist" ? 0.16 : 0.075;
   }
 
   getWeather() { return { kind: this.weather, strength: this.strength } as const; }
@@ -48,8 +49,19 @@ export class WeatherSystem {
   update(delta: number, camera: THREE.Camera) {
     this.root.position.x = camera.position.x;
     this.root.position.z = camera.position.z;
-    if (this.weather === "clear") return;
-    const speed = (this.weather === "mineral_wind" ? 9 : 1.2) * (0.25 + this.strength);
+    this.phase += delta;
+    this.displayedStrength = THREE.MathUtils.lerp(this.displayedStrength, this.strength, 1 - Math.exp(-delta * 1.4));
+    const material = this.particles.material as THREE.PointsMaterial;
+    const targetColor = this.weather === "mist" ? 0x9eb9b6 : this.weather === "electrical_storm" ? 0x8f9aa8 : 0xc0ad8e;
+    material.color.lerp(new THREE.Color(targetColor), 1 - Math.exp(-delta * 1.2));
+    material.opacity = THREE.MathUtils.lerp(material.opacity, this.weather === "clear" ? 0 : 0.06 + this.displayedStrength * 0.5, 1 - Math.exp(-delta * 1.8));
+    material.size = THREE.MathUtils.lerp(material.size, this.weather === "mist" ? 0.16 : 0.075, 1 - Math.exp(-delta * 1.8));
+    const flash = this.weather === "electrical_storm" && Math.sin(this.phase * 0.71) > 0.985
+      ? this.displayedStrength * 8
+      : 0;
+    this.stormLight.intensity = THREE.MathUtils.lerp(this.stormLight.intensity, flash, 1 - Math.exp(-delta * 24));
+    if (this.weather === "clear" && material.opacity < 0.001) return;
+    const speed = (this.weather === "mineral_wind" || this.weather === "electrical_storm" ? 9 : 1.2) * (0.25 + this.displayedStrength);
     for (let index = 0; index < this.positions.length; index += 3) {
       this.positions[index] += delta * speed;
       this.positions[index + 2] += delta * speed * 0.22;

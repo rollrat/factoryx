@@ -75,7 +75,7 @@ export class WorldCollisionIndex {
     this.bucketSize = bucketSize;
     this.obstacles = world.allInstances()
       .filter((instance) => (instance.stratumId ?? "surface") === stratumId)
-      .filter((instance) => world.registry.buildings.get(instance.definitionId)?.terrainPolicy?.role !== "foundation")
+      .filter((instance) => !["foundation", "ramp", "bridge"].includes(world.registry.buildings.get(instance.definitionId)?.terrainPolicy?.role ?? ""))
       .map((instance) => footprintCollider(world, instance));
     this.obstacles.forEach((obstacle) => {
       const minX = Math.floor(obstacle.bounds.minX / bucketSize);

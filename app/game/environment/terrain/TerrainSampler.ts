@@ -1,6 +1,8 @@
 import { BIOMES, BIOME_BY_ID } from "../data/biomes.ts";
 import { CAVE_ZONES } from "../data/caveZones.ts";
 import type { BiomeDefinition, EnvironmentDefinition, SurfaceType, TerrainSample } from "../types.ts";
+import { RESOURCE_ANCHORS } from "../../data/resourceAnchors.ts";
+import type { TerrainAuthoringStroke } from "../authoring.ts";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const smoothstep = (value: number) => {
@@ -15,12 +17,14 @@ const hashNoise = (x: number, z: number, seed: number) => {
 
 export class TerrainSampler {
   readonly definition: EnvironmentDefinition;
+  private readonly strokes: readonly TerrainAuthoringStroke[];
 
-  constructor(definition: EnvironmentDefinition) {
+  constructor(definition: EnvironmentDefinition, strokes: readonly TerrainAuthoringStroke[] = []) {
     this.definition = definition;
+    this.strokes = strokes.map((stroke) => ({ ...stroke }));
   }
 
-  biomeAt(x: number, z: number) {
+  private baseBiomeAt(x: number, z: number) {
     let best: BiomeDefinition = BIOMES[0];
     let bestScore = Number.POSITIVE_INFINITY;
     for (const biome of BIOMES) {
@@ -35,20 +39,51 @@ export class TerrainSampler {
     return best;
   }
 
-  heightAt(x: number, z: number) {
+  biomeAt(x: number, z: number) {
+    const painted = [...this.strokes].reverse().find((stroke) => stroke.brush === "biome"
+      && stroke.biomeId && Math.hypot(x - stroke.x, z - stroke.z) <= stroke.radius);
+    return (painted?.biomeId ? BIOME_BY_ID.get(painted.biomeId) : null) ?? this.baseBiomeAt(x, z);
+  }
+
+  private rawHeightAt(x: number, z: number) {
     const padDistance = Math.max(Math.abs(x) - 13.5, Math.abs(z) - 13.5, 0);
     const padBlend = smoothstep(padDistance / 12);
     if (padBlend === 0) return -0.5;
     const folded = Math.sin((x + z * 0.32) * 0.075) * 2.8;
     const strata = Math.sin(x * 0.031 - z * 0.061) * 4.2;
     const detail = hashNoise(Math.floor(x / 4), Math.floor(z / 4), this.definition.seed) * 0.8;
-    const biome = this.biomeAt(x, z);
+    const biome = this.baseBiomeAt(x, z);
     let regional = 0;
     if (biome.id === "ironwind_faults") regional = Math.max(0, (x - 38) * 0.075);
     if (biome.id === "hematite_crown") regional = Math.max(0, (-x - 34) * 0.09);
     if (biome.id === "blackwater_marsh") regional = -2.2;
     if (biome.id === "thermal_rift") regional = -Math.max(0, 18 - Math.hypot(x - 12, z - 99)) * 0.34;
     return (-0.5 + (folded + strata + detail + regional) * padBlend);
+  }
+
+  heightAt(x: number, z: number) {
+    const raw = this.rawHeightAt(x, z);
+    const anchor = RESOURCE_ANCHORS
+      .filter(({ stratumId }) => stratumId === "surface")
+      .map((candidate) => ({ candidate, distance: Math.hypot(x - (candidate.position.x + 1), z - (candidate.position.z + 1)) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    let height = raw;
+    if (anchor && anchor.distance < 5) {
+      const plateau = this.rawHeightAt(anchor.candidate.position.x + 1, anchor.candidate.position.z + 1);
+      const blend = 1 - smoothstep((anchor.distance - 2.4) / 2.6);
+      height = raw + (plateau - raw) * blend;
+    }
+    for (const stroke of this.strokes) {
+      if (!["raise", "lower", "flatten", "smooth"].includes(stroke.brush)) continue;
+      const distance = Math.hypot(x - stroke.x, z - stroke.z);
+      if (distance > stroke.radius) continue;
+      const falloff = Math.pow(1 - distance / stroke.radius, 2);
+      if (stroke.brush === "raise") height += stroke.strength * falloff;
+      if (stroke.brush === "lower") height -= stroke.strength * falloff;
+      if (stroke.brush === "flatten") height += ((stroke.targetHeight ?? this.rawHeightAt(stroke.x, stroke.z)) - height) * Math.min(1, stroke.strength * falloff);
+      if (stroke.brush === "smooth") height += (this.rawHeightAt(x, z) - height) * Math.min(1, stroke.strength * falloff * 0.45);
+    }
+    return height;
   }
 
   constructionHeightAt(x: number, z: number) {
@@ -92,13 +127,18 @@ export class TerrainSampler {
       ...zone.rooms.map(({ center }) => ({ x: center.x, z: center.z })),
       { x: zone.portals[1].x, z: zone.portals[1].z },
     ];
-    return points.slice(1).some((to, index) => {
-      const from = points[index];
+    const lineContains = (from: { x: number; z: number }, to: { x: number; z: number }, width = 3) => {
       const dx = to.x - from.x;
       const dz = to.z - from.z;
       const lengthSq = dx * dx + dz * dz;
       const t = lengthSq === 0 ? 0 : clamp01(((x - from.x) * dx + (z - from.z) * dz) / lengthSq);
-      return Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t)) <= 3;
+      return Math.hypot(x - (from.x + dx * t), z - (from.z + dz * t)) <= width;
+    };
+    if (points.slice(1).some((to, index) => lineContains(points[index], to))) return true;
+    return zone.corridors.some((corridor) => {
+      const from = zone.rooms.find(({ id }) => id === corridor.fromRoomId)?.center;
+      const to = zone.rooms.find(({ id }) => id === corridor.toRoomId)?.center;
+      return Boolean(from && to && lineContains(from, to, corridor.width));
     });
   }
 
@@ -126,7 +166,14 @@ export class TerrainSampler {
     const biome = this.biomeAt(x, z);
     const noise = hashNoise(Math.floor(x / 3), Math.floor(z / 3), this.definition.seed + 91);
     let surface: SurfaceType = "stable";
-    if (slopeDegrees >= 24) surface = "steep";
+    const resourcePad = RESOURCE_ANCHORS.find((anchor) => anchor.stratumId === "surface"
+      && Math.hypot(x - (anchor.position.x + 1), z - (anchor.position.z + 1)) <= 2.6);
+    const paintedSurface = [...this.strokes].reverse().find((stroke) => stroke.brush === "surface"
+      && stroke.surface && Math.hypot(x - stroke.x, z - stroke.z) <= stroke.radius)?.surface;
+    if (paintedSurface) surface = paintedSurface;
+    else if (resourcePad?.itemId === "crude_oil") surface = "hazard";
+    else if (resourcePad) surface = "stable";
+    else if (slopeDegrees >= 24) surface = "steep";
     else if (biome.id === "blackwater_marsh" && height < -1.4) surface = noise > 0.38 ? "hazard" : "submerged";
     else if ((biome.id === "blackwater_marsh" || biome.id === "windglass_basin") && noise > 0.38) surface = "soft";
     else if (biome.id === "thermal_rift" && noise > 0.5) surface = "hazard";

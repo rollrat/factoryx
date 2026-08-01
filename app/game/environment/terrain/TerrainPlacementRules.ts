@@ -16,12 +16,13 @@ export const evaluateTerrainPlacement = (
   definition: BuildingDefinition,
   position: GridCell,
   rotation: 0 | 1 | 2 | 3,
+  stratumId = "surface",
 ): TerrainPlacementVerdict => {
   const width = rotation % 2 === 0 ? definition.footprint.x : definition.footprint.z;
   const depth = rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
   const samples: TerrainSample[] = [];
   for (let z = 0; z < depth; z += 1) {
-    for (let x = 0; x < width; x += 1) samples.push(sampler.sample(position.x + x, position.z + z));
+    for (let x = 0; x < width; x += 1) samples.push(sampler.sample(position.x + x, position.z + z, stratumId));
   }
   const worst = samples.reduce((a, b) => rank[b.buildability] > rank[a.buildability] ? b : a);
   if (worst.surface === "steep") return { allowed: false, requiresFoundation: false, reason: "terrain_steep", worst };

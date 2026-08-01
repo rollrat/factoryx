@@ -123,6 +123,7 @@ export type GameCallbacks = {
   onPower: (power: PowerInfo) => void;
   onProject: (project: ProjectInfo) => void;
   onConstructionState: (state: ConstructionUiState) => void;
+  onEnvironment: (state: import("./environment/types.ts").EnvironmentRuntimeInfo) => void;
 };
 
 export type ConstructionUiState = Readonly<{

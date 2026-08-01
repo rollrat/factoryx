@@ -62,9 +62,17 @@ import {
   A17_ENVIRONMENT,
   CAVE_ZONES,
   EnvironmentRenderer,
+  EnvironmentAudioSystem,
+  browserEnvironmentQuality,
   TerrainSampler,
   evaluateTerrainPlacement,
   resolveTerrainMovement,
+  infrastructureHeightAt,
+  type TerrainInfrastructureSurface,
+  WORLD_STUDIO_STORAGE_KEY,
+  parseWorldStudioDocument,
+  EnvironmentObstacleIndex,
+  ExplorationTracker,
 } from "./environment/index.ts";
 import type {
   BuildingId,
@@ -153,11 +161,15 @@ export class FactoryRuntime {
   private readonly powerPoleGroup: THREE.Group;
   private readonly projectDockGroup: THREE.Group;
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly environmentQuality = browserEnvironmentQuality();
   private readonly environment: EnvironmentRenderer;
-  private readonly terrainSampler = new TerrainSampler(A17_ENVIRONMENT);
+  private readonly environmentAudio = new EnvironmentAudioSystem();
+  private readonly exploration: ExplorationTracker;
+  private readonly terrainSampler: TerrainSampler;
+  private environmentObstacles: EnvironmentObstacleIndex;
   private readonly buildGrid: THREE.GridHelper;
-  private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
-  private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
+  private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 400);
+  private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 180);
   private readonly materials = createFactoryMaterials();
   private readonly simulation: FactorySimulation;
   private readonly world: DataDrivenWorld;
@@ -259,14 +271,22 @@ export class FactoryRuntime {
   private lastAutoSaveTime = 0;
   private lastConnectionSyncTime = -1;
   private lastLodSyncTime = -1;
+  private lastEnvironmentUiTime = -1;
 
   constructor(
     private readonly mount: HTMLDivElement,
     private readonly callbacks: GameCallbacks,
   ) {
     this.saveStorage = createFactoryRuntimeSaveStorage(window.localStorage);
+    let worldStudioDocument = null;
+    try {
+      const raw = window.localStorage.getItem(WORLD_STUDIO_STORAGE_KEY);
+      worldStudioDocument = raw ? parseWorldStudioDocument(JSON.parse(raw), A17_ENVIRONMENT.id) : null;
+    } catch { /* Invalid authoring drafts never prevent the game from starting. */ }
+    this.terrainSampler = new TerrainSampler(A17_ENVIRONMENT, worldStudioDocument?.strokes ?? []);
     const loaded = this.saveStorage.load();
     const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
+    this.exploration = new ExplorationTracker(restored?.exploration);
     const gameplayBounds = A17_ENVIRONMENT.constructionBounds;
     const migratedCampaign = restored?.campaignWorld
       ? { ...restored.campaignWorld, world: migrateWorldSnapshotBounds(restored.campaignWorld.world, gameplayBounds) }
@@ -277,10 +297,16 @@ export class FactoryRuntime {
       bounds: gameplayBounds,
       constructionInventory: CAMPAIGN_START_INVENTORY,
       terrainPlacement: (definition, position, rotation, context) => {
-        if (definition.id === "vein_miner" || definition.id === "fluid_extractor") return { ok: true };
-        const verdict = evaluateTerrainPlacement(this.terrainSampler, definition, position, rotation);
+        const verdict = evaluateTerrainPlacement(this.terrainSampler, definition, position, rotation, context.stratumId);
+        const expectedElevation = context.supportElevation ?? (context.stratumId === "surface"
+          ? this.terrainSampler.constructionHeightAt(position.x, position.z)
+          : this.terrainSampler.caveHeightAt(position.x, position.z, context.stratumId));
+        if (context.elevation !== undefined && Math.abs(context.elevation - expectedElevation) > 0.2) {
+          return { ok: false, reason: "terrain_clearance", cell: position };
+        }
         if (definition.terrainPolicy?.role === "hazard_stabilizer") return { ok: true };
         if (verdict.reason === "terrain_hazard" && context.hazardStabilized) return { ok: true };
+        if (context.foundationCoverage && verdict.reason !== "terrain_hazard") return { ok: true };
         if (definition.terrainPolicy?.allowedOnRestrictedSurface && verdict.reason !== "terrain_hazard") return { ok: true };
         if (!verdict.allowed) return { ok: false, reason: verdict.reason ?? "terrain_clearance", cell: position };
         if (verdict.requiresFoundation && !context.foundationCoverage && definition.footprint.x * definition.footprint.z > 4) {
@@ -346,7 +372,7 @@ export class FactoryRuntime {
     this.playerPosition.x = recoveredPlayer.position.x;
     this.playerPosition.z = recoveredPlayer.position.z;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.environmentQuality === "high" ? 1.5 : 1));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -360,12 +386,21 @@ export class FactoryRuntime {
     );
     this.hoverTile.position.y = 0.035;
 
-    this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, "high");
+    this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, this.environmentQuality, this.terrainSampler);
+    this.exploration.snapshot().discoveredSiteIds.forEach((id) => this.environment.exploration.setDiscovered(id));
+    this.environmentObstacles = new EnvironmentObstacleIndex(this.environment.props.obstacles());
+    if (restored?.environment?.cycle) this.environment.restoreCycle(restored.environment.cycle);
+    this.environment.setAutomaticCycle(true);
     this.environment.setStratum(this.activeStratumId);
+    this.environmentAudio.setStratum(this.activeStratumId);
     const powerModels = this.setupWorld();
     this.powerCoreGroup = powerModels.core;
     this.powerPoleGroup = powerModels.pole;
     this.projectDockGroup = powerModels.projectDock;
+    if (this.activeStratumId !== "surface") {
+      this.powerCoreGroup.visible = false;
+      this.projectDockGroup.visible = false;
+    }
     this.buildGrid = powerModels.grid;
     if (restored) this.simulation.structures.forEach((structure) => this.mountStructure(structure));
     this.bindEvents();
@@ -378,6 +413,7 @@ export class FactoryRuntime {
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
+    this.publishEnvironment();
     this.updateBeltBuildInfo(false);
     this.buildGrid.visible = false;
     this.animate(performance.now());
@@ -386,7 +422,9 @@ export class FactoryRuntime {
   setTool(tool: Tool) {
     if (this.inputLocked) return;
     this.activeTool = tool;
-    this.selectedBuildingId = null;
+    this.selectedBuildingId = tool === "inspect" || tool === "demolish"
+      ? null
+      : defaultBuildingForLegacyType(tool as BuildType);
     this.callbacks.onToolChange(tool);
     this.beltStart = null;
     if (this.beltPreview) this.scene.remove(this.beltPreview);
@@ -672,10 +710,23 @@ export class FactoryRuntime {
     }
     this.setTool("inspect");
     this.selectStructure(visual.id);
+    const worldInstance = visual.worldInstanceId ? this.world.instance(visual.worldInstanceId) : null;
+    const focusStratum = worldInstance?.stratumId ?? "surface";
+    if (focusStratum !== this.activeStratumId) {
+      this.activeStratumId = focusStratum;
+      this.environment.setStratum(focusStratum);
+      this.environmentAudio.setStratum(focusStratum);
+      this.collisionIndex = new WorldCollisionIndex(this.world, 8, focusStratum);
+      this.groups.forEach((group) => { group.visible = (group.userData.stratumId ?? "surface") === focusStratum; });
+      this.resourceGroups.forEach((group) => { group.visible = group.userData.stratumId === focusStratum; });
+      this.powerCoreGroup.visible = focusStratum === "surface";
+      this.projectDockGroup.visible = focusStratum === "surface";
+      this.publishEnvironment();
+    }
     this.desiredTarget.set(
-      THREE.MathUtils.clamp(visual.x + 0.5, -10, 10),
-      0,
-      THREE.MathUtils.clamp(visual.z + 0.5, -10, 10),
+      THREE.MathUtils.clamp(visual.x + 0.5, this.world.bounds.minX + 2, this.world.bounds.maxX - 2),
+      worldInstance?.elevation ?? this.elevationAt(visual.x + 0.5, visual.z + 0.5, focusStratum),
+      THREE.MathUtils.clamp(visual.z + 0.5, this.world.bounds.minZ + 2, this.world.bounds.maxZ - 2),
     );
     this.cameraZoom = Math.max(this.cameraZoom, 1.25);
     this.callbacks.onToast(`${START_REGISTRY.buildings.get(visual.buildingId ?? "")?.name ?? "설비"} 위치로 이동`);
@@ -722,6 +773,7 @@ export class FactoryRuntime {
     window.removeEventListener("pagehide", this.onPageHide);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.environment.dispose();
+    this.environmentAudio.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.mount) this.mount.removeChild(this.renderer.domElement);
   }
@@ -750,12 +802,14 @@ export class FactoryRuntime {
       });
       patch.position.set(
         anchor.position.x + 0.5,
-        this.terrainSampler.constructionHeightAt(anchor.position.x + 0.5, anchor.position.z + 0.5) + 0.04,
+        (anchor.elevation ?? this.elevationAt(anchor.position.x + 0.5, anchor.position.z + 0.5, anchor.stratumId)) + 0.04,
         anchor.position.z + 0.5,
       );
-      patch.visible = anchor.active;
+      patch.visible = anchor.stratumId === this.activeStratumId;
+      patch.scale.setScalar(anchor.active ? 1 : 0.62);
       patch.userData.resourceAnchorId = anchor.id;
       patch.userData.resourceActive = anchor.active;
+      patch.userData.stratumId = anchor.stratumId;
       this.resourceGroups.set(anchor.id, patch);
       this.scene.add(patch);
     });
@@ -873,18 +927,29 @@ export class FactoryRuntime {
       playerPosition: this.playerPosition.toArray(),
       firstPersonYaw: this.firstPersonYaw,
       firstPersonPitch: this.firstPersonPitch,
-      environment: createEnvironmentSnapshot(A17_ENVIRONMENT),
+      environment: createEnvironmentSnapshot(A17_ENVIRONMENT, {}, this.environment.cycleSnapshot()),
       activeStratumId: this.activeStratumId,
+      exploration: this.exploration.snapshot(),
     };
   }
 
   private publishConstructionState() {
     const snapshot = this.world.snapshot();
+    const foundationAreas = this.world.allInstances().flatMap((instance) => {
+      const definition = START_REGISTRY.buildings.get(instance.definitionId);
+      if (definition?.terrainPolicy?.role !== "foundation" || (instance.stratumId ?? "surface") !== "surface") return [];
+      const width = instance.rotation % 2 === 0 ? definition.footprint.x : definition.footprint.z;
+      const depth = instance.rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
+      return [{ minX: instance.position.x - 0.5, maxX: instance.position.x + width + 0.5, minZ: instance.position.z - 0.5, maxZ: instance.position.z + depth + 0.5 }];
+    });
+    this.environment.props.applyFoundationClearing(foundationAreas);
+    this.environmentObstacles = new EnvironmentObstacleIndex(this.environment.props.obstaclesOutside(foundationAreas));
     this.world.resourceAnchors().forEach((anchor) => {
       const group = this.resourceGroups.get(anchor.id);
       if (!group) return;
       group.userData.resourceActive = anchor.active;
-      group.visible = anchor.active && this.activeStratumId === "surface";
+      group.visible = anchor.stratumId === this.activeStratumId;
+      group.scale.setScalar(anchor.active ? 1 : 0.62);
     });
     this.callbacks.onConstructionState({
       unlockedIds: snapshot.unlockedIds,
@@ -920,6 +985,11 @@ export class FactoryRuntime {
       if (!source || !target) return;
       const group = createPortConnectionModel(source, target, this.materials);
       group.userData.connectionKey = key;
+      group.userData.strata = [
+        this.world.instance(connection.fromInstanceId)?.stratumId ?? "surface",
+        this.world.instance(connection.toInstanceId)?.stratumId ?? "surface",
+      ];
+      group.visible = (group.userData.strata as string[]).includes(this.activeStratumId);
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
@@ -936,6 +1006,11 @@ export class FactoryRuntime {
       if (this.connectionGroups.has(key)) return;
       const group = createPowerCableConnectionModel(cable, START_REGISTRY, this.materials);
       group.userData.connectionKey = key;
+      group.userData.strata = [
+        this.world.instance(cable.from.ownerId)?.stratumId ?? "surface",
+        this.world.instance(cable.to.ownerId)?.stratumId ?? "surface",
+      ];
+      group.visible = (group.userData.strata as string[]).includes(this.activeStratumId);
       this.connectionGroups.set(key, group);
       this.scene.add(group);
     });
@@ -1004,9 +1079,35 @@ export class FactoryRuntime {
   };
 
   private elevationAt(x: number, z: number, stratumId = this.activeStratumId) {
+    const supported = infrastructureHeightAt(x, z, this.terrainInfrastructure(stratumId));
+    if (supported !== null) return supported;
     return stratumId === "surface"
       ? this.terrainSampler.constructionHeightAt(x, z)
       : this.terrainSampler.caveHeightAt(x, z, stratumId);
+  }
+
+  private terrainInfrastructure(stratumId = this.activeStratumId): readonly TerrainInfrastructureSurface[] {
+    return this.world.allInstances().flatMap((instance) => {
+      if ((instance.stratumId ?? "surface") !== stratumId) return [];
+      const definition = START_REGISTRY.buildings.get(instance.definitionId);
+      const role = definition?.terrainPolicy?.role;
+      if (!definition || (role !== "foundation" && role !== "ramp" && role !== "bridge")) return [];
+      const width = instance.rotation % 2 === 0 ? definition.footprint.x : definition.footprint.z;
+      const depth = instance.rotation % 2 === 0 ? definition.footprint.z : definition.footprint.x;
+      const baseElevation = instance.elevation ?? (stratumId === "surface"
+        ? this.terrainSampler.constructionHeightAt(instance.position.x, instance.position.z)
+        : this.terrainSampler.caveHeightAt(instance.position.x, instance.position.z, stratumId));
+      return [{
+        minX: instance.position.x,
+        maxX: instance.position.x + width,
+        minZ: instance.position.z,
+        maxZ: instance.position.z + depth,
+        baseElevation,
+        rise: definition.terrainPolicy?.elevationStep ?? 0,
+        rotation: instance.rotation,
+        kind: role,
+      } satisfies TerrainInfrastructureSurface];
+    });
   }
 
   private updateCamera() {
@@ -1046,13 +1147,20 @@ export class FactoryRuntime {
       this.playerPosition,
       { x: this.playerVelocity.x * delta, z: this.playerVelocity.z * delta },
     );
-    const terrainResolved = resolveTerrainMovement(this.terrainSampler, this.playerPosition, resolved.position, this.activeStratumId);
+    const obstacleResolved = this.environmentObstacles.resolve(this.playerPosition, resolved.position, 0.32, this.activeStratumId);
+    const terrainResolved = resolveTerrainMovement(
+      this.terrainSampler,
+      this.playerPosition,
+      obstacleResolved.position,
+      this.activeStratumId,
+      this.terrainInfrastructure(),
+    );
     this.playerPosition.x = terrainResolved.position.x;
     this.playerPosition.z = terrainResolved.position.z;
     this.playerPosition.y += ((terrainResolved.elevation + 1.62) - this.playerPosition.y) * (1 - Math.exp(-delta * 15));
     if (resolved.contacts.some(({ normal }) => normal.x !== 0)) this.playerVelocity.x = 0;
     if (resolved.contacts.some(({ normal }) => normal.z !== 0)) this.playerVelocity.z = 0;
-    if (terrainResolved.blocked) this.playerVelocity.multiplyScalar(0.2);
+    if (terrainResolved.blocked || obstacleResolved.blocked) this.playerVelocity.multiplyScalar(0.2);
 
     const moving = movement.lengthSq() > 0.01;
     const headBob = moving ? Math.sin(this.elapsed * (this.pressed.has("shift") ? 13 : 9)) * 0.025 : 0;
@@ -1202,7 +1310,14 @@ export class FactoryRuntime {
     const reserved = new Set<string>();
     let allValid = true;
     this.beltPreviewCells.forEach((cell) => {
-      const valid = this.simulation.canPlace("belt", cell.x, cell.z, reserved);
+      const valid = this.simulation.canPlace("belt", cell.x, cell.z, reserved)
+        && Boolean(this.selectedBuildingId && this.campaignWorld.previewConstruction({
+          buildingId: this.selectedBuildingId,
+          position: { x: cell.x, z: cell.z },
+          rotation: cell.rotation as 0 | 1 | 2 | 3,
+          elevation: this.elevationAt(cell.x, cell.z),
+          stratumId: this.activeStratumId,
+        }).ok);
       if (!valid) allValid = false;
       reserved.add(cellKey(cell.x, cell.z));
       const model = createStructureModel("belt", this.materials);
@@ -1498,6 +1613,7 @@ export class FactoryRuntime {
   };
 
   private onPointerDown = (event: PointerEvent) => {
+    void this.environmentAudio.resume();
     if (this.inputLocked) return;
     this.renderer.domElement.focus();
     if (this.cameraMode === "firstPerson") {
@@ -1623,22 +1739,26 @@ export class FactoryRuntime {
     const zone = CAVE_ZONES[0];
     const entering = this.activeStratumId === "surface";
     const reference = this.cameraMode === "firstPerson" ? this.playerPosition : this.cameraTarget;
-    const nearestPortal = [...zone.portals].sort((a, b) => (
-      Math.hypot(reference.x - a.x, reference.z - a.z) - Math.hypot(reference.x - b.x, reference.z - b.z)
-    ))[0];
-    if (entering && Math.hypot(reference.x - nearestPortal.x, reference.z - nearestPortal.z) > 8) {
-      this.callbacks.onToast("열극 천공 입구 가까이에서 C를 눌러야 합니다");
+    const portalCandidates = zone.portals.map((portal, index) => ({
+      portal,
+      index,
+      distance: Math.hypot(reference.x - portal.x, reference.z - portal.z),
+    })).sort((a, b) => a.distance - b.distance);
+    const nearest = portalCandidates[0];
+    if (nearest.distance > 8) {
+      this.callbacks.onToast(entering ? "열극 천공 입구 가까이에서 C를 눌러야 합니다" : "동굴 출구 가까이에서 C를 눌러야 합니다");
       return;
     }
     this.activeStratumId = entering ? zone.stratumId : "surface";
     this.environment.setStratum(this.activeStratumId);
+    this.environmentAudio.setStratum(this.activeStratumId);
     if (entering) {
-      const room = zone.rooms[0];
+      const room = nearest.index === 0 ? zone.rooms[0] : zone.rooms.at(-1)!;
       this.playerPosition.set(room.center.x, room.center.y + 1.62, room.center.z);
       this.desiredTarget.set(room.center.x, room.center.y, room.center.z);
       this.cameraTarget.copy(this.desiredTarget);
     } else {
-      const portal = nearestPortal;
+      const portal = nearest.portal;
       const elevation = this.elevationAt(portal.x, portal.z, "surface");
       this.playerPosition.set(portal.x, elevation + 1.62, portal.z);
       this.desiredTarget.set(portal.x, elevation, portal.z);
@@ -1646,12 +1766,22 @@ export class FactoryRuntime {
     }
     this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
     this.groups.forEach((group) => { group.visible = (group.userData.stratumId ?? "surface") === this.activeStratumId; });
-    this.resourceGroups.forEach((group) => { group.visible = !entering && group.userData.resourceActive !== false; });
+    this.connectionGroups.forEach((group) => {
+      group.visible = (group.userData.strata as string[] | undefined)?.includes(this.activeStratumId) ?? this.activeStratumId === "surface";
+    });
+    this.worldItemMeshes.forEach((mesh, key) => {
+      const connection = this.connectionGroups.get(key);
+      mesh.visible = (connection?.userData.strata as string[] | undefined)?.includes(this.activeStratumId) ?? this.activeStratumId === "surface";
+    });
+    this.resourceGroups.forEach((group) => {
+      group.visible = group.userData.stratumId === this.activeStratumId;
+    });
     this.powerCoreGroup.visible = !entering;
     this.projectDockGroup.visible = !entering;
     this.buildGrid.position.y = entering ? zone.rooms[1].center.y + 0.02 : 0.012;
     this.updateCamera();
     this.updateGhost();
+    this.publishEnvironment();
     this.callbacks.onToast(entering ? "열극 심층부로 진입했습니다 · C 지상 복귀" : "지상 열극 입구로 복귀했습니다");
   }
 
@@ -1757,6 +1887,7 @@ export class FactoryRuntime {
         + 2 * inverse * progress * belt.z
         + progress * progress * endZ;
       mesh.position.set(x, 0.48, z);
+      mesh.visible = this.activeStratumId === "surface";
       mesh.rotation.y += delta * (item.type.endsWith("_ore") ? 1.2 : item.type === "iron_plate" ? 2.2 : 0.35);
     });
     this.itemMeshes.forEach((mesh, id) => {
@@ -1801,6 +1932,7 @@ export class FactoryRuntime {
         remaining -= segmentLength;
       }
       mesh.position.copy(position);
+      mesh.visible = (connectionGroup.userData.strata as string[] | undefined)?.includes(this.activeStratumId) ?? true;
       mesh.rotation.y += delta * 1.8;
     });
     this.worldItemMeshes.forEach((mesh, key) => {
@@ -1808,6 +1940,7 @@ export class FactoryRuntime {
       this.scene.remove(mesh);
       this.worldItemMeshes.delete(key);
     });
+    this.itemMeshes.forEach((mesh) => { mesh.visible = this.activeStratumId === "surface"; });
   }
 
   private updateBuildingLods() {
@@ -2205,6 +2338,10 @@ export class FactoryRuntime {
     this.animateMachines(delta);
     this.animateConnections();
     this.environment.update(delta, this.activeCamera);
+    if (this.elapsed - this.lastEnvironmentUiTime >= 0.5) {
+      this.lastEnvironmentUiTime = this.elapsed;
+      this.publishEnvironment();
+    }
     this.selectedUiClock += delta;
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;
@@ -2217,4 +2354,17 @@ export class FactoryRuntime {
     }
     this.renderer.render(this.scene, this.activeCamera);
   };
+
+  private publishEnvironment() {
+    const reference = this.cameraMode === "firstPerson" ? this.playerPosition : this.cameraTarget;
+    this.exploration.discoverNear(reference.x, reference.z, this.activeStratumId).forEach((site) => {
+      this.environment.exploration.setDiscovered(site.id);
+      this.campaignWorld.applyConstructionCreditDeltas([{ id: site.reward.creditId, amount: site.reward.amount }]);
+      this.publishConstructionState();
+      this.callbacks.onToast(`탐사 완료 · ${site.name} · ${site.reward.label}`);
+    });
+    const info = this.environment.runtimeInfo(reference.x, reference.z, this.activeStratumId);
+    this.environmentAudio.setWeather(info.weather, info.weatherStrength);
+    this.callbacks.onEnvironment(info);
+  }
 }

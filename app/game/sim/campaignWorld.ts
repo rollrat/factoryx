@@ -67,6 +67,9 @@ const constructionCredit = (buildingId: string) => {
   if (["pipe_t_junction", "fluid_tank", "pipe_pump"].includes(buildingId)) {
     return { id: buildingId, amount: 1 } as const;
   }
+  if (["foundation_2m", "access_ramp", "short_bridge", "conveyor_lift", "pipe_riser", "shaft_logistics_socket"].includes(buildingId)) {
+    return { id: buildingId, amount: 1 } as const;
+  }
   return null;
 };
 

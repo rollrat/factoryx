@@ -114,6 +114,30 @@ button {
   letter-spacing: 0.12em;
 }
 
+.environment-readout {
+  min-width: 136px;
+  min-height: 46px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 7px 12px;
+}
+
+.environment-readout span,
+.environment-readout small {
+  color: var(--muted);
+  font: 700 7px/1 var(--font-geist-mono), monospace;
+  letter-spacing: 0.1em;
+}
+
+.environment-readout strong {
+  color: #c6d3d1;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.environment-readout small { color: #9bb3ad; letter-spacing: 0; }
+
 .system-readouts {
   min-height: 46px;
   display: flex;
@@ -1312,6 +1336,7 @@ kbd {
 }
 
 @media (max-width: 480px) {
+  .environment-readout { display: none; }
   .sector-tag {
     width: 68px;
   }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
 import { START_REGISTRY } from "../game/data/index.ts";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
+import type { EnvironmentRuntimeInfo } from "../game/environment/types.ts";
 
 export type ProjectHudRequirement = Readonly<{
   itemId: string;
@@ -28,6 +29,7 @@ type GameHudProps = {
   powerDemand: number;
   powerServed: number;
   powerOverloaded: boolean;
+  environment: EnvironmentRuntimeInfo;
   selected: SelectedInfo;
   beltBuildInfo: BeltBuildInfo;
   toast: string;
@@ -129,6 +131,7 @@ export default function GameHud({
   powerDemand,
   powerServed,
   powerOverloaded,
+  environment,
   selected,
   beltBuildInfo,
   toast,
@@ -191,6 +194,12 @@ export default function GameHud({
         <div className="sector-tag instrument-panel">
           <span className="sector-mark">FX</span>
           <span className="sector-code">A-17</span>
+        </div>
+
+        <div className="environment-readout instrument-panel" role="status" aria-label={`${environment.biomeName}, ${environment.stratumId === "surface" ? "지상" : "동굴"}`}>
+          <span>{environment.stratumId === "surface" ? "SURFACE" : "SUBTERRANEAN"}</span>
+          <strong>{environment.biomeName}</strong>
+          <small>{environment.weather === "clear" ? "맑음" : environment.weather === "mist" ? "광물 안개" : environment.weather === "mineral_wind" ? "먼지 돌풍" : "전기성 폭풍"}</small>
         </div>
 
         <div className="system-readouts instrument-panel">

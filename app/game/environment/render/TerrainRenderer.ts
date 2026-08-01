@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
+import type { TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
 
 export class TerrainRenderer {
   readonly root = new THREE.Group();
@@ -8,6 +9,9 @@ export class TerrainRenderer {
   readonly surveyPad: THREE.Group;
   readonly sampler: TerrainSampler;
   private readonly definition: EnvironmentDefinition;
+  private readonly chunkRoot = new THREE.Group();
+  private readonly chunkLods = new Map<string, readonly THREE.Mesh[]>();
+  private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.05 });
 
   constructor(
     definition: EnvironmentDefinition,
@@ -19,17 +23,79 @@ export class TerrainRenderer {
     this.root.name = "a17-terrain";
     const width = definition.worldBounds.maxX - definition.worldBounds.minX + 1;
     const depth = definition.worldBounds.maxZ - definition.worldBounds.minZ + 1;
-    const segments = quality === "high" ? 128 : 72;
-    const geometry = new THREE.PlaneGeometry(width, depth, segments, segments);
+    this.terrain = this.createTerrainMesh(0, 0, width, quality === "high" ? 128 : 72);
+    this.terrain.name = "terrain-editor-surface";
+    this.terrain.receiveShadow = true;
+    this.terrain.visible = false;
+    this.root.add(this.terrain);
+
+    this.chunkRoot.name = "terrain-chunks";
+    const minChunkX = Math.floor(definition.worldBounds.minX / definition.chunkSize);
+    const maxChunkX = Math.floor(definition.worldBounds.maxX / definition.chunkSize);
+    const minChunkZ = Math.floor(definition.worldBounds.minZ / definition.chunkSize);
+    const maxChunkZ = Math.floor(definition.worldBounds.maxZ / definition.chunkSize);
+    for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ += 1) {
+      for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
+        const centerX = chunkX * definition.chunkSize + definition.chunkSize / 2;
+        const centerZ = chunkZ * definition.chunkSize + definition.chunkSize / 2;
+        const lods = ([16, 8, 4] as const).map((segments, lod) => {
+          const mesh = this.createTerrainMesh(centerX, centerZ, definition.chunkSize, quality === "low" ? Math.max(3, segments / 2) : segments);
+          mesh.name = `terrain-chunk:${chunkX},${chunkZ}:lod${lod}`;
+          mesh.visible = false;
+          mesh.receiveShadow = lod < 2;
+          this.chunkRoot.add(mesh);
+          return mesh;
+        });
+        this.chunkLods.set(`${chunkX},${chunkZ}`, lods);
+      }
+    }
+    this.root.add(this.chunkRoot);
+
+    this.surveyPad = this.createSurveyPad();
+    this.root.add(this.surveyPad);
+  }
+
+  updateChunks(states: readonly TerrainChunkState[]) {
+    this.chunkLods.forEach((lods) => lods.forEach((mesh) => { mesh.visible = false; }));
+    states.forEach(({ x, z, lod }) => {
+      const meshes = this.chunkLods.get(`${x},${z}`);
+      if (meshes) meshes[lod].visible = true;
+    });
+  }
+
+  setEditorMode(enabled: boolean) {
+    this.terrain.visible = enabled;
+    this.chunkRoot.visible = !enabled;
+  }
+
+  dispose() {
+    const materials = new Set<THREE.Material>();
+    this.root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      child.geometry.dispose();
+      (Array.isArray(child.material) ? child.material : [child.material]).forEach((material) => materials.add(material));
+    });
+    materials.forEach((material) => material.dispose());
+  }
+
+  private createTerrainMesh(centerX: number, centerZ: number, size: number, segments: number) {
+    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
     geometry.rotateX(-Math.PI / 2);
+    geometry.translate(centerX, 0, centerZ);
     const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
     const colors = new Float32Array(positions.count * 3);
     const color = new THREE.Color();
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const z = positions.getZ(index);
-      positions.setY(index, sampler.heightAt(x, z));
-      color.setHex(sampler.colorAt(x, z));
+      const sample = this.sampler.sample(x, z);
+      positions.setY(index, sample.height);
+      color.setHex(this.sampler.colorAt(x, z));
+      const surfaceTint = sample.surface === "soft" ? new THREE.Color(0x40514b)
+        : sample.surface === "submerged" ? new THREE.Color(0x142f34)
+          : sample.surface === "hazard" ? new THREE.Color(0x75543e)
+            : sample.surface === "steep" ? new THREE.Color(0x1b292d) : color;
+      color.lerp(surfaceTint, sample.surface === "stable" ? 0 : 0.44);
       const variation = 0.88 + (Math.sin(x * 0.43 + z * 0.19) * 0.5 + 0.5) * 0.15;
       colors[index * 3] = color.r * variation;
       colors[index * 3 + 1] = color.g * variation;
@@ -37,24 +103,7 @@ export class TerrainRenderer {
     }
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
-    this.terrain = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.05 }),
-    );
-    this.terrain.receiveShadow = true;
-    this.root.add(this.terrain);
-
-    this.surveyPad = this.createSurveyPad();
-    this.root.add(this.surveyPad);
-  }
-
-  dispose() {
-    this.root.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return;
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      materials.forEach((material) => material.dispose());
-    });
+    return new THREE.Mesh(geometry, this.material);
   }
 
   private createSurveyPad() {

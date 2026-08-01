@@ -2,6 +2,8 @@ import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import { BIOME_BY_ID } from "../data/biomes.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
+import type { TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
+import type { EnvironmentObstacle } from "../collision/EnvironmentObstacleIndex.ts";
 
 const randomFactory = (seed: number) => {
   let state = seed >>> 0;
@@ -14,28 +16,28 @@ const randomFactory = (seed: number) => {
 export class PropScatterRenderer {
   readonly root = new THREE.Group();
   readonly instanceCount: number;
+  private readonly quality: EnvironmentQuality;
+  private landmarksVisible = true;
+  private readonly collisionObstacles: EnvironmentObstacle[] = [];
+  private readonly baseMatrices = new Map<THREE.InstancedMesh, readonly THREE.Matrix4[]>();
 
   constructor(definition: EnvironmentDefinition, sampler: TerrainSampler, quality: EnvironmentQuality) {
     this.root.name = "a17-props";
+    this.quality = quality;
     const density = quality === "high" ? 1 : 0.48;
     const random = randomFactory(definition.seed);
     const rockCount = Math.floor(360 * density);
     const plantCount = Math.floor(300 * density);
     this.instanceCount = rockCount + plantCount;
 
-    const rock = new THREE.InstancedMesh(
-      new THREE.DodecahedronGeometry(0.75, 0),
-      new THREE.MeshStandardMaterial({ color: 0x24353a, roughness: 0.96, metalness: 0.02 }),
-      rockCount,
-    );
-    const plant = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(0.52, 2.4, 5, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x597468, roughness: 0.82, side: THREE.DoubleSide }),
-      plantCount,
-    );
+    const rockGeometry = new THREE.DodecahedronGeometry(0.75, 0);
+    const plantGeometry = new THREE.ConeGeometry(0.52, 2.4, 5, 1, true);
+    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0.02 });
+    const plantMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, side: THREE.DoubleSide });
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
-    const place = (mesh: THREE.InstancedMesh, index: number, plantLike: boolean) => {
+    const placements = new Map<string, { rock: Array<{ matrix: THREE.Matrix4; color: THREE.Color }>; plant: Array<{ matrix: THREE.Matrix4; color: THREE.Color }> }>();
+    const place = (plantLike: boolean) => {
       let x = 0;
       let z = 0;
       do {
@@ -48,36 +50,91 @@ export class PropScatterRenderer {
       dummy.rotation.set((random() - 0.5) * 0.2, random() * Math.PI * 2, plantLike ? -0.28 : (random() - 0.5) * 0.35);
       dummy.scale.set(scale * (0.65 + random() * 0.7), scale, scale * (0.65 + random() * 0.7));
       dummy.updateMatrix();
-      mesh.setMatrixAt(index, dummy.matrix);
       const palette = BIOME_BY_ID.get(sample.biomeId)!.palette;
       color.setHex(plantLike ? palette.vegetation : palette.rock).offsetHSL((random() - 0.5) * 0.025, 0, (random() - 0.5) * 0.08);
-      mesh.setColorAt(index, color);
+      const chunkX = Math.floor(x / definition.chunkSize);
+      const chunkZ = Math.floor(z / definition.chunkSize);
+      const key = `${chunkX},${chunkZ}`;
+      const bucket = placements.get(key) ?? { rock: [], plant: [] };
+      bucket[plantLike ? "plant" : "rock"].push({ matrix: dummy.matrix.clone(), color: color.clone() });
+      placements.set(key, bucket);
+      if (!plantLike && scale > 1.45) {
+        this.collisionObstacles.push({ id: `rock:${key}:${bucket.rock.length}`, x, z, radius: scale * 0.48, stratumId: "surface" });
+      }
     };
-    for (let index = 0; index < rockCount; index += 1) place(rock, index, false);
-    for (let index = 0; index < plantCount; index += 1) place(plant, index, true);
-    rock.instanceMatrix.needsUpdate = true;
-    plant.instanceMatrix.needsUpdate = true;
-    if (rock.instanceColor) rock.instanceColor.needsUpdate = true;
-    if (plant.instanceColor) plant.instanceColor.needsUpdate = true;
-    rock.castShadow = quality === "high";
-    rock.receiveShadow = true;
-    plant.castShadow = quality === "high";
-    this.root.add(rock, plant);
+    for (let index = 0; index < rockCount; index += 1) place(false);
+    for (let index = 0; index < plantCount; index += 1) place(true);
+    placements.forEach((bucket, key) => {
+      (["rock", "plant"] as const).forEach((kind) => {
+        const entries = bucket[kind];
+        if (entries.length === 0) return;
+        const mesh = new THREE.InstancedMesh(kind === "rock" ? rockGeometry : plantGeometry, kind === "rock" ? rockMaterial : plantMaterial, entries.length);
+        entries.forEach((entry, index) => {
+          mesh.setMatrixAt(index, entry.matrix);
+          mesh.setColorAt(index, entry.color);
+        });
+        this.baseMatrices.set(mesh, entries.map(({ matrix }) => matrix.clone()));
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.castShadow = quality === "high";
+        mesh.receiveShadow = kind === "rock";
+        mesh.userData.chunkKey = key;
+        mesh.userData.propKind = kind;
+        mesh.visible = false;
+        this.root.add(mesh);
+      });
+    });
     this.addLandmarks(definition, sampler);
   }
 
-  update(camera: THREE.Camera) {
-    const distance = camera.position.length();
-    this.root.visible = distance < 260;
+  update(camera: THREE.Camera, activeChunks: readonly TerrainChunkState[]) {
+    const active = new Map(activeChunks.map((chunk) => [`${chunk.x},${chunk.z}`, chunk]));
+    this.root.children.forEach((child) => {
+      const key = child.userData.chunkKey as string | undefined;
+      if (key) {
+        const chunk = active.get(key);
+        child.visible = Boolean(chunk && (child.userData.propKind !== "plant" || chunk.lod < 2));
+        return;
+      }
+      if (child.name.startsWith("landmark:")) {
+        const world = new THREE.Vector3();
+        child.getWorldPosition(world);
+        child.visible = this.landmarksVisible && world.distanceTo(camera.position) < (this.quality === "high" ? 210 : 145);
+      }
+    });
+  }
+
+  setLandmarksVisible(visible: boolean) { this.landmarksVisible = visible; }
+  obstacles() { return this.collisionObstacles.map((obstacle) => ({ ...obstacle })); }
+  obstaclesOutside(areas: readonly Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>[]) {
+    return this.obstacles().filter((obstacle) => !areas.some((area) => obstacle.x >= area.minX && obstacle.x <= area.maxX
+      && obstacle.z >= area.minZ && obstacle.z <= area.maxZ));
+  }
+  applyFoundationClearing(areas: readonly Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>[]) {
+    const position = new THREE.Vector3();
+    this.baseMatrices.forEach((matrices, mesh) => {
+      matrices.forEach((base, index) => {
+        position.setFromMatrixPosition(base);
+        const cleared = areas.some((area) => position.x >= area.minX && position.x <= area.maxX
+          && position.z >= area.minZ && position.z <= area.maxZ);
+        const matrix = base.clone();
+        if (cleared) matrix.scale(new THREE.Vector3(0, 0, 0));
+        mesh.setMatrixAt(index, matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    });
   }
 
   dispose() {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
     this.root.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
-      materials.forEach((material) => material.dispose());
+      geometries.add(child.geometry);
+      (Array.isArray(child.material) ? child.material : [child.material]).forEach((material) => materials.add(material));
     });
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
   }
 
   private addLandmarks(definition: EnvironmentDefinition, sampler: TerrainSampler) {

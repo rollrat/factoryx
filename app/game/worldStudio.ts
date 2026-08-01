@@ -3,33 +3,19 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { A17_ENVIRONMENT, BIOMES, EnvironmentRenderer } from "./environment/index.ts";
 import type { SurfaceType } from "./environment/types.ts";
 import type { WeatherKind } from "./environment/render/WeatherSystem.ts";
+import {
+  parseWorldStudioDocument,
+  type TerrainAuthoringBrush,
+  type TerrainAuthoringStroke,
+  type WorldStudioEnvironmentDocument,
+} from "./environment/authoring.ts";
 
-export type WorldStudioBrush = "raise" | "lower" | "flatten" | "smooth" | "biome" | "surface";
+export type WorldStudioBrush = TerrainAuthoringBrush;
 export type WorldStudioOverlay = "none" | "biome" | "surface" | "buildability" | "chunks";
 export type WorldStudioView = "overview" | "firstPerson" | "distance" | "caveCutaway";
 
-export type WorldStudioStroke = Readonly<{
-  brush: WorldStudioBrush;
-  x: number;
-  z: number;
-  radius: number;
-  strength: number;
-  biomeId?: string;
-  surface?: SurfaceType;
-}>;
-
-export type WorldStudioDocument = Readonly<{
-  format: "factoryx-world-studio";
-  version: 1;
-  environmentId: string;
-  environmentVersion: number;
-  seed: number;
-  strokes: readonly WorldStudioStroke[];
-  timeOfDay: number;
-  fogDensity: number;
-  weather: WeatherKind;
-  weatherStrength: number;
-}>;
+export type WorldStudioStroke = TerrainAuthoringStroke;
+export type WorldStudioDocument = WorldStudioEnvironmentDocument;
 
 export type WorldStudioStats = Readonly<{
   fps: number;
@@ -89,6 +75,7 @@ export class WorldStudioRuntime {
     this.renderer.domElement.setAttribute("aria-label", "A-17 환경 제작 뷰포트");
     this.mount.appendChild(this.renderer.domElement);
     this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, "high");
+    this.environment.terrain.setEditorMode(true);
     this.camera.position.set(48, 54, 52);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 0, 0);
@@ -169,20 +156,14 @@ export class WorldStudioRuntime {
   }
 
   importDocument(value: unknown) {
-    if (!value || typeof value !== "object") return false;
-    const document = value as Partial<WorldStudioDocument>;
-    if (document.format !== "factoryx-world-studio" || document.version !== 1
-      || document.environmentId !== A17_ENVIRONMENT.id || !Array.isArray(document.strokes)) return false;
+    const document = parseWorldStudioDocument(value, A17_ENVIRONMENT.id);
+    if (!document) return false;
     this.resetTerrain();
     this.strokes = [];
-    for (const stroke of document.strokes) {
-      if (!stroke || typeof stroke !== "object" || typeof stroke.x !== "number" || typeof stroke.z !== "number"
-        || typeof stroke.radius !== "number" || typeof stroke.strength !== "number") continue;
-      this.applyStroke(stroke as WorldStudioStroke, false);
-    }
+    for (const stroke of document.strokes) this.applyStroke(stroke, false);
     if (typeof document.timeOfDay === "number") this.setTimeOfDay(document.timeOfDay);
     if (typeof document.fogDensity === "number") this.setFogDensity(document.fogDensity);
-    if (document.weather === "clear" || document.weather === "mineral_wind" || document.weather === "mist") {
+    if (document.weather === "clear" || document.weather === "mineral_wind" || document.weather === "mist" || document.weather === "electrical_storm") {
       this.setWeather(document.weather, document.weatherStrength);
     }
     this.refreshTerrainColors();
@@ -257,13 +238,13 @@ export class WorldStudioRuntime {
     this.applyStroke({ brush: this.brush, x, z, radius: this.brushRadius, strength: this.brushStrength, biomeId: this.biomeId, surface: this.surface }, true);
   }
 
-  private applyStroke(stroke: WorldStudioStroke, record: boolean) {
-    if (record) this.strokes.push({ ...stroke });
-    else this.strokes.push({ ...stroke });
+  private applyStroke(stroke: WorldStudioStroke, _record: boolean) {
     const geometry = this.environment.terrain.terrain.geometry as THREE.BufferGeometry;
     const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const targetHeight = stroke.targetHeight ?? this.heightNear(stroke.x, stroke.z, positions);
+    const applied = { ...stroke, ...(["flatten", "smooth"].includes(stroke.brush) ? { targetHeight } : {}) };
+    this.strokes.push(applied);
     if (["raise", "lower", "flatten", "smooth"].includes(stroke.brush)) {
-      const targetHeight = this.heightNear(stroke.x, stroke.z, positions);
       for (let index = 0; index < positions.count; index += 1) {
         const dx = positions.getX(index) - stroke.x;
         const dz = positions.getZ(index) - stroke.z;

@@ -130,7 +130,7 @@ export class WorldProductionSimulation {
       const inputs = new Map(definition.ports.filter(allowsInput).map((port) => [port.id, makeInventory(port)]));
       const outputs = new Map(definition.ports.filter(allowsOutput).map((port) => [port.id, makeInventory(port)]));
       const extractionRecipeId = (definition.id === "vein_miner" || definition.id === "fluid_extractor")
-        ? this.world.resourceAnchorAt(instance.position)?.recipeId
+        ? this.world.resourceAnchorAt(instance.position, instance.stratumId ?? "surface")?.recipeId
         : undefined;
       const selectedRecipeId = extractionRecipeId
         ?? instance.selectedRecipeId
@@ -167,7 +167,7 @@ export class WorldProductionSimulation {
     const recipe = this.world.registry.recipes.get(recipeId);
     if (!node || !recipe || recipe.buildingId !== node.definition.id || !node.definition.recipeIds.includes(recipeId)) return false;
     if ((node.definition.id === "vein_miner" || node.definition.id === "fluid_extractor")
-      && this.world.resourceAnchorAt(this.world.instance(instanceId)!.position)?.recipeId !== recipeId) return false;
+      && this.world.resourceAnchorAt(this.world.instance(instanceId)!.position, this.world.instance(instanceId)!.stratumId ?? "surface")?.recipeId !== recipeId) return false;
     if (node.process?.snapshot().workInProgress) return false;
     if ([...node.inputs.values(), ...node.outputs.values()].some(({ amount }) => amount > 0)) return false;
     node.selectedRecipeId = recipeId;
@@ -262,14 +262,23 @@ export class WorldProductionSimulation {
       .sort((a, b) => endpointKey(a.instance.id, a.port.definition.id).localeCompare(endpointKey(b.instance.id, b.port.definition.id)));
     const inputs = ports.filter(({ port }) => allowsInput(port.definition));
     const usedInputs = new Set<string>();
+    const usedEdges = new Set<string>();
     const connections: ProductionConnection[] = [];
     outputs.forEach((source) => {
       const target = inputs
         .filter((candidate) => candidate.instance.id !== source.instance.id)
         .filter((candidate) => !usedInputs.has(endpointKey(candidate.instance.id, candidate.port.definition.id)))
         .filter((candidate) => this.compatiblePorts(source.port, candidate.port))
+        .filter((candidate) => !usedEdges.has([
+          endpointKey(source.instance.id, source.port.definition.id),
+          endpointKey(candidate.instance.id, candidate.port.definition.id),
+        ].sort().join("|")))
         .sort((a, b) => endpointKey(a.instance.id, a.port.definition.id).localeCompare(endpointKey(b.instance.id, b.port.definition.id)))[0];
       if (!target || source.port.definition.medium === "power") return;
+      usedEdges.add([
+        endpointKey(source.instance.id, source.port.definition.id),
+        endpointKey(target.instance.id, target.port.definition.id),
+      ].sort().join("|"));
       usedInputs.add(endpointKey(target.instance.id, target.port.definition.id));
       connections.push({
         fromInstanceId: source.instance.id,
@@ -377,13 +386,28 @@ export class WorldProductionSimulation {
     this.connections().forEach((connection) => {
       const sourceNode = this.nodes.get(connection.fromInstanceId);
       const targetNode = this.nodes.get(connection.toInstanceId);
-      const source = sourceNode?.outputs.get(connection.fromPortId);
-      const target = targetNode?.inputs.get(connection.toPortId);
-      if (!sourceNode || !targetNode || !source || !target || !source.itemId || source.availableAmount <= 0) return;
-      const targetPort = targetNode.definition.ports.find(({ id }) => id === connection.toPortId)!;
+      let source = sourceNode?.outputs.get(connection.fromPortId);
+      let target = targetNode?.inputs.get(connection.toPortId);
+      let targetPort = targetNode?.definition.ports.find(({ id }) => id === connection.toPortId);
+      const sourcePort = sourceNode?.definition.ports.find(({ id }) => id === connection.fromPortId);
+      let lockInstanceId = connection.toInstanceId;
+      let lockPortId = connection.toPortId;
+      if (sourceNode && targetNode && sourcePort?.direction === "bidirectional" && targetPort?.direction === "bidirectional"
+        && (!source?.itemId || source.availableAmount <= 0)) {
+        const reverseSource = targetNode.outputs.get(connection.toPortId);
+        const reverseTarget = sourceNode.inputs.get(connection.fromPortId);
+        if (reverseSource?.itemId && reverseSource.availableAmount > 0 && reverseTarget) {
+          source = reverseSource;
+          target = reverseTarget;
+          targetPort = sourcePort;
+          lockInstanceId = connection.fromInstanceId;
+          lockPortId = connection.fromPortId;
+        }
+      }
+      if (!sourceNode || !targetNode || !source || !target || !targetPort || !source.itemId || source.availableAmount <= 0) return;
       if (!accepts(targetPort, source.itemId)) return;
       if (connection.medium === "fluid") {
-        const lock = this.fluidNetworkLock(connection.toInstanceId, connection.toPortId);
+        const lock = this.fluidNetworkLock(lockInstanceId, lockPortId);
         if (lock.conflict || (lock.itemId !== null && lock.itemId !== source.itemId)) return;
       }
       const amount = Math.min(1, source.availableAmount, target.availableCapacity);

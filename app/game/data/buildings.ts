@@ -343,10 +343,14 @@ export const START_BUILDINGS = [
   {
     ...building("shaft_logistics_socket", "대형 갱도 물류 소켓", "thermal_verified", { x: 3, z: 3 }, [
       ...straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 3),
-      power("shaft_power", "bidirectional", "power_high_voltage", 3, 2, 1.5, 1, 1),
+      fluid("shaft_fluid_in", "bidirectional", -1, 2, -1.5, 0.5, -1, FLUID_ITEMS),
+      fluid("shaft_fluid_out", "bidirectional", 3, 2, 1.5, 0.5, 1, FLUID_ITEMS),
+      power("shaft_power_in", "bidirectional", "power_high_voltage", -1, 2, -1.5, 1, -1),
+      power("shaft_power_out", "bidirectional", "power_high_voltage", 3, 2, 1.5, 1, 1),
     ], [], cost(["steel_beam", 24], ["industrial_frame", 8], ["advanced_control_board", 4])),
     terrainPolicy: { role: "shaft_socket", allowedOnRestrictedSurface: true, connectsStrata: true, elevationStep: 12 },
     transportPolicy: { throughputPerMinute: 120, maxSegmentLengthTiles: 1 },
+    fluidStoragePolicy: { capacityM3: 24, throughputM3PerMinute: 60, locksFluidType: true },
   },
 
   // 유체 물류
@@ -360,6 +364,7 @@ export const START_BUILDINGS = [
       port("upper_pipe", "bidirectional", "fluid", "pipe_mk1", { x: 0, z: 1 }, { x: 0, y: 3.5, z: 0.5 }, { x: 0, z: 1 }, FLUID_ITEMS),
     ], [], cost(["steel_billet", 5], ["fastener_pack", 2])),
     terrainPolicy: { role: "pipe_riser", allowedOnRestrictedSurface: true, elevationStep: 3 },
+    transportPolicy: { throughputPerMinute: 60, maxSegmentLengthTiles: 1 },
     fluidStoragePolicy: { capacityM3: 8, throughputM3PerMinute: 60, locksFluidType: true },
   },
   {

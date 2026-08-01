@@ -13,6 +13,7 @@ import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import { START_DEFINITIONS } from "./game/data/index.ts";
 import { buildDefinitionLineageGraph, highlightLineagePath } from "./game/telemetry/definitionLineage.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
+import type { EnvironmentRuntimeInfo } from "./game/environment/types.ts";
 
 const IDLE_BELT_BUILD: BeltBuildInfo = {
   dragging: false,
@@ -29,6 +30,16 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
 const DEFINITION_LINEAGE_GRAPH = buildDefinitionLineageGraph(START_DEFINITIONS);
 
 const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
+const INITIAL_ENVIRONMENT: EnvironmentRuntimeInfo = {
+  biomeId: "windglass_basin",
+  biomeName: "바람유리 분지",
+  stratumId: "surface",
+  surface: "stable",
+  timeOfDay: 0.68,
+  weather: "clear",
+  weatherStrength: 0,
+  quality: "high",
+};
 const INITIAL_POWER_CONTROL: RuntimePowerControlSnapshot = {
   capacityMW: 0, dispatchableMW: 0, requestedMW: 0, servedMW: 0, storedMWh: 0,
   maxConsumptionMW: 0, nameplateReserveMW: 0, operatingReserveMW: 0,
@@ -127,6 +138,7 @@ export default function FactoryGame({
   const [catalogBuildingId, setCatalogBuildingId] = useState<string | null>(null);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
+  const [environment, setEnvironment] = useState<EnvironmentRuntimeInfo>(INITIAL_ENVIRONMENT);
   const [project, setProject] = useState<ProjectHudState>(INITIAL_PROJECT);
   const [constructionState, setConstructionState] = useState(() => ({
     unlockedIds,
@@ -169,6 +181,7 @@ export default function FactoryGame({
       onPower: setPower,
       onProject: setProject,
       onConstructionState: setConstructionState,
+      onEnvironment: setEnvironment,
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
@@ -264,6 +277,7 @@ export default function FactoryGame({
         powerDemand={power.demandMW}
         powerServed={power.servedMW}
         powerOverloaded={power.overloaded}
+        environment={environment}
         selected={selected}
         beltBuildInfo={beltBuildInfo}
         toast={toast}

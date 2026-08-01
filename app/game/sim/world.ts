@@ -28,7 +28,7 @@ export type WorldTerrainPlacementValidator = (
   definition: BuildingDefinition,
   position: GridCell,
   rotation: 0 | 1 | 2 | 3,
-  context: Readonly<{ foundationCoverage: boolean; hazardStabilized: boolean; stratumId: string }>,
+  context: Readonly<{ foundationCoverage: boolean; hazardStabilized: boolean; stratumId: string; elevation?: number; supportElevation?: number }>,
 ) => Readonly<{ ok: true }> | WorldTerrainPlacementIssue;
 
 export type WorldSnapshot = Readonly<{
@@ -166,6 +166,12 @@ const aggregateStacks = (stacks: readonly ItemStack[]) => {
   return [...amounts].map(([itemId, amount]) => ({ itemId, amount })).sort((a, b) => a.itemId.localeCompare(b.itemId));
 };
 
+const isSupportLayer = (definition: BuildingDefinition) => (
+  definition.terrainPolicy?.role === "foundation"
+  || definition.terrainPolicy?.role === "bridge"
+  || definition.terrainPolicy?.role === "ramp"
+);
+
 export class DataDrivenWorld {
   readonly registry: DefinitionRegistry;
   readonly bounds: WorldBounds;
@@ -233,8 +239,8 @@ export class DataDrivenWorld {
     }));
   }
 
-  resourceAnchorAt(position: GridCell): Readonly<ResourceAnchorDefinition & { active: boolean }> | null {
-    const anchor = getResourceAnchorAt(position);
+  resourceAnchorAt(position: GridCell, stratumId = "surface"): Readonly<ResourceAnchorDefinition & { active: boolean }> | null {
+    const anchor = getResourceAnchorAt(position, stratumId);
     return anchor && this.registry.items.has(anchor.itemId)
       ? { ...anchor, position: { ...anchor.position }, active: this.unlockedIds.has(anchor.unlockId) }
       : null;
@@ -250,13 +256,13 @@ export class DataDrivenWorld {
     if (definition.placementMode === "preplaced_unique") return { ok: false, reason: "preplaced_unique" };
     if (!this.unlockedIds.has(definition.unlockId)) return { ok: false, reason: "locked" };
     if (definition.id === "vein_miner" || definition.id === "fluid_extractor") {
-      const anchor = this.resourceAnchorAt(request.position);
+      const anchor = this.resourceAnchorAt(request.position, request.stratumId ?? "surface");
       if (!anchor || anchor.extractionBuildingId !== definition.id) {
         return { ok: false, reason: "invalid_resource_anchor" };
       }
       if (!anchor.active) return { ok: false, reason: "resource_locked", itemId: anchor.itemId };
     }
-    const placementIssue = this.validatePlacement(definition, request.position, request.rotation, request.stratumId ?? "surface");
+    const placementIssue = this.validatePlacement(definition, request.position, request.rotation, request.stratumId ?? "surface", request.elevation);
     if (placementIssue) return placementIssue;
     for (const cost of request.waiveBuildCost ? [] : aggregateStacks(definition.buildCost)) {
       if (this.inventoryAmount(cost.itemId) < cost.amount) {
@@ -401,8 +407,8 @@ export class DataDrivenWorld {
     snapshot.unlockedIds.forEach((id) => this.unlockedIds.add(id));
     snapshot.constructionInventory.forEach(({ itemId, amount }) => this.addInventory(itemId, amount));
     [...snapshot.instances].sort((a, b) => {
-      const aFoundation = this.registry.buildings.get(a.definitionId)?.terrainPolicy?.role === "foundation" ? 0 : 1;
-      const bFoundation = this.registry.buildings.get(b.definitionId)?.terrainPolicy?.role === "foundation" ? 0 : 1;
+      const aFoundation = isSupportLayer(this.registry.buildings.get(a.definitionId)!) ? 0 : 1;
+      const bFoundation = isSupportLayer(this.registry.buildings.get(b.definitionId)!) ? 0 : 1;
       return aFoundation - bFoundation;
     }).forEach((saved) => {
       const definition = this.registry.buildings.get(saved.definitionId);
@@ -414,7 +420,7 @@ export class DataDrivenWorld {
           throw new Error(`preplaced snapshot transform mismatch: ${saved.definitionId}`);
         }
       }
-      const issue = this.validatePlacement(definition, saved.position, saved.rotation, saved.stratumId ?? "surface");
+      const issue = this.validatePlacement(definition, saved.position, saved.rotation, saved.stratumId ?? "surface", saved.elevation);
       if (issue) throw new Error(`invalid snapshot placement for ${saved.id}: ${issue.reason}`);
       this.validateStacks([
         ...Object.values(saved.inputBuffersByPortId).flat(),
@@ -464,7 +470,7 @@ export class DataDrivenWorld {
       if (port.direction !== "output") inputBuffersByPortId[port.id] = [];
       if (port.direction !== "input") outputBuffersByPortId[port.id] = [];
     });
-    const anchor = this.resourceAnchorAt(position);
+    const anchor = this.resourceAnchorAt(position, stratumId ?? "surface");
     const extractionRecipeId = anchor?.extractionBuildingId === definition.id ? anchor.recipeId : undefined;
     return {
       id,
@@ -489,6 +495,7 @@ export class DataDrivenWorld {
     position: GridCell,
     rotation: 0 | 1 | 2 | 3,
     stratumId = "surface",
+    elevation?: number,
   ): Extract<WorldPlacementResult, { ok: false }> | null {
     if (!definition.allowedRotations.includes(rotation)) return { ok: false, reason: "invalid_rotation" };
     const cells = occupiedCells(definition, position, rotation);
@@ -498,11 +505,26 @@ export class DataDrivenWorld {
         return { ok: false, reason: "out_of_bounds", cell };
       }
       const key = cellKey(cell, stratumId);
-      if (definition.terrainPolicy?.role === "foundation") {
+      if (isSupportLayer(definition)) {
         if (this.foundations.has(key)) return { ok: false, reason: "occupied", cell };
       } else if (this.occupancy.has(key)) return { ok: false, reason: "occupied", cell };
     }
     const foundationCoverage = cells.every((cell) => this.foundations.has(cellKey(cell, stratumId)));
+    const supportId = cells.map((cell) => this.foundations.get(cellKey(cell, stratumId))).find((id): id is string => Boolean(id));
+    const support = supportId ? this.instances.get(supportId) : null;
+    const supportDefinition = support ? this.registry.buildings.get(support.definitionId) : null;
+    let supportElevation = support?.elevation;
+    if (support && supportDefinition?.terrainPolicy?.role === "bridge") {
+      supportElevation = (support.elevation ?? 0) + (supportDefinition.terrainPolicy.elevationStep ?? 0);
+    }
+    if (support && supportDefinition?.terrainPolicy?.role === "ramp") {
+      const size = rotatedSize(supportDefinition, support.rotation);
+      const xProgress = (position.x - support.position.x + 0.5) / Math.max(1, size.x);
+      const zProgress = (position.z - support.position.z + 0.5) / Math.max(1, size.z);
+      const progress = support.rotation === 0 ? zProgress : support.rotation === 1 ? xProgress
+        : support.rotation === 2 ? 1 - zProgress : 1 - xProgress;
+      supportElevation = (support.elevation ?? 0) + (supportDefinition.terrainPolicy.elevationStep ?? 0) * Math.max(0, Math.min(1, progress));
+    }
     const center = { x: position.x + definition.footprint.x / 2, z: position.z + definition.footprint.z / 2 };
     const hazardStabilized = [...this.instances.values()].some((instance) => {
       const existing = this.registry.buildings.get(instance.definitionId);
@@ -510,7 +532,9 @@ export class DataDrivenWorld {
       const size = rotatedSize(existing, instance.rotation);
       return Math.hypot(instance.position.x + size.x / 2 - center.x, instance.position.z + size.z / 2 - center.z) <= 7;
     });
-    const terrainIssue = this.terrainPlacement?.(definition, position, rotation, { foundationCoverage, hazardStabilized, stratumId });
+    const terrainIssue = this.terrainPlacement?.(definition, position, rotation, {
+      foundationCoverage, hazardStabilized, stratumId, elevation, supportElevation,
+    });
     if (terrainIssue && !terrainIssue.ok) return terrainIssue;
     return null;
   }
@@ -518,12 +542,12 @@ export class DataDrivenWorld {
   private insertInstance(instance: BuildingInstance, definition: BuildingDefinition) {
     if (this.instances.has(instance.id)) throw new Error(`duplicate world instance id: ${instance.id}`);
     this.instances.set(instance.id, instance);
-    const target = definition.terrainPolicy?.role === "foundation" ? this.foundations : this.occupancy;
+    const target = isSupportLayer(definition) ? this.foundations : this.occupancy;
     occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.set(cellKey(cell, instance.stratumId ?? "surface"), instance.id));
   }
 
   private removeInstance(instance: BuildingInstance, definition: BuildingDefinition) {
-    const target = definition.terrainPolicy?.role === "foundation" ? this.foundations : this.occupancy;
+    const target = isSupportLayer(definition) ? this.foundations : this.occupancy;
     occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.delete(cellKey(cell, instance.stratumId ?? "surface")));
     this.instances.delete(instance.id);
   }

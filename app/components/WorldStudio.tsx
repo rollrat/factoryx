@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { BIOMES } from "../game/environment/index.ts";
+import { BIOMES, WORLD_STUDIO_STORAGE_KEY } from "../game/environment/index.ts";
 import type { SurfaceType } from "../game/environment/types.ts";
 import type { WeatherKind } from "../game/environment/render/WeatherSystem.ts";
 import {
@@ -15,7 +15,6 @@ import {
 } from "../game/worldStudio.ts";
 import styles from "../world-studio/world-studio.module.css";
 
-const STORAGE_KEY = "factoryx.world-studio.v1";
 const EMPTY_STATS: WorldStudioStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, activeChunks: 0, visibleProps: 0 };
 const BRUSHES: readonly Readonly<{ id: WorldStudioBrush; label: string; key: string }>[] = [
   { id: "raise", label: "높이기", key: "1" },
@@ -65,7 +64,7 @@ export default function WorldStudio() {
     if (!mountRef.current) return;
     const runtime = new WorldStudioRuntime(mountRef.current, setStats);
     runtimeRef.current = runtime;
-    const saved = window.localStorage.getItem(STORAGE_KEY);
+    const saved = window.localStorage.getItem(WORLD_STUDIO_STORAGE_KEY);
     if (saved) {
       try { if (runtime.importDocument(JSON.parse(saved))) setNotice("로컬 작업본을 불러왔습니다."); } catch { /* Ignore malformed local drafts. */ }
     }
@@ -86,7 +85,7 @@ export default function WorldStudio() {
 
   const documentJson = () => JSON.stringify(runtimeRef.current?.exportDocument(), null, 2);
   const saveLocal = () => {
-    window.localStorage.setItem(STORAGE_KEY, documentJson());
+    window.localStorage.setItem(WORLD_STUDIO_STORAGE_KEY, documentJson());
     setNotice("이 브라우저에 작업본을 저장했습니다.");
   };
   const downloadJson = () => {
@@ -164,7 +163,7 @@ export default function WorldStudio() {
             <span className={styles.eyebrow}>05 / ATMOSPHERE</span><h2>하늘·날씨</h2>
             <label><span>시간 <output>{Math.round(time * 24).toString().padStart(2, "0")}:00</output></span><input type="range" min="0" max="1" step="0.01" value={time} onChange={(event) => { const value = Number(event.target.value); setTime(value); runtimeRef.current?.setTimeOfDay(value); }} /></label>
             <label><span>안개 <output>{fog.toFixed(3)}</output></span><input type="range" min="0" max="0.025" step="0.0005" value={fog} onChange={(event) => { const value = Number(event.target.value); setFog(value); runtimeRef.current?.setFogDensity(value); }} /></label>
-            <label><span>날씨</span><select value={weather} onChange={(event) => { const value = event.target.value as WeatherKind; setWeather(value); runtimeRef.current?.setWeather(value, weatherStrength); }}><option value="clear">맑음</option><option value="mineral_wind">광물 바람</option><option value="mist">지면 안개</option></select></label>
+            <label><span>날씨</span><select value={weather} onChange={(event) => { const value = event.target.value as WeatherKind; setWeather(value); runtimeRef.current?.setWeather(value, weatherStrength); }}><option value="clear">맑음</option><option value="mineral_wind">광물 바람</option><option value="mist">지면 안개</option><option value="electrical_storm">전기성 폭풍</option></select></label>
             <label><span>강도 <output>{Math.round(weatherStrength * 100)}%</output></span><input type="range" min="0" max="1" step="0.01" value={weatherStrength} onChange={(event) => { const value = Number(event.target.value); setWeatherStrength(value); runtimeRef.current?.setWeather(weather, value); }} /></label>
           </section>
           <section>

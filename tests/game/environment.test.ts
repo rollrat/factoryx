@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { A17_ENVIRONMENT, BIOMES, TerrainChunkManager, TerrainSampler } from "../../app/game/environment/index.ts";
+import {
+  A17_DAY_LENGTH_SECONDS,
+  A17_ENVIRONMENT,
+  BIOMES,
+  EnvironmentCycle,
+  TerrainChunkManager,
+  TerrainSampler,
+  chooseEnvironmentQuality,
+  parseWorldStudioDocument,
+} from "../../app/game/environment/index.ts";
 import { createEnvironmentSnapshot, isEnvironmentSnapshotCompatible } from "../../app/game/environment/persistence/environmentSnapshot.ts";
 import { migrateWorldSnapshotBounds } from "../../app/game/sim/world.ts";
 
@@ -59,4 +68,36 @@ test("environment persistence stores only deterministic identity and player delt
   assert.deepEqual(snapshot.removedPropIds, ["rock-2", "rock-9"]);
   assert.equal(isEnvironmentSnapshotCompatible(snapshot, A17_ENVIRONMENT), true);
   assert.equal(isEnvironmentSnapshotCompatible({ ...snapshot, environmentId: "other" }, A17_ENVIRONMENT), false);
+});
+
+test("the authored clock completes one A-17 day in 36 real minutes", () => {
+  const cycle = new EnvironmentCycle(0, 0);
+  const before = cycle.state();
+  const after = cycle.advance(A17_DAY_LENGTH_SECONDS);
+  assert.ok(Math.abs(before.timeOfDay - after.timeOfDay) < 1e-9);
+});
+
+test("environment quality respects low-memory and reduced-motion hardware", () => {
+  assert.equal(chooseEnvironmentQuality({ deviceMemory: 4, hardwareConcurrency: 16 }), "low");
+  assert.equal(chooseEnvironmentQuality({ deviceMemory: 16, hardwareConcurrency: 12, pixelRatio: 1 }), "high");
+  assert.equal(chooseEnvironmentQuality({ reducedMotion: true }), "low");
+});
+
+test("world-studio strokes drive the same runtime terrain sampler", () => {
+  const document = parseWorldStudioDocument({
+    format: "factoryx-world-studio", version: 1, environmentId: A17_ENVIRONMENT.id,
+    environmentVersion: 1, seed: A17_ENVIRONMENT.seed,
+    strokes: [
+      { brush: "raise", x: 30, z: 30, radius: 4, strength: 2 },
+      { brush: "surface", x: 30, z: 30, radius: 3, strength: 1, surface: "hazard" },
+      { brush: "biome", x: 30, z: 30, radius: 3, strength: 1, biomeId: "silicate_sailwood" },
+    ],
+    timeOfDay: 0.5, fogDensity: 0.01, weather: "clear", weatherStrength: 0,
+  }, A17_ENVIRONMENT.id);
+  assert.ok(document);
+  const base = new TerrainSampler(A17_ENVIRONMENT);
+  const authored = new TerrainSampler(A17_ENVIRONMENT, document.strokes);
+  assert.ok(authored.heightAt(30, 30) > base.heightAt(30, 30) + 1.9);
+  assert.equal(authored.sample(30, 30).surface, "hazard");
+  assert.equal(authored.sample(30, 30).biomeId, "silicate_sailwood");
 });

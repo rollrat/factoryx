@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { EnvironmentQuality } from "../types.ts";
 
 const disposeObject = (object: THREE.Object3D) => {
   object.traverse((child) => {
@@ -15,10 +16,12 @@ export class SkySystem {
   private readonly dome: THREE.Mesh;
   private readonly moons = new THREE.Group();
   private readonly dustBand: THREE.Mesh;
+  private readonly hemisphere: THREE.HemisphereLight;
+  private readonly sunOffset = new THREE.Vector3(-38, 54, 32);
   private timeOfDay = 0.68;
   private readonly scene: THREE.Scene;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, quality: EnvironmentQuality = "high") {
     this.scene = scene;
     this.root.name = "a17-sky";
     this.dome = new THREE.Mesh(
@@ -64,15 +67,17 @@ export class SkySystem {
     this.dustBand.position.set(12, 42, -10);
     this.root.add(this.dustBand);
 
-    const hemisphere = new THREE.HemisphereLight(0xb9e7e3, 0x19272a, 1.85);
-    this.root.add(hemisphere);
+    this.hemisphere = new THREE.HemisphereLight(0xb9e7e3, 0x19272a, 1.85);
+    this.root.add(this.hemisphere);
     this.sun.position.set(-38, 54, 32);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -42;
-    this.sun.shadow.camera.right = 42;
-    this.sun.shadow.camera.top = 42;
-    this.sun.shadow.camera.bottom = -42;
+    const shadowSize = quality === "high" ? 2048 : 1024;
+    const shadowDistance = quality === "high" ? 42 : 24;
+    this.sun.shadow.mapSize.set(shadowSize, shadowSize);
+    this.sun.shadow.camera.left = -shadowDistance;
+    this.sun.shadow.camera.right = shadowDistance;
+    this.sun.shadow.camera.top = shadowDistance;
+    this.sun.shadow.camera.bottom = -shadowDistance;
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 120;
     this.sun.shadow.bias = -0.00035;
@@ -91,7 +96,7 @@ export class SkySystem {
   update(camera: THREE.Camera) {
     this.root.position.copy(camera.position);
     this.sun.target.position.copy(camera.position);
-    this.sun.position.set(camera.position.x - 38, camera.position.y + 54, camera.position.z + 32);
+    this.sun.position.copy(camera.position).add(this.sunOffset);
     this.sun.target.updateMatrixWorld();
   }
 
@@ -102,10 +107,20 @@ export class SkySystem {
   }
 
   private applyTimeOfDay(value: number) {
-    const daylight = THREE.MathUtils.smoothstep(Math.sin((value - 0.25) * Math.PI * 2) * 0.5 + 0.5, 0.08, 0.72);
+    const orbit = (value - 0.25) * Math.PI * 2;
+    const altitude = Math.sin(orbit);
+    const daylight = THREE.MathUtils.smoothstep(altitude * 0.5 + 0.5, 0.08, 0.72);
+    this.sunOffset.set(Math.cos(orbit) * 68, Math.max(-9, altitude * 72), Math.sin(orbit * 0.82) * 54);
     this.sun.intensity = 0.25 + daylight * 3.85;
     const material = this.dome.material as THREE.ShaderMaterial;
     material.uniforms.sunAmount.value = daylight;
+    const twilight = 1 - Math.min(1, Math.abs(altitude) * 4);
+    material.uniforms.topColor.value.setHex(daylight > 0.18 ? 0x17343e : 0x07111e).lerp(new THREE.Color(0x4b2930), twilight * 0.32);
+    material.uniforms.horizonColor.value.setHex(daylight > 0.18 ? 0xb89777 : 0x26334b).lerp(new THREE.Color(0xd17b58), twilight * 0.48);
+    material.uniforms.bottomColor.value.setHex(daylight > 0.18 ? 0x536a69 : 0x111b2a);
+    this.sun.color.setHex(daylight > 0.18 ? 0xffe7bd : 0x9bb8d8).lerp(new THREE.Color(0xffa06b), twilight * 0.55);
+    this.hemisphere.intensity = 0.42 + daylight * 1.43;
+    this.hemisphere.color.setHex(daylight > 0.18 ? 0xb9e7e3 : 0x7186ad);
     this.moons.visible = daylight < 0.72;
     this.dustBand.visible = daylight > 0.16;
   }

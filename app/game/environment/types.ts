@@ -47,6 +47,7 @@ export type CaveZoneDefinition = Readonly<{
   stratumId: string;
   portals: readonly Readonly<{ x: number; y: number; z: number }>[];
   rooms: readonly Readonly<{ id: string; center: Readonly<{ x: number; y: number; z: number }>; radius: number; clearance: number }>[];
+  corridors: readonly Readonly<{ fromRoomId: string; toRoomId: string; width: number }>[];
   ambientProfile: "geothermal";
   fogColor: number;
 }>;
@@ -81,6 +82,17 @@ export type EnvironmentFrameStats = Readonly<{
   visibleProps: number;
   triangles: number;
   drawCalls: number;
+}>;
+
+export type EnvironmentRuntimeInfo = Readonly<{
+  biomeId: string;
+  biomeName: string;
+  stratumId: string;
+  surface: SurfaceType;
+  timeOfDay: number;
+  weather: "clear" | "mineral_wind" | "mist" | "electrical_storm";
+  weatherStrength: number;
+  quality: EnvironmentQuality;
 }>;
 
 export type EnvironmentDisposable = Readonly<{
