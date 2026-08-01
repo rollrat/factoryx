@@ -1,0 +1,66 @@
+import type { BiomeDefinition } from "../types.ts";
+
+export const BIOMES = [
+  {
+    id: "windglass_basin",
+    name: "바람유리 분지",
+    center: { x: 0, z: 0 },
+    radius: 62,
+    palette: { ground: 0x263a3f, groundSecondary: 0x354a48, rock: 0x18282e, accent: 0x8b573c, vegetation: 0x526f65, fog: 0x789394 },
+    surfaceProfiles: ["stable", "soft"],
+    resourceAffinity: ["iron_ore", "copper_ore", "limestone"],
+    landmark: "갈라진 검은 암주 쌍침",
+  },
+  {
+    id: "ironwind_faults",
+    name: "철풍 단층지",
+    center: { x: 72, z: -48 },
+    radius: 72,
+    palette: { ground: 0x503b35, groundSecondary: 0x6b4635, rock: 0x28282a, accent: 0x9d5839, vegetation: 0x525b4e, fog: 0x8f7770 },
+    surfaceProfiles: ["stable", "steep"],
+    resourceAffinity: ["coal"],
+    landmark: "기울어진 현무암 늑골",
+  },
+  {
+    id: "silicate_sailwood",
+    name: "규산 돛숲",
+    center: { x: -72, z: 18 },
+    radius: 68,
+    palette: { ground: 0x394247, groundSecondary: 0x50565b, rock: 0xb5b4a3, accent: 0x8c7898, vegetation: 0x7f7790, fog: 0xa29bab },
+    surfaceProfiles: ["stable", "soft"],
+    resourceAffinity: ["quartz"],
+    landmark: "거대한 유리 돛",
+  },
+  {
+    id: "blackwater_marsh",
+    name: "검은수맥 습지",
+    center: { x: 74, z: 58 },
+    radius: 66,
+    palette: { ground: 0x202c2b, groundSecondary: 0x1b2424, rock: 0x293233, accent: 0x6f555c, vegetation: 0x3e6657, fog: 0x536f68 },
+    surfaceProfiles: ["soft", "submerged", "hazard"],
+    resourceAffinity: ["crude_oil"],
+    landmark: "압력 분출공",
+  },
+  {
+    id: "hematite_crown",
+    name: "적철 왕관고원",
+    center: { x: -62, z: -72 },
+    radius: 70,
+    palette: { ground: 0x694138, groundSecondary: 0x8a5843, rock: 0x3b3030, accent: 0xc0aa89, vegetation: 0x685d52, fog: 0x9d7567 },
+    surfaceProfiles: ["stable", "steep"],
+    resourceAffinity: ["bauxite"],
+    landmark: "왕관 단층",
+  },
+  {
+    id: "thermal_rift",
+    name: "열극 심층부",
+    center: { x: 12, z: 96 },
+    radius: 58,
+    palette: { ground: 0x182326, groundSecondary: 0x293538, rock: 0x10191b, accent: 0xc9d8cc, vegetation: 0x455c57, fog: 0x40585b },
+    surfaceProfiles: ["steep", "hazard", "cave_floor"],
+    resourceAffinity: ["tungsten_ore"],
+    landmark: "증기가 새는 거대 천공",
+  },
+] as const satisfies readonly BiomeDefinition[];
+
+export const BIOME_BY_ID: ReadonlyMap<string, BiomeDefinition> = new Map(BIOMES.map((biome) => [biome.id, biome]));

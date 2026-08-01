@@ -57,6 +57,7 @@ import {
 } from "./visualPersistence.ts";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildWorldRuntimeTopology } from "./telemetry/worldTopology.ts";
+import { A17_ENVIRONMENT, EnvironmentRenderer } from "./environment/index.ts";
 import type {
   BuildingId,
   BuildType,
@@ -143,6 +144,8 @@ export class FactoryRuntime {
   private readonly powerPoleGroup: THREE.Group;
   private readonly projectDockGroup: THREE.Group;
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly environment: EnvironmentRenderer;
+  private readonly buildGrid: THREE.GridHelper;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
   private readonly materials = createFactoryMaterials();
@@ -314,8 +317,6 @@ export class FactoryRuntime {
     const recoveredPlayer = recoverPlayerStart(this.collisionIndex, this.playerPosition);
     this.playerPosition.x = recoveredPlayer.position.x;
     this.playerPosition.z = recoveredPlayer.position.z;
-    this.scene.background = new THREE.Color(0x071419);
-    this.scene.fog = new THREE.FogExp2(0x071419, 0.027);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
@@ -331,10 +332,12 @@ export class FactoryRuntime {
     );
     this.hoverTile.position.y = 0.035;
 
+    this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, "high");
     const powerModels = this.setupWorld();
     this.powerCoreGroup = powerModels.core;
     this.powerPoleGroup = powerModels.pole;
     this.projectDockGroup = powerModels.projectDock;
+    this.buildGrid = powerModels.grid;
     if (restored) this.simulation.structures.forEach((structure) => this.mountStructure(structure));
     this.bindEvents();
     this.resize();
@@ -347,6 +350,7 @@ export class FactoryRuntime {
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
     this.updateBeltBuildInfo(false);
+    this.buildGrid.visible = false;
     this.animate(performance.now());
   }
 
@@ -362,6 +366,7 @@ export class FactoryRuntime {
     this.updateBeltBuildInfo(false);
     this.renderer.domElement.style.cursor =
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
+    this.buildGrid.visible = tool !== "inspect";
     this.updateGhost();
   }
 
@@ -682,37 +687,12 @@ export class FactoryRuntime {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     window.removeEventListener("pagehide", this.onPageHide);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+    this.environment.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.mount) this.mount.removeChild(this.renderer.domElement);
   }
 
   private setupWorld() {
-    this.scene.add(new THREE.HemisphereLight(0xbdefff, 0x142328, 2.2));
-    const sun = new THREE.DirectionalLight(0xfff0d8, 4.3);
-    sun.position.set(-12, 22, 11);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -18;
-    sun.shadow.camera.right = 18;
-    sun.shadow.camera.top = 18;
-    sun.shadow.camera.bottom = -18;
-    sun.shadow.bias = -0.0004;
-    this.scene.add(sun);
-
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(27, 0.45, 27),
-      new THREE.MeshStandardMaterial({ color: 0x16272c, roughness: 0.88, metalness: 0.18 }),
-    );
-    platform.position.y = -0.27;
-    platform.receiveShadow = true;
-    this.scene.add(platform);
-    const underGlow = new THREE.Mesh(
-      new THREE.BoxGeometry(27.4, 0.18, 27.4),
-      new THREE.MeshBasicMaterial({ color: 0x173d42 }),
-    );
-    underGlow.position.y = -0.51;
-    this.scene.add(underGlow);
-
     const grid = new THREE.GridHelper(26, 26, 0x4c7a7e, 0x29474d);
     grid.position.y = 0.012;
     const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
@@ -721,27 +701,6 @@ export class FactoryRuntime {
       material.opacity = 0.38;
     });
     this.scene.add(grid);
-
-    const edgeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x274249,
-      emissive: 0x0a2528,
-      emissiveIntensity: 0.8,
-      metalness: 0.55,
-      roughness: 0.35,
-    });
-    const horizontal = new THREE.BoxGeometry(27.7, 0.3, 0.28);
-    const vertical = new THREE.BoxGeometry(0.28, 0.3, 27.7);
-    [
-      new THREE.Mesh(horizontal, edgeMaterial),
-      new THREE.Mesh(horizontal, edgeMaterial),
-      new THREE.Mesh(vertical, edgeMaterial),
-      new THREE.Mesh(vertical, edgeMaterial),
-    ].forEach((edge, index) => {
-      if (index < 2) edge.position.set(0, 0.08, index === 0 ? -13.65 : 13.65);
-      else edge.position.set(index === 2 ? -13.65 : 13.65, 0.08, 0);
-      edge.castShadow = true;
-      this.scene.add(edge);
-    });
 
     this.world.resourceAnchors().forEach((anchor) => {
       const patch = new THREE.Group();
@@ -771,7 +730,7 @@ export class FactoryRuntime {
     projectDock.position.set(8.5, 0, 8.5);
     this.scene.add(projectDock);
     this.scene.add(this.hoverTile);
-    return { core, pole, projectDock };
+    return { core, pole, projectDock, grid };
   }
 
   private seedFactory() {
@@ -2130,6 +2089,7 @@ export class FactoryRuntime {
     this.syncWorldConnectionItems(delta);
     this.animateMachines(delta);
     this.animateConnections();
+    this.environment.update(delta, this.activeCamera);
     this.selectedUiClock += delta;
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;
