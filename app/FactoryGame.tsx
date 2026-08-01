@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BuildCatalogDialog } from "./components/BuildCatalog";
 import GameHud, { type ProjectHudState } from "./components/GameHud";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
 import { FactoryRuntime } from "./game/runtime";
+import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.ts";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 
@@ -21,6 +23,7 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
 };
 
 const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
+const START_UNLOCKS: readonly UnlockId[] = ["start"];
 const INITIAL_PROJECT: ProjectHudState = {
   stageName: "기초 정착 패키지",
   delivered: 0,
@@ -73,7 +76,15 @@ const topologyForOverlay = (topology: RuntimeTopology) => ({
   live: topology.live,
 });
 
-export default function FactoryGame() {
+export type FactoryGameProps = Readonly<{
+  unlockedIds?: readonly UnlockId[];
+  inventoryByItemId?: Readonly<Partial<Record<ItemId, number>>>;
+}>;
+
+export default function FactoryGame({
+  unlockedIds = START_UNLOCKS,
+  inventoryByItemId,
+}: FactoryGameProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<FactoryRuntime | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,6 +97,8 @@ export default function FactoryGame() {
   const [toast, setToast] = useState("출력 포트에서 벨트를 연결하세요");
   const [toastVisible, setToastVisible] = useState(true);
   const [lineageOpen, setLineageOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogBuildingId, setCatalogBuildingId] = useState<string | null>(null);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
   const [project, setProject] = useState<ProjectHudState>(INITIAL_PROJECT);
@@ -127,6 +140,7 @@ export default function FactoryGame() {
     const handleLineageKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setLineageOpen(false);
+        setCatalogOpen(false);
         return;
       }
       if (
@@ -135,6 +149,7 @@ export default function FactoryGame() {
         && !event.metaKey
         && !event.altKey
         && !isTextEntryTarget(event.target)
+        && !catalogOpen
       ) {
         event.preventDefault();
         if (event.repeat) return;
@@ -144,14 +159,22 @@ export default function FactoryGame() {
     };
     window.addEventListener("keydown", handleLineageKey);
     return () => window.removeEventListener("keydown", handleLineageKey);
-  }, []);
+  }, [catalogOpen]);
 
   useEffect(() => {
-    runtimeRef.current?.setInputLocked(lineageOpen);
-  }, [lineageOpen]);
+    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen);
+  }, [catalogOpen, lineageOpen]);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
   const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();
+  const chooseCatalogBuilding = (building: BuildingDefinition) => {
+    const runtime = runtimeRef.current as (FactoryRuntime & { selectBuilding: (buildingId: string) => unknown }) | null;
+    if (!runtime) return;
+    runtime.setInputLocked(false);
+    runtime.selectBuilding(building.id);
+    setCatalogBuildingId(building.id);
+    setCatalogOpen(false);
+  };
 
   return (
     <main className="game-shell">
@@ -172,7 +195,23 @@ export default function FactoryGame() {
         toastVisible={toastVisible}
         onToolChange={chooseTool}
         onCameraModeChange={toggleCameraMode}
-        onLineageToggle={() => setLineageOpen((open) => !open)}
+        onLineageToggle={() => {
+          setCatalogOpen(false);
+          setLineageOpen((open) => !open);
+        }}
+        onBuildCatalogToggle={() => {
+          setLineageOpen(false);
+          setCatalogOpen((open) => !open);
+        }}
+      />
+      <BuildCatalogDialog
+        open={catalogOpen}
+        unlockedIds={unlockedIds}
+        inventoryByItemId={inventoryByItemId}
+        credits={credits}
+        selectedBuildingId={catalogBuildingId}
+        onSelect={chooseCatalogBuilding}
+        onClose={() => setCatalogOpen(false)}
       />
       <ProductionLineageOverlay
         open={lineageOpen}

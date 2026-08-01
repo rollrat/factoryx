@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { COST, STORAGE_CAPACITY, TYPE_NAME, cellKey, directionForRotation, machinePorts, sameDirection } from "./config";
 import {
+  createBuildingModel,
   createFactoryMaterials,
   createItemModel,
   createOrePatch,
@@ -22,9 +23,14 @@ import { animateProjectDockModel, createProjectDockModel } from "./models/projec
 import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
 import { START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
+import {
+  createFactoryRuntimeSaveStorage,
+  type FactoryRuntimeSnapshot,
+} from "./visualPersistence.ts";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildRuntimeTopology } from "./telemetry/topology.ts";
 import type {
+  BuildingId,
   BuildType,
   CameraMode,
   Cell,
@@ -41,6 +47,17 @@ const modelPosition = (type: BuildType, x: number, z: number) =>
     ? new THREE.Vector3(x, 0, z)
     : new THREE.Vector3(x + 0.5, 0, z + 0.5);
 
+const legacyTypeForBuilding = (buildingId: BuildingId): BuildType => {
+  if (buildingId.startsWith("conveyor_") || buildingId === "pipe_mk1") return "belt";
+  if (buildingId === "splitter" || buildingId === "pipe_t_junction") return "splitter";
+  if (buildingId === "merger") return "merger";
+  if (buildingId === "vein_miner" || buildingId === "fluid_extractor") return "miner";
+  if (["arc_smelter", "alloy_furnace", "electrolytic_reducer"].includes(buildingId)) return "smelter";
+  if (buildingId === "crusher") return "crusher";
+  if (buildingId.includes("storage") || buildingId === "fluid_tank" || buildingId === "industrial_accumulator") return "storage";
+  return "assembler";
+};
+
 export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly powerCoreGroup: THREE.Group;
@@ -50,7 +67,8 @@ export class FactoryRuntime {
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
   private readonly materials = createFactoryMaterials();
-  private readonly simulation = new FactorySimulation();
+  private readonly simulation: FactorySimulation;
+  private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
   private readonly history: HistoryEntry[] = [];
@@ -101,6 +119,8 @@ export class FactoryRuntime {
   private currentCell: Cell = { x: 0, z: 0 };
   private ghost: THREE.Group | null = null;
   private ghostType: BuildType | null = null;
+  private ghostBuildingId: BuildingId | null = null;
+  private selectedBuildingId: BuildingId | null = null;
   private ghostValid = false;
   private beltStart: Cell | null = null;
   private beltPreview: THREE.Group | null = null;
@@ -129,11 +149,29 @@ export class FactoryRuntime {
   private lastProjectSignature = "";
   private lastMotorCount = -1;
   private selectedUiClock = 0;
+  private lastAutoSaveTime = 0;
 
   constructor(
     private readonly mount: HTMLDivElement,
     private readonly callbacks: GameCallbacks,
   ) {
+    this.saveStorage = createFactoryRuntimeSaveStorage(window.localStorage);
+    const loaded = this.saveStorage.load();
+    const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
+    this.simulation = new FactorySimulation(24, restored?.simulation);
+    if (restored) {
+      this.credits = restored.credits;
+      this.nextId = restored.nextId;
+      this.cameraMode = restored.cameraMode;
+      this.cameraAngle = restored.cameraAngle;
+      this.desiredCameraAngle = restored.cameraAngle;
+      this.cameraZoom = restored.cameraZoom;
+      this.cameraTarget.fromArray(restored.cameraTarget);
+      this.desiredTarget.fromArray(restored.cameraTarget);
+      this.playerPosition.fromArray(restored.playerPosition);
+      this.firstPersonYaw = restored.firstPersonYaw;
+      this.firstPersonPitch = restored.firstPersonPitch;
+    }
     this.scene.background = new THREE.Color(0x071419);
     this.scene.fog = new THREE.FogExp2(0x071419, 0.027);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -155,7 +193,8 @@ export class FactoryRuntime {
     this.powerCoreGroup = powerModels.core;
     this.powerPoleGroup = powerModels.pole;
     this.projectDockGroup = powerModels.projectDock;
-    this.seedFactory();
+    if (restored) this.simulation.structures.forEach((structure) => this.mountStructure(structure));
+    else this.seedFactory();
     this.bindEvents();
     this.resize();
     this.updateCamera();
@@ -172,6 +211,7 @@ export class FactoryRuntime {
   setTool(tool: Tool) {
     if (this.inputLocked) return;
     this.activeTool = tool;
+    this.selectedBuildingId = null;
     this.callbacks.onToolChange(tool);
     this.beltStart = null;
     if (this.beltPreview) this.scene.remove(this.beltPreview);
@@ -181,6 +221,20 @@ export class FactoryRuntime {
     this.renderer.domElement.style.cursor =
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
     this.updateGhost();
+  }
+
+  selectBuilding(buildingId: BuildingId) {
+    const definition = START_REGISTRY.buildings.get(buildingId);
+    if (!definition || definition.placementMode !== "buildable") {
+      this.callbacks.onToast("건설할 수 없는 설비입니다");
+      return false;
+    }
+    const type = legacyTypeForBuilding(buildingId);
+    this.setTool(type);
+    this.selectedBuildingId = buildingId;
+    this.updateGhost();
+    this.callbacks.onToast(`${definition.name} 배치 · R 회전`);
+    return true;
   }
 
   /** Suspends every world/camera command while a modal UI owns player input. */
@@ -244,6 +298,7 @@ export class FactoryRuntime {
   }
 
   dispose() {
+    this.save(false);
     cancelAnimationFrame(this.animationId);
     this.renderer.domElement.removeEventListener("pointermove", this.onPointerMove);
     this.renderer.domElement.removeEventListener("pointerdown", this.onPointerDown);
@@ -255,6 +310,8 @@ export class FactoryRuntime {
     window.removeEventListener("resize", this.resize);
     document.removeEventListener("mousemove", this.onFirstPersonLook);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    window.removeEventListener("pagehide", this.onPageHide);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.mount) this.mount.removeChild(this.renderer.domElement);
@@ -358,8 +415,19 @@ export class FactoryRuntime {
 
   private addStructure(data: StructureData) {
     this.simulation.addStructure(data);
-    const group = createStructureModel(data.type, this.materials);
-    group.position.copy(modelPosition(data.type, data.x, data.z));
+    this.mountStructure(data);
+    this.nextId = Math.max(this.nextId, data.id + 1);
+    return data;
+  }
+
+  private mountStructure(data: StructureData) {
+    const group = data.buildingId
+      ? createBuildingModel(data.buildingId, this.materials)
+      : createStructureModel(data.type, this.materials);
+    const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
+    group.position.copy(definition
+      ? new THREE.Vector3(data.x + definition.footprint.x / 2, 0, data.z + definition.footprint.z / 2)
+      : modelPosition(data.type, data.x, data.z));
     group.rotation.y = data.rotation * (Math.PI / 2);
     group.userData.structureId = data.id;
     group.traverse((child) => {
@@ -367,8 +435,6 @@ export class FactoryRuntime {
     });
     this.groups.set(data.id, group);
     this.scene.add(group);
-    this.nextId = Math.max(this.nextId, data.id + 1);
-    return data;
   }
 
   private removeStructure(id: number) {
@@ -394,7 +460,39 @@ export class FactoryRuntime {
     window.addEventListener("resize", this.resize);
     document.addEventListener("mousemove", this.onFirstPersonLook);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
+    window.addEventListener("pagehide", this.onPageHide);
   }
+
+  private snapshot(): FactoryRuntimeSnapshot {
+    return {
+      version: 1,
+      simulation: this.simulation.snapshot(),
+      credits: this.credits,
+      nextId: this.nextId,
+      cameraMode: this.cameraMode,
+      cameraAngle: this.cameraAngle,
+      cameraZoom: this.cameraZoom,
+      cameraTarget: this.cameraTarget.toArray(),
+      playerPosition: this.playerPosition.toArray(),
+      firstPersonYaw: this.firstPersonYaw,
+      firstPersonPitch: this.firstPersonPitch,
+    };
+  }
+
+  private save(paused: boolean) {
+    const state = this.snapshot();
+    return paused ? this.saveStorage.saveForPageHide(state) : this.saveStorage.save(state);
+  }
+
+  private onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") this.save(true);
+    this.lastTime = performance.now();
+  };
+
+  private onPageHide = () => {
+    this.save(true);
+  };
 
   private resize = () => {
     const width = this.mount.clientWidth;
@@ -489,6 +587,7 @@ export class FactoryRuntime {
     if (this.ghost) this.scene.remove(this.ghost);
     this.ghost = null;
     this.ghostType = null;
+    this.ghostBuildingId = null;
   }
 
   private recolorGhost(group: THREE.Group, valid: boolean) {
@@ -508,14 +607,20 @@ export class FactoryRuntime {
       return;
     }
     const type = this.activeTool as BuildType;
-    if (!this.ghost || this.ghostType !== type) {
+    if (!this.ghost || this.ghostType !== type || this.ghostBuildingId !== this.selectedBuildingId) {
       this.clearGhost();
-      this.ghost = createStructureModel(type, this.materials);
+      this.ghost = this.selectedBuildingId
+        ? createBuildingModel(this.selectedBuildingId, this.materials)
+        : createStructureModel(type, this.materials);
       this.ghostType = type;
+      this.ghostBuildingId = this.selectedBuildingId;
       this.scene.add(this.ghost);
     }
     this.ghostValid = this.simulation.canPlace(type, this.currentCell.x, this.currentCell.z);
-    this.ghost.position.copy(modelPosition(type, this.currentCell.x, this.currentCell.z));
+    const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
+    this.ghost.position.copy(definition
+      ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
+      : modelPosition(type, this.currentCell.x, this.currentCell.z));
     this.ghost.rotation.y = this.rotation * (Math.PI / 2);
     this.recolorGhost(this.ghost, this.ghostValid);
   }
@@ -635,13 +740,17 @@ export class FactoryRuntime {
     const data = this.addStructure({
       id: this.nextId++,
       type,
+      ...(this.selectedBuildingId ? { buildingId: this.selectedBuildingId } : {}),
       x: this.currentCell.x,
       z: this.currentCell.z,
       rotation: this.rotation,
     });
     this.history.push({ added: [{ ...data }], removed: [], creditDelta: -cost });
     this.changeCredits(this.credits - cost);
-    this.callbacks.onToast(`${TYPE_NAME[type]} 설치 완료`);
+    const buildingName = this.selectedBuildingId
+      ? START_REGISTRY.buildings.get(this.selectedBuildingId)?.name
+      : TYPE_NAME[type];
+    this.callbacks.onToast(`${buildingName ?? TYPE_NAME[type]} 설치 완료`);
     this.updateGhost();
   }
 
@@ -655,9 +764,14 @@ export class FactoryRuntime {
       this.callbacks.onToast("크레딧이 부족합니다");
       return;
     }
-    const added = this.beltPreviewCells.map((cell) =>
-      this.addStructure({ id: this.nextId++, type: "belt", x: cell.x, z: cell.z, rotation: cell.rotation }),
-    );
+    const added = this.beltPreviewCells.map((cell) => this.addStructure({
+      id: this.nextId++,
+      type: "belt",
+      ...(this.selectedBuildingId ? { buildingId: this.selectedBuildingId } : {}),
+      x: cell.x,
+      z: cell.z,
+      rotation: cell.rotation,
+    }));
     this.history.push({ added: added.map((data) => ({ ...data })), removed: [], creditDelta: -cost });
     this.changeCredits(this.credits - cost);
     const connected = added.some((belt) =>
@@ -1082,6 +1196,10 @@ export class FactoryRuntime {
     const delta = Math.min((time - this.lastTime) / 1000, 0.05);
     this.lastTime = time;
     this.elapsed += delta;
+    if (time - this.lastAutoSaveTime >= 5_000) {
+      this.lastAutoSaveTime = time;
+      this.save(false);
+    }
 
     if (this.cameraMode === "overview") {
       const angularDistance = this.desiredCameraAngle - this.cameraAngle;

@@ -1076,6 +1076,25 @@ kbd {
   pointer-events: auto;
 }
 
+.catalog-launch-button {
+  position: absolute;
+  right: 14px;
+  bottom: 98px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 0;
+  color: #b8c4c3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.catalog-launch-button > span { color: var(--amber); }
+.catalog-launch-button strong { font: 700 8px/1 var(--font-geist-mono), monospace; }
+.catalog-launch-button:hover { border-color: var(--line-strong); background: var(--hud-raised); }
+
 .lineage-launch-button > span {
   color: var(--cyan);
 }
@@ -1214,6 +1233,11 @@ kbd {
   .lineage-launch-button {
     right: 8px;
     bottom: 112px;
+  }
+
+  .catalog-launch-button {
+    right: 8px;
+    bottom: 152px;
   }
 }
 

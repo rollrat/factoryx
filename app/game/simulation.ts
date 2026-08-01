@@ -8,9 +8,11 @@ import {
   sameDirection,
 } from "./config.ts";
 import { FixedStepClock } from "./sim/clock.ts";
-import { MergerRouter, SplitterRouter } from "./sim/junction.ts";
+import type { FixedStepClockSnapshot } from "./sim/clock.ts";
+import { MergerRouter, SplitterRouter, type RouterSnapshot } from "./sim/junction.ts";
 import { computePowerGrid, type PowerGridResult } from "./sim/power.ts";
 import { createPhaseOneProject } from "./sim/project.ts";
+import type { ProjectStageSnapshot } from "./sim/project.ts";
 import { START_REGISTRY } from "./data/index.ts";
 import { getRuntimeRecipe, resolveRuntimeRecipe, type RuntimeRecipe } from "./recipes/runtimeRecipes.ts";
 import type { BeltItem, BuildType, Direction, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
@@ -48,14 +50,26 @@ const consumeRecipeInputs = (items: ItemType[], recipe: RuntimeRecipe) => {
   });
 };
 
+export type FactorySimulationSnapshot = Readonly<{
+  version: 1;
+  clock: FixedStepClockSnapshot;
+  structures: readonly StructureData[];
+  machines: readonly Readonly<{ structureId: number; state: MachineState }>[];
+  beltItems: readonly Readonly<{ structureId: number; item: BeltItem }>[];
+  splitterRouters: readonly Readonly<{ structureId: number; state: RouterSnapshot }>[];
+  mergerRouters: readonly Readonly<{ structureId: number; state: RouterSnapshot }>[];
+  project: ProjectStageSnapshot;
+  nextItemId: number;
+}>;
+
 export class FactorySimulation {
   readonly structures = new Map<number, StructureData>();
   readonly occupancy = new Map<string, number>();
   readonly machines = new Map<number, MachineState>();
   readonly beltItems = new Map<number, BeltItem>();
 
-  private readonly clock = new FixedStepClock();
-  private readonly project = createPhaseOneProject();
+  private readonly clock: FixedStepClock;
+  private readonly project;
   private powerGrid: PowerGridResult = computePowerGrid([]);
   private readonly splitterRouters = new Map<number, SplitterRouter<ItemType>>();
   private readonly mergerRouters = new Map<number, MergerRouter<ItemType>>();
@@ -63,8 +77,75 @@ export class FactorySimulation {
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
   private readonly powerSupplyMW: number;
 
-  constructor(powerSupplyMW = 24) {
+  constructor(powerSupplyMW = 24, snapshot?: FactorySimulationSnapshot) {
     this.powerSupplyMW = powerSupplyMW;
+    this.clock = new FixedStepClock(undefined, snapshot?.clock);
+    this.project = createPhaseOneProject(snapshot?.project);
+    if (snapshot) this.restore(snapshot);
+  }
+
+  snapshot(): FactorySimulationSnapshot {
+    return {
+      version: 1,
+      clock: this.clock.snapshot(),
+      structures: [...this.structures.values()].map((structure) => ({ ...structure })),
+      machines: [...this.machines].map(([structureId, state]) => ({
+        structureId,
+        state: {
+          ...state,
+          input: [...state.input],
+          output: [...state.output],
+          storedItems: [...state.storedItems],
+        },
+      })),
+      beltItems: [...this.beltItems].map(([structureId, item]) => ({ structureId, item: { ...item, ...(item.incoming ? { incoming: { ...item.incoming } } : {}) } })),
+      splitterRouters: [...this.splitterRouters].map(([structureId, router]) => ({ structureId, state: router.snapshot() })),
+      mergerRouters: [...this.mergerRouters].map(([structureId, router]) => ({ structureId, state: router.snapshot() })),
+      project: this.project.snapshot(),
+      nextItemId: this.nextItemId,
+    };
+  }
+
+  private restore(snapshot: FactorySimulationSnapshot) {
+    if (snapshot.version !== 1) throw new Error(`unsupported visual simulation snapshot version: ${snapshot.version}`);
+    if (!Number.isSafeInteger(snapshot.nextItemId) || snapshot.nextItemId < 1) throw new RangeError("nextItemId must be a positive integer");
+    const structureIds = new Set<number>();
+    snapshot.structures.forEach((structure) => {
+      if (!Number.isSafeInteger(structure.id) || structure.id < 0 || structureIds.has(structure.id)) {
+        throw new Error(`invalid or duplicate structure id: ${structure.id}`);
+      }
+      structureIds.add(structure.id);
+      this.addStructure(structure);
+    });
+    const machineIds = new Set<number>();
+    snapshot.machines.forEach(({ structureId, state }) => {
+      if (machineIds.has(structureId) || !this.machines.has(structureId)) throw new Error(`invalid machine snapshot: ${structureId}`);
+      machineIds.add(structureId);
+      this.machines.set(structureId, {
+        ...state,
+        input: [...state.input],
+        output: [...state.output],
+        storedItems: [...state.storedItems],
+      });
+    });
+    if (machineIds.size !== this.machines.size) throw new Error("visual simulation snapshot is missing machine state");
+    snapshot.beltItems.forEach(({ structureId, item }) => {
+      const structure = this.structures.get(structureId);
+      if (!structure || !isTransport(structure.type) || this.beltItems.has(structureId)) throw new Error(`invalid belt item snapshot: ${structureId}`);
+      this.beltItems.set(structureId, { ...item, ...(item.incoming ? { incoming: { ...item.incoming } } : {}) });
+    });
+    snapshot.splitterRouters.forEach(({ structureId, state }) => {
+      const router = this.splitterRouters.get(structureId);
+      if (!router) throw new Error(`invalid splitter router snapshot: ${structureId}`);
+      router.restore(state);
+    });
+    snapshot.mergerRouters.forEach(({ structureId, state }) => {
+      const router = this.mergerRouters.get(structureId);
+      if (!router) throw new Error(`invalid merger router snapshot: ${structureId}`);
+      router.restore(state);
+    });
+    this.nextItemId = snapshot.nextItemId;
+    this.rebuildPorts();
   }
 
   addStructure(data: StructureData) {
@@ -187,6 +268,7 @@ export class FactorySimulation {
       return {
         id,
         type: data.type,
+        ...(data.buildingId ? { buildingId: data.buildingId } : {}),
         status: jammed ? "출력 막힘" : item ? "운송 중" : "가동 대기",
         runtimeState: jammed ? "blocked" : item ? "working" : "idle",
         recipeName: data.type === "splitter" ? "라운드로빈 분배" : data.type === "merger" ? "공정 병합" : "단일 품목 운송",
@@ -236,6 +318,7 @@ export class FactorySimulation {
     return {
       id,
       type: data.type,
+      ...(data.buildingId ? { buildingId: data.buildingId } : {}),
       status,
       runtimeState,
       recipeName: recipe?.name ?? (data.type === "storage" ? "품목 보관" : "입력 품목 자동 선택"),

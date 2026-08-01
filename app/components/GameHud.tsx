@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
+import { START_REGISTRY } from "../game/data/index.ts";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 
 export type ProjectHudRequirement = Readonly<{
@@ -34,6 +35,7 @@ type GameHudProps = {
   onToolChange: (tool: Tool) => void;
   onCameraModeChange: () => void;
   onLineageToggle: () => void;
+  onBuildCatalogToggle: () => void;
 };
 
 type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
@@ -131,6 +133,7 @@ export default function GameHud({
   onToolChange,
   onCameraModeChange,
   onLineageToggle,
+  onBuildCatalogToggle,
 }: GameHudProps) {
   const activeToolButtonRef = useRef<HTMLButtonElement>(null);
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
@@ -150,6 +153,9 @@ export default function GameHud({
     ? Math.max(0, Math.min(100, selectedDetails.progress * 100))
     : 0;
   const selectedType = selectedDetails?.type as string | undefined;
+  const selectedName = selectedDetails?.buildingId
+    ? START_REGISTRY.buildings.get(selectedDetails.buildingId)?.name ?? TYPE_NAME[selectedDetails.type]
+    : selectedDetails ? TYPE_NAME[selectedDetails.type] : "설비";
   const isSplitter = selectedType === "splitter";
   const isMerger = selectedType === "merger";
   const isCrusher = selectedType === "crusher";
@@ -233,7 +239,7 @@ export default function GameHud({
       <aside
         className={`inspector instrument-panel status-${selectedStatus} ${selected ? "visible" : ""}`}
         aria-hidden={!selected}
-        aria-label={selected ? `${TYPE_NAME[selected.type]} 설비 상태` : undefined}
+        aria-label={selected ? `${selectedName} 설비 상태` : undefined}
       >
         <div className="inspector-rail">
           <span>EQP</span>
@@ -243,7 +249,7 @@ export default function GameHud({
           <div className="inspector-head">
             <div>
               <span className="panel-label">선택 설비</span>
-              <div className="inspector-title">{selected ? TYPE_NAME[selected.type] : "설비"}</div>
+              <div className="inspector-title">{selectedName}</div>
             </div>
             <div className={`equipment-status status-${selectedStatus}`} aria-label={`상태: ${STATUS_LABEL[selectedStatus]}`}>
               <i aria-hidden="true" />
@@ -385,6 +391,11 @@ export default function GameHud({
         <span>⌘</span>
         <strong>생산 계보</strong>
         <kbd>G</kbd>
+      </button>
+
+      <button className="catalog-launch-button instrument-panel" onClick={onBuildCatalogToggle} aria-label="전체 건설 카탈로그 열기">
+        <span aria-hidden="true">▦</span>
+        <strong>건설 카탈로그</strong>
       </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>

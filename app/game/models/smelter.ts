@@ -6,7 +6,7 @@ import {
   setIndicator,
   type MachineMaterials,
   type ProcessingVisualState,
-} from "./shared";
+} from "./shared.ts";
 
 const addFoundation = (group: THREE.Group, materials: MachineMaterials) => {
   addBox(group, [1.76, 0.2, 1.72], [0, 0.1, 0], materials.dark);

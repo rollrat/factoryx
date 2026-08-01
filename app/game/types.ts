@@ -1,6 +1,6 @@
 import type { MachineRuntimeState } from "./sim/contracts.ts";
 import type { RuntimeItemId } from "./recipes/runtimeRecipes.ts";
-import type { RecipeId } from "./domain/types.ts";
+import type { BuildingId, RecipeId } from "./domain/types.ts";
 
 export type Tool =
   | "inspect"
@@ -24,6 +24,7 @@ export type ItemType = RuntimeItemId;
 export type StructureData = {
   id: number;
   type: BuildType;
+  buildingId?: BuildingId;
   x: number;
   z: number;
   rotation: number;
@@ -96,6 +97,7 @@ export type HistoryEntry = {
 export type SelectedInfo = {
   id: number;
   type: BuildType;
+  buildingId?: BuildingId;
   status: string;
   runtimeState?: MachineRuntimeState;
   recipeName?: string;

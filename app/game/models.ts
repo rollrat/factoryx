@@ -1,12 +1,17 @@
 import * as THREE from "three";
-import type { BuildType, ItemType } from "./types";
-import { createMinerModel } from "./models/miner";
-import { createSmelterModel } from "./models/smelter";
-import { createAssemblerModel } from "./models/assembler";
-import { createStorageModel } from "./models/storage";
-import { createMergerModel, createSplitterModel } from "./models/logistics";
-import { createCrusherModel } from "./models/crusher";
-import { createRegisteredItemModel } from "./models/item";
+import type { BuildType, ItemType } from "./types.ts";
+import type { BuildingDefinition, BuildingId } from "./domain/types.ts";
+import { START_REGISTRY } from "./data/index.ts";
+import { createMinerModel } from "./models/miner.ts";
+import { createSmelterModel } from "./models/smelter.ts";
+import { createAssemblerModel } from "./models/assembler.ts";
+import { createStorageModel } from "./models/storage.ts";
+import { createMergerModel, createSplitterModel } from "./models/logistics.ts";
+import { createCrusherModel } from "./models/crusher.ts";
+import { createRegisteredItemModel } from "./models/item.ts";
+import { createGenericBuildingModel } from "./models/genericBuilding.ts";
+import { createDistributionPoleModel, createFieldPowerCoreModel } from "./models/power.ts";
+import { createProjectDockModel } from "./models/projectDock.ts";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -130,6 +135,50 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
   if (type === "assembler") return createAssemblerModel(materials);
   if (type === "storage") return createStorageModel(materials);
   return group;
+};
+
+const dedicatedBuildingModel = (
+  modelKey: string,
+  materials: FactoryMaterials,
+): THREE.Group | null => {
+  if (modelKey === "vein_miner") return createMinerModel(materials);
+  if (modelKey === "arc_smelter") return createSmelterModel(materials);
+  if (modelKey === "crusher") return createCrusherModel(materials);
+  // The current detailed work-cell model remains shared by the legacy former and
+  // the data-defined precision assembler until a dedicated press model lands.
+  if (modelKey === "hydraulic_former" || modelKey === "precision_assembler") return createAssemblerModel(materials);
+  if (modelKey === "small_storage") return createStorageModel(materials);
+  if (modelKey === "conveyor_mk1") return createStructureModel("belt", materials);
+  if (modelKey === "splitter") return createSplitterModel(materials);
+  if (modelKey === "merger") return createMergerModel(materials);
+  if (modelKey === "field_power_core") return createFieldPowerCoreModel(materials);
+  if (modelKey === "distribution_pole_mk1") return createDistributionPoleModel(materials);
+  if (modelKey === "project_dock") return createProjectDockModel(materials);
+  return null;
+};
+
+/** Routes a validated definition by modelKey, falling back to its data-driven blockout. */
+export const createBuildingModelFromDefinition = (
+  definition: BuildingDefinition,
+  materials: FactoryMaterials,
+) => {
+  const modelKey = definition.modelKey ?? definition.id;
+  const dedicated = dedicatedBuildingModel(modelKey, materials);
+  const group = dedicated ?? createGenericBuildingModel(definition, materials);
+  group.userData.buildingId = definition.id;
+  group.userData.modelKey = modelKey;
+  group.userData.modelSource = dedicated ? "dedicated" : "generic";
+  return group;
+};
+
+/** Creates any campaign building by registry id without changing the legacy BuildType API. */
+export const createBuildingModel = (
+  buildingId: BuildingId,
+  materials: FactoryMaterials,
+) => {
+  const definition = START_REGISTRY.buildings.get(buildingId);
+  if (!definition) throw new Error(`Unknown building definition: ${buildingId}`);
+  return createBuildingModelFromDefinition(definition, materials);
 };
 
 export const createOrePatch = (materials: FactoryMaterials, copper = false, limestone = false) => {
