@@ -5,6 +5,7 @@ import { createSmelterModel } from "./models/smelter";
 import { createAssemblerModel } from "./models/assembler";
 import { createStorageModel } from "./models/storage";
 import { createMergerModel, createSplitterModel } from "./models/logistics";
+import { createCrusherModel } from "./models/crusher";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -35,6 +36,7 @@ export const createFactoryMaterials = () => {
     beltRib: standard(0x405255, 0.08, 0.72),
     copper: standard(0xb76e43, 0.58, 0.3),
     ore: standard(0x5d7b8b, 0.65, 0.38),
+    limestone: standard(0xc8c3aa, 0.18, 0.78),
   };
 };
 
@@ -123,14 +125,15 @@ export const createStructureModel = (type: BuildType, materials: FactoryMaterial
 
   if (type === "miner") return createMinerModel(materials);
   if (type === "smelter") return createSmelterModel(materials);
+  if (type === "crusher") return createCrusherModel(materials);
   if (type === "assembler") return createAssemblerModel(materials);
   if (type === "storage") return createStorageModel(materials);
   return group;
 };
 
-export const createOrePatch = (materials: FactoryMaterials, copper = false) => {
+export const createOrePatch = (materials: FactoryMaterials, copper = false, limestone = false) => {
   const group = new THREE.Group();
-  const material = copper ? materials.copper : materials.ore;
+  const material = limestone ? materials.limestone : copper ? materials.copper : materials.ore;
   const points = [
     [-0.5, 0.13, -0.38, 0.28],
     [0.34, 0.2, -0.22, 0.36],
@@ -149,7 +152,7 @@ export const createOrePatch = (materials: FactoryMaterials, copper = false) => {
 
 export const createItemModel = (type: ItemType, materials: FactoryMaterials) => {
   const group = new THREE.Group();
-  if (type === "iron_ore" || type === "copper_ore") {
+  if (type === "iron_ore" || type === "copper_ore" || type === "limestone") {
     const fragments = [
       [-0.09, 0, 0, 0.15],
       [0.08, 0.03, 0.03, 0.12],
@@ -158,7 +161,7 @@ export const createItemModel = (type: ItemType, materials: FactoryMaterials) => 
     fragments.forEach(([x, y, z, size]) => {
       const fragment = new THREE.Mesh(
         new THREE.OctahedronGeometry(size, 0),
-        type === "copper_ore" ? materials.copper : materials.ore,
+        type === "copper_ore" ? materials.copper : type === "limestone" ? materials.limestone : materials.ore,
       );
       fragment.position.set(x, y, z);
       fragment.castShadow = true;
@@ -178,6 +181,11 @@ export const createItemModel = (type: ItemType, materials: FactoryMaterials) => 
   if (type === "iron_plate") {
     addBox(group, [0.34, 0.07, 0.24], [0, 0.02, 0], materials.pale);
     addBox(group, [0.27, 0.025, 0.17], [0, 0.065, 0], materials.steel, false);
+  }
+  if (type === "construction_block") {
+    addBox(group, [0.3, 0.18, 0.24], [0, 0.07, 0], materials.limestone);
+    addBox(group, [0.22, 0.025, 0.16], [0, 0.175, 0], materials.pale, false);
+    addBox(group, [0.035, 0.2, 0.035], [0.1, 0.08, 0.07], materials.orange, false);
   }
   return group;
 };

@@ -583,6 +583,22 @@ button {
   background: #202728;
 }
 
+.active-tool-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.active-tool-heading kbd {
+  min-width: 17px;
+  padding: 3px 4px;
+  border-color: rgba(230, 160, 75, 0.34);
+  background: rgba(230, 160, 75, 0.08);
+  color: #ddb078;
+  text-align: center;
+}
+
 .active-tool-readout span {
   color: var(--amber);
   font: 800 7px/1 var(--font-geist-mono), monospace;

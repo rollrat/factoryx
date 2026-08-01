@@ -55,14 +55,15 @@ export type RuntimeTopology = Readonly<{
 const BUILDING_ID: Record<MachineType, string> = {
   miner: "vein_miner",
   smelter: "arc_smelter",
+  crusher: "crusher",
   assembler: "hydraulic_former",
   storage: "small_storage",
 };
 
-const STAGE: Record<MachineType, number> = { miner: 0, smelter: 2, assembler: 4, storage: 6 };
-const NEXT_TYPE: Partial<Record<MachineType, MachineType>> = {
-  miner: "smelter",
+const STAGE: Record<MachineType, number> = { miner: 0, smelter: 2, crusher: 2, assembler: 4, storage: 6 };
+const NEXT_TYPE: Partial<Record<Exclude<MachineType, "miner">, MachineType>> = {
   smelter: "assembler",
+  crusher: "storage",
   assembler: "storage",
 };
 const ITEM_INFO: Record<ItemType, Readonly<{ id: string; label: string; column: number }>> = {
@@ -71,10 +72,13 @@ const ITEM_INFO: Record<ItemType, Readonly<{ id: string; label: string; column: 
   iron_ingot: { id: "iron_ingot", label: "철 주괴", column: 3 },
   copper_ingot: { id: "copper_ingot", label: "구리 주괴", column: 3 },
   iron_plate: { id: "iron_plate", label: "철판", column: 5 },
+  limestone: { id: "limestone", label: "석회암", column: 1 },
+  construction_block: { id: "construction_block", label: "건축 블록", column: 3 },
 };
 const RATE_PER_MINUTE: Record<Exclude<MachineType, "storage">, number> = {
   miner: 60 / 2.1,
   smelter: 60 / 2.7,
+  crusher: 30,
   assembler: 60 / 3.4,
 };
 const STATUS_LABEL: Record<LiveRuntimeState | "storing", string> = {
@@ -156,7 +160,13 @@ const runtimeStateFor = (simulation: FactorySimulation, structure: StructureData
 };
 
 const outputItemFor = (simulation: FactorySimulation, structure: StructureData & { type: MachineType }): ItemType | null => {
-  if (structure.type === "miner") return structure.x === 7 && structure.z === 4 ? "copper_ore" : "iron_ore";
+  if (structure.type === "miner") {
+    const recipeId = simulation.machines.get(structure.id)?.recipeId;
+    if (recipeId === "mine_copper_ore") return "copper_ore";
+    if (recipeId === "mine_limestone") return "limestone";
+    return "iron_ore";
+  }
+  if (structure.type === "crusher") return "construction_block";
   if (structure.type === "assembler") return "iron_plate";
   if (structure.type === "smelter") {
     return simulation.machines.get(structure.id)?.recipeId === "smelt_copper_ingot"
@@ -170,7 +180,8 @@ const outputItemFor = (simulation: FactorySimulation, structure: StructureData &
 export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopology {
   const structures = [...simulation.structures.values()];
   const machines = structures.filter((structure): structure is StructureData & { type: MachineType } => (
-    structure.type !== "belt" && structure.type !== "splitter" && structure.type !== "merger"
+    structure.type === "miner" || structure.type === "smelter"
+      || structure.type === "assembler" || structure.type === "storage"
   ));
   const nodes: RuntimeTopologyNode[] = [];
   const nodeStates: Record<string, RuntimeTopology["live"]["nodeStates"][string]> = {};
@@ -178,7 +189,7 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
 
   machines.forEach((structure) => {
     if (structure.type === "miner") {
-      const item = structure.x === 7 && structure.z === 4 ? "copper_ore" : "iron_ore";
+      const item = outputItemFor(simulation, structure) ?? "iron_ore";
       usedItems.add(item);
     }
     if (structure.type === "smelter") {
@@ -187,7 +198,10 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
       usedItems.add(copper ? "copper_ingot" : "iron_ingot");
     }
     if (structure.type === "assembler") { usedItems.add("iron_ingot"); usedItems.add("iron_plate"); }
-    if (structure.type === "storage") usedItems.add("iron_plate");
+    if (structure.type === "crusher") { usedItems.add("limestone"); usedItems.add("construction_block"); }
+    if (structure.type === "storage") {
+      simulation.machines.get(structure.id)?.storedItems.forEach((item) => usedItems.add(item));
+    }
     const runtime = runtimeStateFor(simulation, structure);
     const id = machineNodeId(structure.id);
     nodes.push({
@@ -212,6 +226,8 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
     iron_ingot: 0,
     copper_ingot: 0,
     iron_plate: 0,
+    limestone: 0,
+    construction_block: 0,
   };
   simulation.machines.forEach((state, structureId) => {
     state.input.forEach((item) => { stockByItem[item] += 1; });
@@ -244,8 +260,10 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
 
   const edges: RuntimeTopologyEdge[] = [];
   machines.forEach((source) => {
-    const targetType = NEXT_TYPE[source.type];
     const outputItem = outputItemFor(simulation, source);
+    const targetType = source.type === "miner"
+      ? outputItem === "limestone" ? "crusher" : "smelter"
+      : NEXT_TYPE[source.type];
     if (!targetType || !outputItem) return;
     const target = findTarget(machines, source, targetType);
     if (!target) return;

@@ -1,3 +1,4 @@
+import { RUNTIME_RESOURCE_ANCHORS } from "./recipes/runtimeRecipes.ts";
 import type { BuildType, Cell, Direction, MachinePorts, StructureData, Tool } from "./types";
 
 export const TOOL_INFO: Array<{
@@ -15,6 +16,7 @@ export const TOOL_INFO: Array<{
   { id: "storage", name: "창고", glyph: "▣", key: "6", cost: 90 },
   { id: "splitter", name: "분배기", glyph: "⑂", key: "7", cost: 45 },
   { id: "merger", name: "병합기", glyph: "⑃", key: "8", cost: 45 },
+  { id: "crusher", name: "파쇄기", glyph: "C", key: "9", cost: 220 },
   { id: "demolish", name: "철거", glyph: "×", key: "X" },
 ];
 
@@ -25,6 +27,7 @@ export const COST: Record<BuildType, number> = {
   miner: 120,
   smelter: 180,
   assembler: 260,
+  crusher: 220,
   storage: 90,
 };
 
@@ -35,6 +38,7 @@ export const TYPE_NAME: Record<BuildType, string> = {
   miner: "철 채굴기",
   smelter: "아크 제련기",
   assembler: "유압 성형기",
+  crusher: "파쇄기",
   storage: "소형 저장고",
 };
 
@@ -47,10 +51,12 @@ export const TYPE_RATE: Record<BuildType, string> = {
   miner: "24 /분",
   smelter: "18 /분",
   assembler: "30 /분",
+  crusher: "30 /분",
   storage: `${STORAGE_CAPACITY} 슬롯`,
 };
 
 export const ORE_ANCHORS = new Set(["-8,-3", "7,4"]);
+ORE_ANCHORS.add(`${RUNTIME_RESOURCE_ANCHORS.limestone.x},${RUNTIME_RESOURCE_ANCHORS.limestone.z}`);
 
 export const cellKey = (x: number, z: number) => `${x},${z}`;
 

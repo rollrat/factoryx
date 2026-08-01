@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 
@@ -104,7 +105,12 @@ export default function GameHud({
   onCameraModeChange,
   onLineageToggle,
 }: GameHudProps) {
+  const activeToolButtonRef = useRef<HTMLButtonElement>(null);
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
+  const numericToolKeys = TOOL_INFO.map((tool) => tool.key).filter((key) => /^\d$/.test(key));
+  const toolKeyRange = numericToolKeys.length > 1
+    ? `${numericToolKeys[0]}–${numericToolKeys[numericToolKeys.length - 1]}`
+    : numericToolKeys[0] ?? "숫자";
   const objectiveProgress = Math.min(100, (motors / 20) * 100);
   const selectedDetails = selected as SelectedDetails | null;
   const selectedStatus = selectedDetails ? getEquipmentStatus(selectedDetails) : "idle";
@@ -114,15 +120,24 @@ export default function GameHud({
   const selectedType = selectedDetails?.type as string | undefined;
   const isSplitter = selectedType === "splitter";
   const isMerger = selectedType === "merger";
-  const progressLabel = isSplitter
+  const isCrusher = selectedType === "crusher";
+  const progressLabel = isCrusher
+    ? "파쇄 진행"
+    : isSplitter
     ? "분배 흐름"
     : isMerger ? "병합 흐름" : selectedDetails?.type === "storage"
     ? "저장 용량"
     : selectedDetails?.type === "belt" ? "운송 진행" : "공정 진행";
-  const flowInputLabel = isMerger ? "병합 입력" : selected?.type === "storage" ? "보관" : "입력";
-  const flowOutputLabel = isSplitter ? "분배 출력" : "출력";
+  const flowInputLabel = isCrusher ? "원광 투입" : isMerger ? "병합 입력" : selected?.type === "storage" ? "보관" : "입력";
+  const flowOutputLabel = isCrusher ? "파쇄물" : isSplitter ? "분배 출력" : "출력";
   const equipmentMode = selectedDetails?.recipeName
-    ?? (isSplitter ? "연결된 출력으로 균등 분배" : isMerger ? "준비된 입력을 순차 병합" : null);
+    ?? (isCrusher
+      ? "원광을 파쇄해 다음 공정으로 공급"
+      : isSplitter ? "연결된 출력으로 균등 분배" : isMerger ? "준비된 입력을 순차 병합" : null);
+
+  useEffect(() => {
+    activeToolButtonRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTool]);
 
   return (
     <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
@@ -273,20 +288,21 @@ export default function GameHud({
         {cameraMode === "firstPerson" ? (
           <><span><kbd>클릭</kbd> 시점 고정</span><span><kbd>WASD</kbd> 이동</span><span><kbd>SHIFT</kbd> 달리기</span></>
         ) : (
-          <><span><kbd>WASD</kbd> 이동</span><span><kbd>휠</kbd> 줌</span><span><kbd>Q E</kbd> 회전</span></>
+          <><span><kbd>WASD</kbd> 이동</span><span><kbd>휠</kbd> 줌</span><span><kbd>Q E</kbd> 회전</span><span><kbd>{toolKeyRange}</kbd> 도구</span></>
         )}
       </div>
 
       <div className="build-dock instrument-panel">
         <div className="active-tool-readout">
-          <span>BUILD</span>
+          <div className="active-tool-heading"><span>BUILD</span><kbd>{activeToolInfo.key}</kbd></div>
           <strong>{activeToolInfo.name}</strong>
           <em>{activeToolInfo.cost ? `₡ ${activeToolInfo.cost}` : "조작 도구"}</em>
         </div>
-        <nav className="toolbar" aria-label="건설 도구">
+        <nav className="toolbar" aria-label="건설 도구" aria-description="항목이 더 있으면 가로로 스크롤하세요.">
           {TOOL_INFO.map((tool) => (
             <button
               key={tool.id}
+              ref={activeTool === tool.id ? activeToolButtonRef : undefined}
               className={`tool-button tool-${tool.id} ${activeTool === tool.id ? "active" : ""}`}
               onClick={() => onToolChange(tool.id)}
               aria-pressed={activeTool === tool.id}

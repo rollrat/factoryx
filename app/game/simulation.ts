@@ -57,6 +57,8 @@ export class FactorySimulation {
         ? resolveRuntimeRecipe({ type: "miner", x: data.x, z: data.z })
         : data.type === "assembler"
           ? resolveRuntimeRecipe({ type: "assembler" })
+          : data.type === "crusher"
+            ? resolveRuntimeRecipe({ type: "crusher" })
           : null;
       this.machines.set(data.id, {
         recipeId: initialRecipe?.id ?? null,
@@ -196,7 +198,7 @@ export class FactorySimulation {
       progress: data.type === "storage" ? state.stored / STORAGE_CAPACITY : state.progress,
       inputCount: data.type === "storage" ? state.stored : state.input.length,
       inputItems: aggregateItems(data.type === "storage" ? state.storedItems : state.input),
-      inputCapacity: data.type === "storage" ? STORAGE_CAPACITY : data.type === "assembler" ? 4 : data.type === "smelter" ? 2 : 0,
+      inputCapacity: data.type === "storage" ? STORAGE_CAPACITY : data.type === "crusher" ? 8 : data.type === "assembler" ? 4 : data.type === "smelter" ? 2 : 0,
       outputCount: state.output.length,
       outputItems: aggregateItems(state.output),
       outputCapacity: data.type === "storage" ? STORAGE_CAPACITY : 1,
@@ -381,6 +383,11 @@ export class FactorySimulation {
     }
     if (machine.type === "assembler" && item === "iron_ingot" && state.input.length < 4) {
       state.recipeId = "form_iron_plate";
+      state.input.push(item);
+      return true;
+    }
+    if (machine.type === "crusher" && item === "limestone" && state.input.length < 8) {
+      state.recipeId = "crush_construction_block";
       state.input.push(item);
       return true;
     }

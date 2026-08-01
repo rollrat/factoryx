@@ -11,6 +11,7 @@ import { animateSmelterModel } from "./models/smelter";
 import { animateAssemblerModel } from "./models/assembler";
 import { animateStorageModel } from "./models/storage";
 import { animateLogisticsModel } from "./models/logistics";
+import { animateCrusherModel } from "./models/crusher";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildRuntimeTopology } from "./telemetry/topology.ts";
@@ -267,6 +268,9 @@ export class FactoryRuntime {
     const copperPatch = createOrePatch(this.materials, true);
     copperPatch.position.set(7.5, 0, 4.5);
     this.scene.add(copperPatch);
+    const limestonePatch = createOrePatch(this.materials, false, true);
+    limestonePatch.position.set(-6.5, 0, 7.5);
+    this.scene.add(limestonePatch);
     this.scene.add(this.hoverTile);
   }
 
@@ -736,6 +740,7 @@ export class FactoryRuntime {
       "6": "storage",
       "7": "splitter",
       "8": "merger",
+      "9": "crusher",
       x: "demolish",
     };
     if (tools[key]) this.setTool(tools[key]);
@@ -833,6 +838,19 @@ export class FactoryRuntime {
       }
       if (data.type === "smelter") {
         animateSmelterModel(group, {
+          time: machineTime,
+          delta,
+          progress: state?.progress ?? 0,
+          activity,
+          working: state?.working ?? false,
+          inputCount: state?.input.length ?? 0,
+          outputQueued,
+          inputConnected: hasInputConnection,
+          outputConnected: hasOutputConnection,
+        });
+      }
+      if (data.type === "crusher") {
+        animateCrusherModel(group, {
           time: machineTime,
           delta,
           progress: state?.progress ?? 0,

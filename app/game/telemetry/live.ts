@@ -8,9 +8,12 @@ export type BeltRuntimeState = "moving" | "jammed" | "idle";
 
 export const LEGACY_BUILDING_IDS = {
   belt: "conveyor_mk1",
+  splitter: "splitter",
+  merger: "merger",
   miner: "vein_miner",
   smelter: "arc_smelter",
   assembler: "hydraulic_former",
+  crusher: "crusher",
   storage: "small_storage",
 } as const satisfies Record<BuildType, BuildingId>;
 
@@ -20,6 +23,8 @@ export const LEGACY_ITEM_IDS = {
   iron_ingot: "iron_ingot",
   copper_ingot: "copper_ingot",
   iron_plate: "iron_plate",
+  limestone: "limestone",
+  construction_block: "construction_block",
 } as const satisfies Record<ItemType, string>;
 
 export type RuntimeStateCounts = Readonly<Record<LiveRuntimeState, number>>;
@@ -91,7 +96,10 @@ type MutableMachineTypeTelemetry = {
   progressTotal: number;
 };
 
-const MACHINE_TYPES: readonly MachineType[] = ["miner", "smelter", "assembler", "storage"];
+const MACHINE_TYPES: readonly MachineType[] = ["miner", "smelter", "crusher", "assembler", "storage"];
+const isTelemetryMachine = (type: BuildType): type is MachineType => (
+  type === "miner" || type === "smelter" || type === "crusher" || type === "assembler" || type === "storage"
+);
 
 const emptyStateCounts = (): Record<LiveRuntimeState, number> => ({
   working: 0,
@@ -127,10 +135,10 @@ export const buildLiveTelemetry = (
   simulation: Pick<FactorySimulation, "structures" | "machines" | "beltItems" | "hasInputConnection" | "hasOutputConnection">,
   options: LiveTelemetryOptions = {},
 ): LiveFactoryTelemetry => {
-  const ids: Record<BuildType, BuildingId> = {
+  const ids = {
     ...LEGACY_BUILDING_IDS,
     ...options.buildingIdByType,
-  };
+  } as Record<BuildType, BuildingId>;
   const beltJamProgress = options.beltJamProgress ?? 0.979;
   if (!Number.isFinite(beltJamProgress) || beltJamProgress < 0 || beltJamProgress > 1) {
     throw new RangeError("beltJamProgress must be between zero and one");
@@ -156,7 +164,7 @@ export const buildLiveTelemetry = (
   };
 
   for (const [structureId, structure] of simulation.structures) {
-    if (structure.type === "belt") continue;
+    if (!isTelemetryMachine(structure.type)) continue;
     const machine = simulation.machines.get(structureId);
     if (!machine) continue;
     const type = structure.type;

@@ -9,6 +9,7 @@ export type Tool =
   | "merger"
   | "miner"
   | "smelter"
+  | "crusher"
   | "assembler"
   | "storage"
   | "demolish";
