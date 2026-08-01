@@ -19,6 +19,7 @@ const fluidDelivery = (itemId: string, amount: number, portId = "fluid_in") => (
 export const START_PROJECT_STAGES = [
   {
     id: "phase_1_settlement_package",
+    completionUnlockId: "phase_1_complete",
     prerequisiteIds: [],
     deliveries: [
       solidDelivery("iron_plate", 120, "phase1_plate_in"),
@@ -39,6 +40,7 @@ export const START_PROJECT_STAGES = [
   },
   {
     id: "phase_2_industrial_power_node",
+    completionUnlockId: "phase_2_complete",
     prerequisiteIds: ["phase_1_settlement_package"],
     deliveries: [
       solidDelivery("steel_billet", 160, "phase1_plate_in"),
@@ -60,6 +62,7 @@ export const START_PROJECT_STAGES = [
   },
   {
     id: "phase_3_automation_core",
+    completionUnlockId: "phase_3_complete",
     prerequisiteIds: ["phase_2_industrial_power_node"],
     deliveries: [solidDelivery("automation_core", 120, "phase1_plate_in")],
     rewards: {
@@ -89,6 +92,7 @@ export const START_PROJECT_STAGES = [
   },
   {
     id: "phase_4_chemistry_stabilization",
+    completionUnlockId: "chemistry_stable",
     prerequisiteIds: ["phase_3_automation_core"],
     deliveries: [
       solidDelivery("polymer_resin", 200, "phase1_plate_in"),
@@ -113,6 +117,7 @@ export const START_PROJECT_STAGES = [
   },
   {
     id: "phase_4_thermal_management_verification",
+    completionUnlockId: "thermal_verified",
     prerequisiteIds: ["phase_4_chemistry_stabilization"],
     deliveries: [
       solidDelivery("advanced_control_board", 20, "phase1_plate_in"),

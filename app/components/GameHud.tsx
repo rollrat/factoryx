@@ -384,7 +384,7 @@ export default function GameHud({
       <button className="lineage-launch-button instrument-panel" onClick={onLineageToggle} aria-label="공장 전체 생산 계보 열기">
         <span>⌘</span>
         <strong>생산 계보</strong>
-        <kbd>TAB</kbd>
+        <kbd>G</kbd>
       </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>

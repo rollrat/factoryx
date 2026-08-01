@@ -6,6 +6,7 @@ import { createAssemblerModel } from "./models/assembler";
 import { createStorageModel } from "./models/storage";
 import { createMergerModel, createSplitterModel } from "./models/logistics";
 import { createCrusherModel } from "./models/crusher";
+import { createRegisteredItemModel } from "./models/item";
 
 export type FactoryMaterials = ReturnType<typeof createFactoryMaterials>;
 
@@ -151,57 +152,5 @@ export const createOrePatch = (materials: FactoryMaterials, copper = false, lime
 };
 
 export const createItemModel = (type: ItemType, materials: FactoryMaterials) => {
-  const group = new THREE.Group();
-  if (type === "iron_ore" || type === "copper_ore" || type === "limestone") {
-    const fragments = [
-      [-0.09, 0, 0, 0.15],
-      [0.08, 0.03, 0.03, 0.12],
-      [0, 0.06, -0.07, 0.1],
-    ];
-    fragments.forEach(([x, y, z, size]) => {
-      const fragment = new THREE.Mesh(
-        new THREE.OctahedronGeometry(size, 0),
-        type === "copper_ore" ? materials.copper : type === "limestone" ? materials.limestone : materials.ore,
-      );
-      fragment.position.set(x, y, z);
-      fragment.castShadow = true;
-      group.add(fragment);
-    });
-  }
-  if (type === "iron_ingot" || type === "copper_ingot") {
-    const ingot = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.17, 0.34, 4),
-      type === "copper_ingot" ? materials.copper : materials.pale,
-    );
-    ingot.rotation.z = Math.PI / 2;
-    ingot.castShadow = true;
-    group.add(ingot);
-    addBox(group, [0.05, 0.19, 0.19], [0, 0, 0], materials.amber, false);
-  }
-  if (type === "iron_plate") {
-    addBox(group, [0.34, 0.07, 0.24], [0, 0.02, 0], materials.pale);
-    addBox(group, [0.27, 0.025, 0.17], [0, 0.065, 0], materials.steel, false);
-  }
-  if (type === "iron_rod") {
-    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.38, 8), materials.pale);
-    rod.rotation.z = Math.PI / 2;
-    rod.castShadow = true;
-    group.add(rod);
-    addBox(group, [0.05, 0.13, 0.13], [0, 0, 0], materials.orange, false);
-  }
-  if (type === "fastener_pack") {
-    addBox(group, [0.28, 0.18, 0.22], [0, 0.07, 0], materials.dark);
-    for (const x of [-0.075, 0, 0.075]) {
-      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.24, 6), materials.pale);
-      pin.position.set(x, 0.14, 0);
-      pin.rotation.x = Math.PI / 2;
-      group.add(pin);
-    }
-  }
-  if (type === "construction_block") {
-    addBox(group, [0.3, 0.18, 0.24], [0, 0.07, 0], materials.limestone);
-    addBox(group, [0.22, 0.025, 0.16], [0, 0.175, 0], materials.pale, false);
-    addBox(group, [0.035, 0.2, 0.035], [0.1, 0.08, 0.07], materials.orange, false);
-  }
-  return group;
+  return createRegisteredItemModel(type, materials);
 };

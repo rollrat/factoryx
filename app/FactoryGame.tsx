@@ -33,6 +33,14 @@ const INITIAL_PROJECT: ProjectHudState = {
   ],
 };
 
+const isTextEntryTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable
+    || target.tagName === "INPUT"
+    || target.tagName === "TEXTAREA"
+    || target.tagName === "SELECT";
+};
+
 const topologyForOverlay = (topology: RuntimeTopology) => ({
   graph: {
     title: topology.graph.title,
@@ -117,18 +125,30 @@ export default function FactoryGame() {
 
   useEffect(() => {
     const handleLineageKey = (event: KeyboardEvent) => {
-      if (event.key === "Tab") {
+      if (event.key === "Escape") {
+        setLineageOpen(false);
+        return;
+      }
+      if (
+        event.key.toLowerCase() === "g"
+        && !event.ctrlKey
+        && !event.metaKey
+        && !event.altKey
+        && !isTextEntryTarget(event.target)
+      ) {
         event.preventDefault();
         if (event.repeat) return;
         if (document.pointerLockElement) document.exitPointerLock();
         setLineageOpen((open) => !open);
-      } else if (event.key === "Escape") {
-        setLineageOpen(false);
       }
     };
     window.addEventListener("keydown", handleLineageKey);
     return () => window.removeEventListener("keydown", handleLineageKey);
   }, []);
+
+  useEffect(() => {
+    runtimeRef.current?.setInputLocked(lineageOpen);
+  }, [lineageOpen]);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
   const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();

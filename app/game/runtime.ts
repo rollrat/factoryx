@@ -107,6 +107,8 @@ export class FactoryRuntime {
   private beltPreviewCells: Array<Cell & { rotation: number }> = [];
   private beltBuildSignature = "";
   private panning = false;
+  private capturedPointerId: number | null = null;
+  private inputLocked = false;
   private panOrigin = { x: 0, y: 0 };
   private pointerDown = { x: 0, y: 0 };
   private cameraAngle = Math.PI * 0.25;
@@ -168,6 +170,7 @@ export class FactoryRuntime {
   }
 
   setTool(tool: Tool) {
+    if (this.inputLocked) return;
     this.activeTool = tool;
     this.callbacks.onToolChange(tool);
     this.beltStart = null;
@@ -180,6 +183,38 @@ export class FactoryRuntime {
     this.updateGhost();
   }
 
+  /** Suspends every world/camera command while a modal UI owns player input. */
+  setInputLocked(locked: boolean) {
+    if (this.inputLocked === locked) return;
+    this.inputLocked = locked;
+    this.pressed.clear();
+    this.playerVelocity.set(0, 0, 0);
+
+    if (locked) {
+      if (this.capturedPointerId !== null && this.renderer.domElement.hasPointerCapture(this.capturedPointerId)) {
+        this.renderer.domElement.releasePointerCapture(this.capturedPointerId);
+      }
+      this.capturedPointerId = null;
+      this.panning = false;
+      this.beltStart = null;
+      if (this.beltPreview) this.scene.remove(this.beltPreview);
+      this.beltPreview = null;
+      this.beltPreviewCells = [];
+      this.clearGhost();
+      this.hoverTile.visible = false;
+      this.updateBeltBuildInfo(false);
+      if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+      this.renderer.domElement.style.cursor = "default";
+      return;
+    }
+
+    this.hoverTile.visible = this.cameraMode === "overview";
+    this.renderer.domElement.style.cursor = this.cameraMode === "firstPerson"
+      ? "crosshair"
+      : this.activeTool === "demolish" ? "not-allowed" : this.activeTool === "inspect" ? "default" : "crosshair";
+    if (this.cameraMode === "overview") this.updateGhost();
+  }
+
   getLiveTelemetry() {
     return buildLiveTelemetry(this.simulation);
   }
@@ -189,6 +224,7 @@ export class FactoryRuntime {
   }
 
   toggleCameraMode() {
+    if (this.inputLocked) return;
     if (this.cameraMode === "overview") {
       this.cameraMode = "firstPerson";
       this.setTool("inspect");
@@ -648,6 +684,7 @@ export class FactoryRuntime {
   }
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this.inputLocked) return;
     if (this.cameraMode === "firstPerson") return;
     if (this.panning) {
       const dx = event.clientX - this.panOrigin.x;
@@ -671,6 +708,7 @@ export class FactoryRuntime {
   };
 
   private onPointerDown = (event: PointerEvent) => {
+    if (this.inputLocked) return;
     this.renderer.domElement.focus();
     if (this.cameraMode === "firstPerson") {
       if (event.button === 0 && document.pointerLockElement !== this.renderer.domElement) {
@@ -681,6 +719,7 @@ export class FactoryRuntime {
     this.pointerDown = { x: event.clientX, y: event.clientY };
     if (event.button === 1 || (event.button === 0 && event.altKey)) {
       this.panning = true;
+      this.capturedPointerId = event.pointerId;
       this.panOrigin = { x: event.clientX, y: event.clientY };
       this.renderer.domElement.setPointerCapture(event.pointerId);
       this.renderer.domElement.style.cursor = "grabbing";
@@ -692,20 +731,27 @@ export class FactoryRuntime {
     if (cell) this.currentCell = cell;
     if (this.activeTool === "belt") {
       this.beltStart = { ...this.currentCell };
+      this.capturedPointerId = event.pointerId;
       this.renderer.domElement.setPointerCapture(event.pointerId);
       this.updateBeltPreview(this.currentCell, event.shiftKey);
     }
   };
 
   private onPointerUp = (event: PointerEvent) => {
+    if (this.inputLocked) return;
     if (this.cameraMode === "firstPerson") return;
     if (this.panning) {
       this.panning = false;
       this.renderer.domElement.releasePointerCapture(event.pointerId);
+      this.capturedPointerId = null;
       this.setTool(this.activeTool);
       return;
     }
     if (event.button !== 0) return;
+    if (this.renderer.domElement.hasPointerCapture(event.pointerId)) {
+      this.renderer.domElement.releasePointerCapture(event.pointerId);
+    }
+    this.capturedPointerId = null;
     const cell = this.pointerToCell(event);
     if (cell) this.currentCell = cell;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
@@ -742,12 +788,14 @@ export class FactoryRuntime {
   };
 
   private onWheel = (event: WheelEvent) => {
+    if (this.inputLocked) return;
     event.preventDefault();
     if (this.cameraMode === "firstPerson") return;
     this.cameraZoom = THREE.MathUtils.clamp(this.cameraZoom * Math.exp(-event.deltaY * 0.001), 0.72, 2.2);
   };
 
   private onContextMenu = (event: MouseEvent) => {
+    if (this.inputLocked) return;
     event.preventDefault();
     if (this.cameraMode === "firstPerson") return;
     this.setTool("inspect");
@@ -755,6 +803,7 @@ export class FactoryRuntime {
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
+    if (this.inputLocked) return;
     const key = event.key.toLowerCase();
     if (event.repeat && !["w", "a", "s", "d"].includes(key)) return;
     this.pressed.add(key);
@@ -808,6 +857,7 @@ export class FactoryRuntime {
   };
 
   private onFirstPersonLook = (event: MouseEvent) => {
+    if (this.inputLocked) return;
     if (this.cameraMode !== "firstPerson" || document.pointerLockElement !== this.renderer.domElement) return;
     this.firstPersonYaw -= event.movementX * 0.0022;
     this.firstPersonPitch -= event.movementY * 0.002;

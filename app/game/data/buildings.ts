@@ -82,7 +82,7 @@ const straightSolidPorts = (acceptedIn: readonly ItemId[], acceptedOut: readonly
   solid("solid_out", "output", sizeX, 0, sizeX / 2, -0.5, 1, acceptedOut),
 ] as const;
 
-const consumerPower = (sizeX: number, z = 1) => power("power_in", "input", "power_local", Math.max(0, sizeX - 1), z, sizeX / 2 - 0.5, z - 0.5, 1);
+const consumerPower = (sizeX: number, z = 1) => power("power_in", "input", "power_local", sizeX, z, sizeX / 2, z - 0.5, 1);
 
 const cost = (...entries: ReadonlyArray<readonly [ItemId, number]>) =>
   entries.map(([itemId, amount]) => ({ itemId, amount }));

@@ -161,6 +161,13 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
       if (!expectedProfile[port.medium].includes(port.connectorProfile)) {
         issues.push({ code: "port_medium_mismatch", path: `${portPath}.connectorProfile`, message: `${port.connectorProfile} cannot carry ${port.medium}` });
       }
+      const outsideFootprint = port.connectionCell.x < 0
+        || port.connectionCell.z < 0
+        || port.connectionCell.x >= building.footprint.x
+        || port.connectionCell.z >= building.footprint.z;
+      if (!outsideFootprint) {
+        issues.push({ code: "port_inside_footprint", path: `${portPath}.connectionCell`, message: `${building.id}.${port.id} must connect outside the occupied footprint` });
+      }
       port.acceptedItemIds.forEach((itemId, acceptedIndex) => {
         const item = items.get(itemId);
         if (!item) {
@@ -248,6 +255,8 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
 
   source.projectStages.forEach((stage, stageIndex) => {
     const basePath = `projectStages[${stageIndex}]`;
+    if (stage.completionUnlockId) checkUnlock(stage.completionUnlockId, `${basePath}.completionUnlockId`);
+    const completionRank = stage.completionUnlockId ? unlockRank.get(stage.completionUnlockId) : undefined;
     stage.prerequisiteIds.forEach((stageId, prerequisiteIndex) => {
       if (!stages.has(stageId)) issues.push({ code: "missing_stage", path: `${basePath}.prerequisiteIds[${prerequisiteIndex}]`, message: `Unknown project stage: ${stageId}` });
     });
@@ -266,11 +275,19 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
       const expectedCommit = delivery.medium === "solid" ? "solid_lock_complete" : "fluid_accepted_per_tick";
       if (delivery.commitPolicy !== expectedCommit) issues.push({ code: "commit_policy_mismatch", path: `${deliveryPath}.commitPolicy`, message: `${delivery.medium} deliveries require ${expectedCommit}` });
       if (stage.dockPowerMode === "manual" && delivery.medium === "fluid") issues.push({ code: "manual_fluid_delivery", path: deliveryPath, message: "Manual dock stages cannot accept fluid" });
+      const deliveryRank = item ? unlockRank.get(item.unlockId) : undefined;
+      if (completionRank !== undefined && deliveryRank !== undefined && deliveryRank >= completionRank) {
+        issues.push({ code: "project_self_reward", path: `${deliveryPath}.itemId`, message: `${stage.id} requires ${delivery.itemId} before it becomes available` });
+      }
     });
     (["resourceIds", "itemIds", "recipeIds", "buildingIds"] as const).forEach((key) => {
       const lookup = key === "resourceIds" || key === "itemIds" ? items : key === "recipeIds" ? recipes : buildings;
       (stage.rewards[key] ?? []).forEach((id, rewardIndex) => {
         if (!lookup.has(id)) issues.push({ code: "missing_reward", path: `${basePath}.rewards.${key}[${rewardIndex}]`, message: `Unknown reward: ${id}` });
+        const definition = lookup.get(id);
+        if (stage.completionUnlockId && definition && "unlockId" in definition && definition.unlockId !== stage.completionUnlockId) {
+          issues.push({ code: "reward_unlock_mismatch", path: `${basePath}.rewards.${key}[${rewardIndex}]`, message: `${id} does not unlock at ${stage.completionUnlockId}` });
+        }
       });
     });
     if (stage.dockPowerMode === "powered" && (stage.requiredPowerMW ?? 0) <= 0) {
@@ -281,6 +298,15 @@ export function validateDefinitions(source: DefinitionSource): ValidationIssue[]
         issues.push({ code: "invalid_construction_credit", path: `${basePath}.rewards.constructionCredits.${creditId}`, message: "Construction credits must be positive" });
       }
     });
+  });
+
+  const completionUnlockOwners = new Map<UnlockId, string>();
+  source.projectStages.forEach((stage, index) => {
+    if (!stage.completionUnlockId) return;
+    const owner = completionUnlockOwners.get(stage.completionUnlockId);
+    if (owner) {
+      issues.push({ code: "duplicate_completion_unlock", path: `projectStages[${index}].completionUnlockId`, message: `${stage.completionUnlockId} is already granted by ${owner}` });
+    } else completionUnlockOwners.set(stage.completionUnlockId, stage.id);
   });
 
   const stageVisiting = new Set<string>();

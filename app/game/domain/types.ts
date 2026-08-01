@@ -25,11 +25,34 @@ export type LocalPosition = Readonly<{ x: number; y: number; z: number }>;
 export type ItemUnit = "item" | "m3";
 export type ItemGeometryType =
   | "ore_chunk"
+  | "crystal_cluster"
   | "ingot"
   | "plate"
   | "rod"
+  | "rod_bundle"
   | "block"
+  | "parts_pack"
   | "wire_coil"
+  | "billet"
+  | "gear_set"
+  | "coil"
+  | "motor"
+  | "frame"
+  | "circuit_board"
+  | "core"
+  | "resin_pellet"
+  | "sheet"
+  | "powder"
+  | "sensor"
+  | "electrode"
+  | "case"
+  | "beam"
+  | "power_cell"
+  | "actuator"
+  | "shell"
+  | "component"
+  | "module"
+  | "seed"
   | "mechanical_part"
   | "electronic_part"
   | "container"
@@ -57,7 +80,7 @@ export type ItemDefinition = Readonly<{
   unit: ItemUnit;
   unlockId: UnlockId;
   milestoneId?: string;
-  defaultColor: number;
+  defaultColor: number | `#${string}`;
   geometryType: ItemGeometryType;
   stackSize: number;
   modelKey: string;
@@ -176,6 +199,7 @@ export type ProjectDeliveryDefinition = Readonly<{
 
 export type ProjectStageDefinition = Readonly<{
   id: ProjectStageId;
+  completionUnlockId?: UnlockId;
   prerequisiteIds: readonly ProjectStageId[];
   deliveries: readonly ProjectDeliveryDefinition[];
   rewards: Readonly<{
