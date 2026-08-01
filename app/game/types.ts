@@ -1,4 +1,6 @@
 import type { MachineRuntimeState } from "./sim/contracts.ts";
+import type { RuntimeItemId } from "./recipes/runtimeRecipes.ts";
+import type { RecipeId } from "./domain/types.ts";
 
 export type Tool =
   | "inspect"
@@ -13,7 +15,7 @@ export type CameraMode = "overview" | "firstPerson";
 
 export type BuildType = Exclude<Tool, "inspect" | "demolish">;
 export type MachineType = Exclude<BuildType, "belt">;
-export type ItemType = "ore" | "ingot" | "component";
+export type ItemType = RuntimeItemId;
 
 export type StructureData = {
   id: number;
@@ -34,6 +36,7 @@ export type MachinePorts = {
 };
 
 export type MachineState = {
+  recipeId: RecipeId | null;
   input: ItemType[];
   output: ItemType[];
   progress: number;
@@ -41,6 +44,7 @@ export type MachineState = {
   activity: number;
   animationTime: number;
   stored: number;
+  storedItems: ItemType[];
   intakePulse: number;
 };
 
@@ -71,6 +75,8 @@ export type SelectedInfo = {
   status: string;
   runtimeState?: MachineRuntimeState;
   recipeName?: string;
+  inputItems?: readonly Readonly<{ itemId: ItemType; name: string; amount: number }>[];
+  outputItems?: readonly Readonly<{ itemId: ItemType; name: string; amount: number }>[];
   progress: number;
   inputCount: number;
   inputCapacity?: number;

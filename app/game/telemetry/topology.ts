@@ -65,15 +65,12 @@ const NEXT_TYPE: Partial<Record<MachineType, MachineType>> = {
   smelter: "assembler",
   assembler: "storage",
 };
-const OUTPUT_ITEM: Partial<Record<MachineType, ItemType>> = {
-  miner: "ore",
-  smelter: "ingot",
-  assembler: "component",
-};
 const ITEM_INFO: Record<ItemType, Readonly<{ id: string; label: string; column: number }>> = {
-  ore: { id: "iron_ore", label: "철광석", column: 1 },
-  ingot: { id: "iron_ingot", label: "철 주괴", column: 3 },
-  component: { id: "fastener_pack", label: "체결재 팩", column: 5 },
+  iron_ore: { id: "iron_ore", label: "철광석", column: 1 },
+  copper_ore: { id: "copper_ore", label: "구리광석", column: 1 },
+  iron_ingot: { id: "iron_ingot", label: "철 주괴", column: 3 },
+  copper_ingot: { id: "copper_ingot", label: "구리 주괴", column: 3 },
+  iron_plate: { id: "iron_plate", label: "철판", column: 5 },
 };
 const RATE_PER_MINUTE: Record<Exclude<MachineType, "storage">, number> = {
   miner: 60 / 2.1,
@@ -146,6 +143,17 @@ const runtimeStateFor = (simulation: FactorySimulation, structure: StructureData
   };
 };
 
+const outputItemFor = (simulation: FactorySimulation, structure: StructureData & { type: MachineType }): ItemType | null => {
+  if (structure.type === "miner") return structure.x === 7 && structure.z === 4 ? "copper_ore" : "iron_ore";
+  if (structure.type === "assembler") return "iron_plate";
+  if (structure.type === "smelter") {
+    return simulation.machines.get(structure.id)?.recipeId === "smelt_copper_ingot"
+      ? "copper_ingot"
+      : "iron_ingot";
+  }
+  return null;
+};
+
 /** Builds the graph from placed structure instances and their current belt paths only. */
 export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopology {
   const structures = [...simulation.structures.values()];
@@ -155,10 +163,17 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
   const usedItems = new Set<ItemType>();
 
   machines.forEach((structure) => {
-    if (structure.type === "miner") usedItems.add("ore");
-    if (structure.type === "smelter") { usedItems.add("ore"); usedItems.add("ingot"); }
-    if (structure.type === "assembler") { usedItems.add("ingot"); usedItems.add("component"); }
-    if (structure.type === "storage") usedItems.add("component");
+    if (structure.type === "miner") {
+      const item = structure.x === 7 && structure.z === 4 ? "copper_ore" : "iron_ore";
+      usedItems.add(item);
+    }
+    if (structure.type === "smelter") {
+      const copper = simulation.machines.get(structure.id)?.recipeId === "smelt_copper_ingot";
+      usedItems.add(copper ? "copper_ore" : "iron_ore");
+      usedItems.add(copper ? "copper_ingot" : "iron_ingot");
+    }
+    if (structure.type === "assembler") { usedItems.add("iron_ingot"); usedItems.add("iron_plate"); }
+    if (structure.type === "storage") usedItems.add("iron_plate");
     const runtime = runtimeStateFor(simulation, structure);
     const id = machineNodeId(structure.id);
     nodes.push({
@@ -177,11 +192,19 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
     nodeStates[id] = { ...runtime, actualRatePerMinute };
   });
 
-  const stockByItem: Record<ItemType, number> = { ore: 0, ingot: 0, component: 0 };
+  const stockByItem: Record<ItemType, number> = {
+    iron_ore: 0,
+    copper_ore: 0,
+    iron_ingot: 0,
+    copper_ingot: 0,
+    iron_plate: 0,
+  };
   simulation.machines.forEach((state, structureId) => {
     state.input.forEach((item) => { stockByItem[item] += 1; });
     state.output.forEach((item) => { stockByItem[item] += 1; });
-    if (simulation.structures.get(structureId)?.type === "storage") stockByItem.component += state.stored;
+    if (simulation.structures.get(structureId)?.type === "storage") {
+      state.storedItems.forEach((item) => { stockByItem[item] += 1; });
+    }
   });
   simulation.beltItems.forEach((item) => { stockByItem[item.type] += 1; });
   [...usedItems].forEach((item, order) => {
@@ -208,7 +231,7 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
   const edges: RuntimeTopologyEdge[] = [];
   machines.forEach((source) => {
     const targetType = NEXT_TYPE[source.type];
-    const outputItem = OUTPUT_ITEM[source.type];
+    const outputItem = outputItemFor(simulation, source);
     if (!targetType || !outputItem) return;
     const target = findTarget(machines, source, targetType);
     if (!target) return;

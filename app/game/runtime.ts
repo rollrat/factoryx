@@ -793,7 +793,7 @@ export class FactoryRuntime {
         + 2 * inverse * progress * belt.z
         + progress * progress * endZ;
       mesh.position.set(x, 0.48, z);
-      mesh.rotation.y += delta * (item.type === "ore" ? 1.2 : item.type === "component" ? 2.2 : 0.35);
+      mesh.rotation.y += delta * (item.type.endsWith("_ore") ? 1.2 : item.type === "iron_plate" ? 2.2 : 0.35);
     });
     this.itemMeshes.forEach((mesh, id) => {
       if (activeItemIds.has(id)) return;

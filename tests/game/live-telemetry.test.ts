@@ -18,10 +18,11 @@ test("live telemetry aggregates machine states, belts, inventory, and progress",
   simulation.addStructure({ id: 10, type: "belt", x: 44, z: 0, rotation: 1 });
 
   Object.assign(simulation.machines.get(1)!, { working: true, progress: 0.4 });
-  simulation.machines.get(4)!.output.push("component");
+  simulation.machines.get(4)!.output.push("iron_plate");
+  simulation.machines.get(6)!.storedItems.push(...Array.from({ length: 20 }, () => "iron_plate" as const));
   simulation.machines.get(6)!.stored = 20;
-  simulation.beltItems.set(8, { id: 100, type: "ore", progress: 0.5 });
-  simulation.beltItems.set(9, { id: 101, type: "ingot", progress: 0.98 });
+  simulation.beltItems.set(8, { id: 100, type: "iron_ore", progress: 0.5 });
+  simulation.beltItems.set(9, { id: 101, type: "iron_ingot", progress: 0.98 });
 
   const snapshot = buildLiveTelemetry(simulation);
 

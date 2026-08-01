@@ -15,9 +15,11 @@ export const LEGACY_BUILDING_IDS = {
 } as const satisfies Record<BuildType, BuildingId>;
 
 export const LEGACY_ITEM_IDS = {
-  ore: "iron_ore",
-  ingot: "iron_ingot",
-  component: "fastener_pack",
+  iron_ore: "iron_ore",
+  copper_ore: "copper_ore",
+  iron_ingot: "iron_ingot",
+  copper_ingot: "copper_ingot",
+  iron_plate: "iron_plate",
 } as const satisfies Record<ItemType, string>;
 
 export type RuntimeStateCounts = Readonly<Record<LiveRuntimeState, number>>;
@@ -176,7 +178,7 @@ export const buildLiveTelemetry = (
     };
     machine.input.forEach((item) => addItemStock(item));
     machine.output.forEach((item) => addItemStock(item));
-    if (type === "storage" && machine.stored > 0) addItemStock("component", machine.stored);
+    if (type === "storage") machine.storedItems.forEach((item) => addItemStock(item));
     machines.push(telemetry);
     stateCounts[runtimeState] += 1;
     const aggregate = mutableByType[type];

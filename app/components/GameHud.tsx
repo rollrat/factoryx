@@ -22,6 +22,8 @@ type SelectedDetails = NonNullable<SelectedInfo> & {
   recipeName?: string;
   inputCapacity?: number;
   outputCapacity?: number;
+  inputItems?: readonly Readonly<{ itemId: string; name: string; amount: number }>[];
+  outputItems?: readonly Readonly<{ itemId: string; name: string; amount: number }>[];
 };
 
 const getEquipmentStatus = (selected: SelectedDetails): EquipmentStatus => {
@@ -50,6 +52,43 @@ const STATUS_LABEL: Record<EquipmentStatus, string> = {
   storing: "저장 중",
   idle: "대기",
 };
+
+const itemSummary = (
+  items: SelectedDetails["inputItems"],
+  fallbackCount: number,
+) => items?.length
+  ? items.map((item) => `${item.name} ${item.amount}`).join(", ")
+  : `${fallbackCount}`;
+
+function FlowContents({
+  items,
+  count,
+  capacity,
+}: Readonly<{
+  items: SelectedDetails["inputItems"];
+  count: number;
+  capacity?: number;
+}>) {
+  if (items?.length) {
+    return (
+      <ul className="flow-items">
+        {items.map((item, index) => (
+          <li key={`${item.itemId}-${index}`} title={`${item.name} ${item.amount}`}>
+            <span>{item.name}</span>
+            <strong>×{Number.isFinite(item.amount) ? item.amount.toLocaleString("ko-KR") : 0}</strong>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <strong className="flow-count">
+      {count}
+      {capacity !== undefined ? <small> / {capacity}</small> : null}
+    </strong>
+  );
+}
 
 export default function GameHud({
   activeTool,
@@ -100,11 +139,11 @@ export default function GameHud({
         <div className="objective-readout instrument-panel">
           <span className="objective-index">목표 01</span>
           <div className="objective-copy">
-            <strong>조립품 생산</strong>
-            <span>채굴 → 제련 → 조립</span>
+            <strong>철판 생산</strong>
+            <span>철광석 → 철 주괴 → 철판</span>
           </div>
           <span className="objective-count"><b>{motors}</b> / 20</span>
-          <div className="objective-track" aria-label={`조립품 생산 진행률 ${motors}/20`}>
+          <div className="objective-track" aria-label={`철판 생산 진행률 ${motors}/20`}>
             <div style={{ width: `${objectiveProgress}%` }} />
           </div>
         </div>
@@ -150,23 +189,28 @@ export default function GameHud({
             </div>
           </div>
 
-          <div className="equipment-flow" aria-label={`입력 ${selected?.inputCount ?? 0}, 출력 ${selected?.outputCount ?? 0}`}>
+          <div
+            className="equipment-flow"
+            aria-label={`입력 ${itemSummary(selectedDetails?.inputItems, selected?.inputCount ?? 0)}, 출력 ${itemSummary(selectedDetails?.outputItems, selected?.outputCount ?? 0)}`}
+          >
             <div className="flow-node flow-input">
               <span>{selected?.type === "storage" ? "보관" : "입력"}</span>
-              <strong>
-                {selected?.inputCount ?? 0}
-                {selectedDetails?.inputCapacity !== undefined ? <small> / {selectedDetails.inputCapacity}</small> : null}
-              </strong>
+              <FlowContents
+                items={selectedDetails?.inputItems}
+                count={selected?.inputCount ?? 0}
+                capacity={selectedDetails?.inputCapacity}
+              />
             </div>
             <div className={`flow-path ${selectedStatus === "working" || selectedStatus === "storing" ? "active" : ""}`} aria-hidden="true">
               <i /><i /><i />
             </div>
             <div className="flow-node flow-output">
               <span>출력</span>
-              <strong>
-                {selected?.outputCount ?? 0}
-                {selectedDetails?.outputCapacity !== undefined ? <small> / {selectedDetails.outputCapacity}</small> : null}
-              </strong>
+              <FlowContents
+                items={selectedDetails?.outputItems}
+                count={selected?.outputCount ?? 0}
+                capacity={selectedDetails?.outputCapacity}
+              />
             </div>
           </div>
 

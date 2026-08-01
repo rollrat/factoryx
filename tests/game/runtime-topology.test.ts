@@ -59,7 +59,7 @@ test("seeded runtime topology contains only installed machines and their iron li
       .filter(({ kind }) => kind === "item")
       .map(({ id }) => id.replace(/^item:/, "")),
   );
-  assert.deepEqual(installedItems, new Set(["iron_ore", "iron_ingot", "fastener_pack"]));
+  assert.deepEqual(installedItems, new Set(["iron_ore", "iron_ingot", "iron_plate"]));
   assert.equal(installedItems.has("copper_ore"), false);
   assert.equal(installedItems.has("limestone"), false);
   assert.equal(snapshot.graph.nodes.some(({ buildingId }) => buildingId === "crusher"), false);

@@ -415,6 +415,8 @@ button {
 
 .flow-node {
   display: grid;
+  align-self: stretch;
+  align-content: start;
   gap: 5px;
   min-width: 0;
   padding: 7px 8px;
@@ -422,13 +424,13 @@ button {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.flow-node span {
+.flow-node > span {
   color: var(--muted);
   font: 700 7px/1 var(--font-geist-mono), monospace;
   letter-spacing: 0.1em;
 }
 
-.flow-node strong {
+.flow-node > strong {
   overflow: hidden;
   color: #e2e9e8;
   font: 750 13px/1 var(--font-geist-mono), monospace;
@@ -442,6 +444,52 @@ button {
 
 .flow-output {
   text-align: right;
+}
+
+.flow-items {
+  display: grid;
+  gap: 4px;
+  max-height: 76px;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-color: #536264 transparent;
+  scrollbar-width: thin;
+}
+
+.flow-items li {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 22px;
+  padding: 4px 5px;
+  border-left: 2px solid rgba(98, 215, 199, 0.58);
+  background: rgba(98, 215, 199, 0.065);
+}
+
+.flow-output .flow-items li {
+  border-right: 2px solid rgba(98, 215, 199, 0.58);
+  border-left: 0;
+}
+
+.flow-items span {
+  min-width: 0;
+  overflow: hidden;
+  color: #aab8b7;
+  font-size: 8px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-items strong {
+  flex: 0 0 auto;
+  color: #e1e9e8;
+  font: 760 8px/1 var(--font-geist-mono), monospace;
 }
 
 .flow-path {

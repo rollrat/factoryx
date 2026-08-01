@@ -11,7 +11,7 @@ export const TOOL_INFO: Array<{
   { id: "belt", name: "벨트", glyph: "≫", key: "2", cost: 8 },
   { id: "miner", name: "채굴기", glyph: "M", key: "3", cost: 120 },
   { id: "smelter", name: "제련기", glyph: "S", key: "4", cost: 180 },
-  { id: "assembler", name: "조립기", glyph: "A", key: "5", cost: 260 },
+  { id: "assembler", name: "성형기", glyph: "F", key: "5", cost: 260 },
   { id: "storage", name: "창고", glyph: "▣", key: "6", cost: 90 },
   { id: "demolish", name: "철거", glyph: "×", key: "X" },
 ];
@@ -28,7 +28,7 @@ export const TYPE_NAME: Record<BuildType, string> = {
   belt: "컨베이어 Mk.1",
   miner: "철 채굴기",
   smelter: "아크 제련기",
-  assembler: "정밀 조립기",
+  assembler: "유압 성형기",
   storage: "소형 저장고",
 };
 
@@ -38,7 +38,7 @@ export const TYPE_RATE: Record<BuildType, string> = {
   belt: "52 /분",
   miner: "24 /분",
   smelter: "18 /분",
-  assembler: "10 /분",
+  assembler: "30 /분",
   storage: `${STORAGE_CAPACITY} 슬롯`,
 };
 

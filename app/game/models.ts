@@ -145,45 +145,35 @@ export const createOrePatch = (materials: FactoryMaterials, copper = false) => {
 
 export const createItemModel = (type: ItemType, materials: FactoryMaterials) => {
   const group = new THREE.Group();
-  if (type === "ore") {
+  if (type === "iron_ore" || type === "copper_ore") {
     const fragments = [
       [-0.09, 0, 0, 0.15],
       [0.08, 0.03, 0.03, 0.12],
       [0, 0.06, -0.07, 0.1],
     ];
     fragments.forEach(([x, y, z, size]) => {
-      const fragment = new THREE.Mesh(new THREE.OctahedronGeometry(size, 0), materials.ore);
+      const fragment = new THREE.Mesh(
+        new THREE.OctahedronGeometry(size, 0),
+        type === "copper_ore" ? materials.copper : materials.ore,
+      );
       fragment.position.set(x, y, z);
       fragment.castShadow = true;
       group.add(fragment);
     });
   }
-  if (type === "ingot") {
-    const ingot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.17, 0.34, 4), materials.pale);
+  if (type === "iron_ingot" || type === "copper_ingot") {
+    const ingot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.17, 0.34, 4),
+      type === "copper_ingot" ? materials.copper : materials.pale,
+    );
     ingot.rotation.z = Math.PI / 2;
     ingot.castShadow = true;
     group.add(ingot);
     addBox(group, [0.05, 0.19, 0.19], [0, 0, 0], materials.amber, false);
   }
-  if (type === "component") {
-    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.22, 10), materials.cyan);
-    core.rotation.z = Math.PI / 2;
-    core.castShadow = true;
-    group.add(core);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.045, 6, 10), materials.steel);
-    ring.rotation.y = Math.PI / 2;
-    ring.castShadow = true;
-    group.add(ring);
-    for (let index = 0; index < 6; index += 1) {
-      const angle = (index / 6) * Math.PI * 2;
-      const tooth = addBox(
-        group,
-        [0.08, 0.07, 0.08],
-        [0, Math.sin(angle) * 0.2, Math.cos(angle) * 0.2],
-        materials.steel,
-      );
-      tooth.rotation.x = angle;
-    }
+  if (type === "iron_plate") {
+    addBox(group, [0.34, 0.07, 0.24], [0, 0.02, 0], materials.pale);
+    addBox(group, [0.27, 0.025, 0.17], [0, 0.065, 0], materials.steel, false);
   }
   return group;
 };

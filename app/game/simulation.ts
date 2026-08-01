@@ -8,13 +8,31 @@ import {
   sameDirection,
 } from "./config.ts";
 import { FixedStepClock } from "./sim/clock.ts";
+import { START_REGISTRY } from "./data/index.ts";
+import { getRuntimeRecipe, resolveRuntimeRecipe, type RuntimeRecipe } from "./recipes/runtimeRecipes.ts";
 import type { BeltItem, BuildType, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
 
-const PROCESS_TIME = {
-  miner: 2.1,
-  smelter: 2.7,
-  assembler: 3.4,
-} as const;
+const aggregateItems = (items: readonly ItemType[]) => {
+  const counts = new Map<ItemType, number>();
+  items.forEach((item) => counts.set(item, (counts.get(item) ?? 0) + 1));
+  return [...counts].map(([itemId, amount]) => ({
+    itemId,
+    name: START_REGISTRY.items.get(itemId)?.name ?? itemId,
+    amount,
+  }));
+};
+
+const hasRecipeInputs = (items: readonly ItemType[], recipe: RuntimeRecipe) =>
+  recipe.inputs.every(({ itemId, amount }) => items.filter((item) => item === itemId).length >= amount);
+
+const consumeRecipeInputs = (items: ItemType[], recipe: RuntimeRecipe) => {
+  recipe.inputs.forEach(({ itemId, amount }) => {
+    for (let removed = 0; removed < amount; removed += 1) {
+      const index = items.indexOf(itemId);
+      if (index >= 0) items.splice(index, 1);
+    }
+  });
+};
 
 export class FactorySimulation {
   readonly structures = new Map<number, StructureData>();
@@ -30,7 +48,13 @@ export class FactorySimulation {
     this.structures.set(data.id, { ...data });
     footprint(data.type, data.x, data.z).forEach((cell) => this.occupancy.set(cell, data.id));
     if (data.type !== "belt") {
+      const initialRecipe = data.type === "miner"
+        ? resolveRuntimeRecipe({ type: "miner", x: data.x, z: data.z })
+        : data.type === "assembler"
+          ? resolveRuntimeRecipe({ type: "assembler" })
+          : null;
       this.machines.set(data.id, {
+        recipeId: initialRecipe?.id ?? null,
         input: [],
         output: [],
         progress: 0,
@@ -38,6 +62,7 @@ export class FactorySimulation {
         activity: 0,
         animationTime: 0,
         stored: 0,
+        storedItems: [],
         intakePulse: 0,
       });
     }
@@ -95,7 +120,9 @@ export class FactorySimulation {
   getStoredComponents() {
     let total = 0;
     this.structures.forEach((data, id) => {
-      if (data.type === "storage") total += this.machines.get(id)?.stored ?? 0;
+      if (data.type === "storage") {
+        total += this.machines.get(id)?.storedItems.filter((item) => item === "iron_plate").length ?? 0;
+      }
     });
     return total;
   }
@@ -121,6 +148,7 @@ export class FactorySimulation {
     }
     const state = this.machines.get(id);
     if (!state) return null;
+    const recipe = state.recipeId ? getRuntimeRecipe(state.recipeId) : null;
     let status = "재료 대기";
     let runtimeState: NonNullable<SelectedInfo>["runtimeState"] = "starved";
     if (data.type === "storage") {
@@ -155,17 +183,13 @@ export class FactorySimulation {
       type: data.type,
       status,
       runtimeState,
-      recipeName: data.type === "miner"
-        ? "철광석 채굴"
-        : data.type === "smelter"
-          ? "철 주괴 제련"
-          : data.type === "assembler"
-            ? "조립품 제작"
-            : "품목 보관",
+      recipeName: recipe?.name ?? (data.type === "storage" ? "품목 보관" : "입력 품목 자동 선택"),
       progress: data.type === "storage" ? state.stored / STORAGE_CAPACITY : state.progress,
       inputCount: data.type === "storage" ? state.stored : state.input.length,
+      inputItems: aggregateItems(data.type === "storage" ? state.storedItems : state.input),
       inputCapacity: data.type === "storage" ? STORAGE_CAPACITY : data.type === "assembler" ? 4 : data.type === "smelter" ? 2 : 0,
       outputCount: state.output.length,
+      outputItems: aggregateItems(state.output),
       outputCapacity: data.type === "storage" ? STORAGE_CAPACITY : 1,
     };
   }
@@ -194,35 +218,24 @@ export class FactorySimulation {
         return;
       }
 
-      if (!state.working && state.output.length === 0) {
-        if (data.type === "miner") {
-          state.working = true;
-          state.progress = 0;
-        }
-        if (data.type === "smelter") {
-          const oreIndex = state.input.indexOf("ore");
-          if (oreIndex >= 0) {
-            state.input.splice(oreIndex, 1);
-            state.working = true;
-            state.progress = 0;
-          }
-        }
-        if (data.type === "assembler") {
-          const ingots = state.input.filter((item) => item === "ingot").length;
-          if (ingots >= 2) {
-            let removed = 0;
-            state.input = state.input.filter((item) => item !== "ingot" || removed++ >= 2);
-            state.working = true;
-            state.progress = 0;
-          }
-        }
+      let recipe = state.recipeId ? getRuntimeRecipe(state.recipeId) : null;
+      if (!recipe && data.type === "smelter" && state.input[0]) {
+        recipe = resolveRuntimeRecipe({ type: "smelter", inputItemId: state.input[0] });
+        state.recipeId = recipe?.id ?? null;
       }
 
-      if (state.working) {
-        state.progress += delta / PROCESS_TIME[data.type];
+      if (!state.working && state.output.length === 0 && recipe && hasRecipeInputs(state.input, recipe)) {
+        consumeRecipeInputs(state.input, recipe);
+        state.working = true;
+        state.progress = 0;
+      }
+
+      if (state.working && recipe) {
+        state.progress += delta / recipe.durationSeconds;
         if (state.progress >= 1) {
-          const output: ItemType = data.type === "miner" ? "ore" : data.type === "smelter" ? "ingot" : "component";
-          state.output.push(output);
+          recipe.outputs.forEach(({ itemId, amount }) => {
+            for (let produced = 0; produced < amount; produced += 1) state.output.push(itemId);
+          });
           state.progress = 0;
           state.working = false;
         }
@@ -290,15 +303,21 @@ export class FactorySimulation {
     const machine = this.structures.get(machineId);
     const state = this.machines.get(machineId);
     if (!machine || !state) return false;
-    if (machine.type === "smelter" && item === "ore" && state.input.length < 2) {
+    if (machine.type === "smelter" && state.input.length < 2) {
+      const recipe = resolveRuntimeRecipe({ type: "smelter", inputItemId: item });
+      if (!recipe || (state.recipeId && state.recipeId !== recipe.id
+        && (state.input.length > 0 || state.output.length > 0 || state.working))) return false;
+      state.recipeId = recipe.id;
       state.input.push(item);
       return true;
     }
-    if (machine.type === "assembler" && item === "ingot" && state.input.length < 4) {
+    if (machine.type === "assembler" && item === "iron_ingot" && state.input.length < 4) {
+      state.recipeId = "form_iron_plate";
       state.input.push(item);
       return true;
     }
-    if (machine.type === "storage" && item === "component" && state.stored < STORAGE_CAPACITY) {
+    if (machine.type === "storage" && state.stored < STORAGE_CAPACITY) {
+      state.storedItems.push(item);
       state.stored += 1;
       state.intakePulse = 1;
       return true;

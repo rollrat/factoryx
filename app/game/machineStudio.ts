@@ -129,18 +129,18 @@ export class MachineStudioRuntime {
     outputBelt.rotation.y = Math.PI / 2;
     this.addContext(outputBelt, ["miner", "smelter", "assembler"]);
 
-    const ore = createItemModel("ore", materials);
+    const ore = createItemModel("iron_ore", materials);
     ore.position.set(-1.55, 0.53, -0.5);
     this.addContext(ore, ["smelter"]);
 
-    const ingotA = createItemModel("ingot", materials);
+    const ingotA = createItemModel("iron_ingot", materials);
     ingotA.position.set(-1.55, 0.53, -0.5);
     this.addContext(ingotA, ["assembler"]);
-    const ingotB = createItemModel("ingot", materials);
+    const ingotB = createItemModel("iron_ingot", materials);
     ingotB.position.set(-1.55, 0.53, 0.5);
     this.addContext(ingotB, ["assembler"]);
 
-    const component = createItemModel("component", materials);
+    const component = createItemModel("iron_plate", materials);
     component.position.set(-1.55, 0.53, -0.5);
     this.addContext(component, ["storage"]);
 
