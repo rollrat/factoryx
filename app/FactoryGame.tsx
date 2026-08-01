@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { BuildCatalogDialog } from "./components/BuildCatalog";
 import GameHud, { type ProjectHudState } from "./components/GameHud";
+import ProjectProgressPanel from "./components/ProjectProgressPanel";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
 import { FactoryRuntime } from "./game/runtime";
 import type { BuildingDefinition, ItemId, UnlockId } from "./game/domain/types.ts";
+import type { CampaignSnapshot } from "./game/sim/campaign.ts";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
 
@@ -98,6 +100,7 @@ export default function FactoryGame({
   const [toastVisible, setToastVisible] = useState(true);
   const [lineageOpen, setLineageOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
   const [catalogBuildingId, setCatalogBuildingId] = useState<string | null>(null);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
@@ -106,6 +109,8 @@ export default function FactoryGame({
     unlockedIds,
     inventoryByItemId: inventoryByItemId ?? {},
   }));
+  const [campaignSnapshot, setCampaignSnapshot] = useState<CampaignSnapshot | null>(null);
+  const [dockSuppliedPowerMW, setDockSuppliedPowerMW] = useState(0);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -132,7 +137,13 @@ export default function FactoryGame({
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
-    const telemetryTimer = window.setInterval(() => setTopology(runtime.getProductionTopology()), 250);
+    setCampaignSnapshot(runtime.getCampaignSnapshot());
+    setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
+    const telemetryTimer = window.setInterval(() => {
+      setTopology(runtime.getProductionTopology());
+      setCampaignSnapshot(runtime.getCampaignSnapshot());
+      setDockSuppliedPowerMW(runtime.getDockSuppliedPowerMW());
+    }, 250);
     return () => {
       window.clearInterval(telemetryTimer);
       runtime.dispose();
@@ -146,6 +157,7 @@ export default function FactoryGame({
       if (event.key === "Escape") {
         setLineageOpen(false);
         setCatalogOpen(false);
+        setProjectOpen(false);
         return;
       }
       if (
@@ -155,20 +167,30 @@ export default function FactoryGame({
         && !event.altKey
         && !isTextEntryTarget(event.target)
         && !catalogOpen
+        && !projectOpen
       ) {
         event.preventDefault();
         if (event.repeat) return;
         if (document.pointerLockElement) document.exitPointerLock();
         setLineageOpen((open) => !open);
       }
+      if (
+        event.key.toLowerCase() === "p"
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !isTextEntryTarget(event.target)
+        && !lineageOpen && !catalogOpen
+      ) {
+        event.preventDefault();
+        if (!event.repeat) setProjectOpen((open) => !open);
+      }
     };
     window.addEventListener("keydown", handleLineageKey);
     return () => window.removeEventListener("keydown", handleLineageKey);
-  }, [catalogOpen]);
+  }, [catalogOpen, lineageOpen, projectOpen]);
 
   useEffect(() => {
-    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen);
-  }, [catalogOpen, lineageOpen]);
+    runtimeRef.current?.setInputLocked(lineageOpen || catalogOpen || projectOpen);
+  }, [catalogOpen, lineageOpen, projectOpen]);
 
   const chooseTool = (tool: Tool) => runtimeRef.current?.setTool(tool);
   const toggleCameraMode = () => runtimeRef.current?.toggleCameraMode();
@@ -202,13 +224,26 @@ export default function FactoryGame({
         onCameraModeChange={toggleCameraMode}
         onLineageToggle={() => {
           setCatalogOpen(false);
+          setProjectOpen(false);
           setLineageOpen((open) => !open);
         }}
         onBuildCatalogToggle={() => {
           setLineageOpen(false);
+          setProjectOpen(false);
           setCatalogOpen((open) => !open);
         }}
+        onProjectProgressToggle={() => {
+          setLineageOpen(false);
+          setCatalogOpen(false);
+          setProjectOpen((open) => !open);
+        }}
       />
+      {projectOpen && campaignSnapshot ? (
+        <div className="project-progress-overlay" role="dialog" aria-modal="true" aria-label="프로젝트 계약 진행 상황">
+          <button className="project-progress-close" type="button" onClick={() => setProjectOpen(false)} aria-label="프로젝트 진행 상황 닫기">닫기 <kbd>ESC</kbd></button>
+          <ProjectProgressPanel snapshot={campaignSnapshot} suppliedPowerMW={dockSuppliedPowerMW} />
+        </div>
+      ) : null}
       <BuildCatalogDialog
         open={catalogOpen}
         unlockedIds={constructionState.unlockedIds}

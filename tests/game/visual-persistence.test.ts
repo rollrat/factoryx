@@ -9,6 +9,7 @@ import {
 import { CampaignWorldRuntime } from "../../app/game/sim/campaignWorld.ts";
 import { START_REGISTRY } from "../../app/game/data/index.ts";
 import { CAMPAIGN_START_INVENTORY } from "../../app/game/data/campaign.ts";
+import { WorldProductionSimulation } from "../../app/game/sim/worldProduction.ts";
 
 const snapshot = (): FactoryRuntimeSnapshot => ({
   version: 1,
@@ -45,10 +46,12 @@ test("visual runtime save preserves the integrated world, campaign, and power sn
     constructionInventory: CAMPAIGN_START_INVENTORY,
   });
   campaignWorld.stepPower(1);
+  const worldProduction = new WorldProductionSimulation(campaignWorld.world);
   const integrated = {
     ...original,
     world: campaignWorld.world.snapshot(),
     campaignWorld: campaignWorld.snapshot(),
+    worldProduction: worldProduction.snapshot(),
   };
   const decoded = factoryRuntimeSaveCodec.decode(factoryRuntimeSaveCodec.encode(integrated, { nowMs: 20 }));
   assert.equal(decoded.ok, true);

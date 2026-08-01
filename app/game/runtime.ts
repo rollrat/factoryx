@@ -15,6 +15,11 @@ import { animateLogisticsModel } from "./models/logistics";
 import { animateCrusherModel } from "./models/crusher";
 import { animateGenericBuildingModel } from "./models/genericBuilding.ts";
 import {
+  animateConnectionModel,
+  createPortConnectionModel,
+  type ResolvedWorldPort,
+} from "./models/connection.ts";
+import {
   animateDistributionPoleModel,
   animateFieldPowerCoreModel,
   createDistributionPoleModel,
@@ -26,6 +31,7 @@ import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
 import type { DataDrivenWorld } from "./sim/world.ts";
 import { CampaignWorldRuntime, type PowerInstanceOverride } from "./sim/campaignWorld.ts";
+import { WorldProductionSimulation } from "./sim/worldProduction.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
@@ -93,9 +99,11 @@ export class FactoryRuntime {
   private readonly simulation: FactorySimulation;
   private readonly world: DataDrivenWorld;
   private readonly campaignWorld: CampaignWorldRuntime;
+  private readonly worldProduction: WorldProductionSimulation;
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
+  private readonly connectionGroups = new Map<string, THREE.Group>();
   private readonly history: HistoryEntry[] = [];
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -175,6 +183,7 @@ export class FactoryRuntime {
   private lastMotorCount = -1;
   private selectedUiClock = 0;
   private lastAutoSaveTime = 0;
+  private lastConnectionSyncTime = -1;
 
   constructor(
     private readonly mount: HTMLDivElement,
@@ -194,6 +203,7 @@ export class FactoryRuntime {
     this.world = this.campaignWorld.world;
     this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
     if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
+    this.worldProduction = new WorldProductionSimulation(this.world, restored?.worldProduction);
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -314,6 +324,14 @@ export class FactoryRuntime {
 
   getProductionTopology() {
     return buildRuntimeTopology(this.simulation);
+  }
+
+  getCampaignSnapshot() {
+    return this.campaignWorld.campaign.snapshot();
+  }
+
+  getDockSuppliedPowerMW() {
+    return this.campaignWorld.snapshot().dockSuppliedPowerMW;
   }
 
   toggleCameraMode() {
@@ -504,11 +522,13 @@ export class FactoryRuntime {
   }
 
   private snapshot(): FactoryRuntimeSnapshot {
+    const worldProduction = this.worldProduction.snapshot();
     return {
       version: 1,
       simulation: this.simulation.snapshot(),
       world: this.world.snapshot(),
       campaignWorld: this.campaignWorld.snapshot(),
+      worldProduction,
       credits: this.credits,
       nextId: this.nextId,
       cameraMode: this.cameraMode,
@@ -550,6 +570,51 @@ export class FactoryRuntime {
       unlockedIds: snapshot.unlockedIds,
       inventoryByItemId: Object.fromEntries(snapshot.constructionInventory.map(({ itemId, amount }) => [itemId, amount])),
     });
+  }
+
+  private resolvedProductionPort(instanceId: string, portId: string): ResolvedWorldPort | null {
+    const instance = this.world.instance(instanceId);
+    if (!instance) return null;
+    const building = START_REGISTRY.buildings.get(instance.definitionId);
+    const worldPort = this.world.portsFor(instanceId).find(({ definition }) => definition.id === portId);
+    if (!building || !worldPort) return null;
+    return {
+      buildingId: building.id,
+      port: worldPort.definition,
+      position: new THREE.Vector3(worldPort.localPosition.x, worldPort.localPosition.y, worldPort.localPosition.z),
+      connectionAnchor: new THREE.Vector3(worldPort.connectionCell.x + 0.5, worldPort.localPosition.y, worldPort.connectionCell.z + 0.5),
+      facing: worldPort.localFacing,
+      rotation: instance.rotation,
+    };
+  }
+
+  private syncConnectionModels() {
+    const active = new Set<string>();
+    this.worldProduction.connections().forEach((connection) => {
+      const key = `${connection.fromInstanceId}:${connection.fromPortId}->${connection.toInstanceId}:${connection.toPortId}`;
+      active.add(key);
+      if (this.connectionGroups.has(key)) return;
+      const source = this.resolvedProductionPort(connection.fromInstanceId, connection.fromPortId);
+      const target = this.resolvedProductionPort(connection.toInstanceId, connection.toPortId);
+      if (!source || !target) return;
+      const group = createPortConnectionModel(source, target, this.materials);
+      group.userData.connectionKey = key;
+      this.connectionGroups.set(key, group);
+      this.scene.add(group);
+    });
+    this.connectionGroups.forEach((group, key) => {
+      if (active.has(key)) return;
+      this.scene.remove(group);
+      this.connectionGroups.delete(key);
+    });
+  }
+
+  private animateConnections() {
+    this.connectionGroups.forEach((group) => animateConnectionModel(group, {
+      time: this.elapsed,
+      activity: 1,
+      flowing: true,
+    }));
   }
 
   private save(paused: boolean) {
@@ -1014,7 +1079,7 @@ export class FactoryRuntime {
       }
       const structure = this.simulation.structures.get(id);
       if (structure?.worldInstanceId) {
-        const demolition = this.world.demolish(structure.worldInstanceId);
+        const demolition = this.worldProduction.demolish(structure.worldInstanceId);
         if (!demolition.ok) {
           this.callbacks.onToast("이 설비는 철거할 수 없습니다");
           return;
@@ -1341,6 +1406,7 @@ export class FactoryRuntime {
       };
     });
     const result = this.campaignWorld.stepPower(delta, overrides);
+    this.worldProduction.applyPowerResult(result);
     const poweredByWorldId = new Map(result.consumers.map((consumer) => [consumer.id, consumer.satisfaction >= 0.999]));
     this.simulation.setExternalPowerAvailability(new Map(
       [...this.simulation.structures.values()].map((structure) => [
@@ -1440,11 +1506,17 @@ export class FactoryRuntime {
 
     this.stepCampaignPower(delta);
     this.simulation.update(delta);
+    this.worldProduction.advance(delta);
+    if (this.elapsed - this.lastConnectionSyncTime >= 0.25) {
+      this.lastConnectionSyncTime = this.elapsed;
+      this.syncConnectionModels();
+    }
     this.syncPhaseOneCampaign();
     this.publishPower();
     this.publishProject();
     this.syncItems(delta);
     this.animateMachines(delta);
+    this.animateConnections();
     this.selectedUiClock += delta;
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;

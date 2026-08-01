@@ -3,6 +3,7 @@ import { FactorySimulation, type FactorySimulationSnapshot } from "./simulation.
 import { START_REGISTRY } from "./data/index.ts";
 import { DataDrivenWorld, type WorldSnapshot } from "./sim/world.ts";
 import { CampaignWorldRuntime, type CampaignWorldSnapshot } from "./sim/campaignWorld.ts";
+import { WorldProductionSimulation, type WorldProductionSnapshot } from "./sim/worldProduction.ts";
 import type { CameraMode } from "./types.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
@@ -12,6 +13,7 @@ export type FactoryRuntimeSnapshot = Readonly<{
   simulation: FactorySimulationSnapshot;
   world?: WorldSnapshot;
   campaignWorld?: CampaignWorldSnapshot;
+  worldProduction?: WorldProductionSnapshot;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -41,9 +43,10 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
   ].sort();
   const expectedWithWorld = [...expected, "world"].sort();
   const expectedWithCampaign = [...expected, "world", "campaignWorld"].sort();
+  const expectedWithProduction = [...expected, "world", "campaignWorld", "worldProduction"].sort();
   const matches = (candidate: readonly string[]) => keys.length === candidate.length
     && keys.every((key, index) => key === candidate[index]);
-  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign)) return false;
+  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign) && !matches(expectedWithProduction)) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -67,6 +70,12 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
       const bounds = campaignSnapshot.world.bounds;
       new CampaignWorldRuntime({ registry: START_REGISTRY, bounds, snapshot: campaignSnapshot });
       if (value.world !== undefined && JSON.stringify(value.world) !== JSON.stringify(campaignSnapshot.world)) return false;
+    }
+    if (value.worldProduction !== undefined) {
+      const worldSnapshot = (value.campaignWorld as CampaignWorldSnapshot | undefined)?.world ?? value.world as WorldSnapshot | undefined;
+      if (!worldSnapshot) return false;
+      const world = new DataDrivenWorld({ registry: START_REGISTRY, bounds: worldSnapshot.bounds, snapshot: worldSnapshot });
+      new WorldProductionSimulation(world, value.worldProduction as WorldProductionSnapshot);
     }
     return true;
   } catch {

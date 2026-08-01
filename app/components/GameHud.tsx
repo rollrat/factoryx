@@ -36,6 +36,7 @@ type GameHudProps = {
   onCameraModeChange: () => void;
   onLineageToggle: () => void;
   onBuildCatalogToggle: () => void;
+  onProjectProgressToggle: () => void;
 };
 
 type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
@@ -134,6 +135,7 @@ export default function GameHud({
   onCameraModeChange,
   onLineageToggle,
   onBuildCatalogToggle,
+  onProjectProgressToggle,
 }: GameHudProps) {
   const activeToolButtonRef = useRef<HTMLButtonElement>(null);
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
@@ -396,6 +398,11 @@ export default function GameHud({
       <button className="catalog-launch-button instrument-panel" onClick={onBuildCatalogToggle} aria-label="전체 건설 카탈로그 열기">
         <span aria-hidden="true">▦</span>
         <strong>건설 카탈로그</strong>
+      </button>
+      <button className="project-launch-button instrument-panel" onClick={onProjectProgressToggle} aria-label="전체 프로젝트 진행 상황 열기">
+        <span aria-hidden="true">◈</span>
+        <strong>프로젝트 계약</strong>
+        <kbd>P</kbd>
       </button>
       <button className="camera-mode-button instrument-panel" onClick={onCameraModeChange} aria-label="카메라 모드 전환">
         <span>{cameraMode === "firstPerson" ? "▦" : "◉"}</span>
