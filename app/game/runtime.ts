@@ -42,6 +42,7 @@ import {
 import { PhysicalPowerRuntime } from "./sim/physicalPowerRuntime.ts";
 import type { LoadPriority } from "./sim/powerGrid.ts";
 import { WorldProductionSimulation } from "./sim/worldProduction.ts";
+import { migrateLegacyStructuresIntoWorld } from "./sim/legacyWorldMigration.ts";
 import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
 import {
@@ -263,7 +264,13 @@ export class FactoryRuntime {
     });
     this.world = this.campaignWorld.world;
     this.simulation = new FactorySimulation(24, restored?.simulation, (request) => this.deliverToActiveProject(request));
-    if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
+    if (restored) {
+      migrateLegacyStructuresIntoWorld(
+        this.world,
+        [...this.simulation.structures.values()],
+        defaultBuildingForLegacyType,
+      );
+    }
     this.worldProduction = new WorldProductionSimulation(this.world, restored?.worldProduction);
     this.dockCommitter = new ProjectDockDeliveryCommitter(
       this.campaignWorld,
@@ -863,29 +870,6 @@ export class FactoryRuntime {
       firstPersonYaw: this.firstPersonYaw,
       firstPersonPitch: this.firstPersonPitch,
     };
-  }
-
-  private rebuildWorldFromLegacySave() {
-    const structures = [...this.simulation.structures.values()];
-    const costs = new Map<string, number>();
-    structures.forEach((structure) => {
-      const buildingId = structure.buildingId ?? defaultBuildingForLegacyType(structure.type);
-      START_REGISTRY.buildings.get(buildingId)?.buildCost.forEach(({ itemId, amount }) => {
-        costs.set(itemId, (costs.get(itemId) ?? 0) + amount);
-      });
-    });
-    this.world.grantItems([...costs].map(([itemId, amount]) => ({ itemId, amount })));
-    structures.forEach((structure) => {
-      const buildingId = structure.buildingId ?? defaultBuildingForLegacyType(structure.type);
-      const placed = this.world.place({
-        buildingId,
-        position: { x: structure.x, z: structure.z },
-        rotation: structure.rotation as 0 | 1 | 2 | 3,
-      });
-      if (!placed.ok) return;
-      structure.buildingId = buildingId;
-      structure.worldInstanceId = placed.instance.id;
-    });
   }
 
   private publishConstructionState() {
@@ -2084,8 +2068,16 @@ export class FactoryRuntime {
 
   private animate = (time: number) => {
     this.animationId = requestAnimationFrame(this.animate);
-    const delta = Math.min((time - this.lastTime) / 1000, 0.05);
+    const elapsedSeconds = (time - this.lastTime) / 1000;
     this.lastTime = time;
+    // requestAnimationFrame can reuse a timestamp on the first frame or after
+    // hot replacement. Simulation clocks require positive time, so render the
+    // current state without advancing instead of forwarding a zero/negative dt.
+    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) {
+      this.renderer.render(this.scene, this.activeCamera);
+      return;
+    }
+    const delta = Math.min(elapsedSeconds, 0.05);
     this.elapsed += delta;
     if (time - this.lastAutoSaveTime >= 5_000) {
       this.lastAutoSaveTime = time;

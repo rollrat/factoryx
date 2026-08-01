@@ -62,6 +62,7 @@ test("renders the three-mode shell, filters, and keyboard-selectable actual node
   assert.match(html, />계층 목록</);
   assert.match(html, /빈 공간을 드래그해 이동하고 휠로 확대 또는 축소합니다/);
   assert.match(html, /data-node-id="miner"/);
+  assert.match(html, /aria-label="모바일 노드 표시 범위"/);
   assert.match(html, />전체 상태</);
   assert.match(html, />전체 단계</);
   assert.match(html, /role="button"[^>]*tabindex="0"/);

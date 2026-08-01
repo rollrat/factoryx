@@ -108,6 +108,7 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
 .factory-graph-filters button { min-height: 30px; padding: 0 10px; border: 1px solid rgba(190, 206, 205, 0.15); background: #151d1f; color: #899798; font-size: 9px; white-space: nowrap; cursor: pointer; }
 .factory-graph-filters button:hover, .factory-graph-filters button:focus-visible { outline: none; border-color: #718082; color: #d7e0df; }
 .factory-graph-filters button.is-active { border-color: var(--graph-amber); background: rgba(230, 160, 75, 0.1); color: #edbd7f; }
+.factory-mobile-filter { display: none; }
 .factory-graph-controls output { margin-left: auto; color: #849193; font: 700 8px/1 var(--font-geist-mono, monospace); white-space: nowrap; }
 .factory-graph-select { display: flex; align-items: center; gap: 6px; color: #738183; font: 740 7px/1 var(--font-geist-mono, monospace); white-space: nowrap; }
 .factory-graph-select select { height: 30px; padding: 0 24px 0 8px; border: 1px solid rgba(190, 206, 205, 0.18); border-radius: 0; outline: 0; background: #151e20; color: #b8c4c3; font-size: 9px; }
@@ -263,14 +264,17 @@ button.factory-summary-cell:hover, button.factory-summary-cell:focus-visible { o
   .factory-graph-header { grid-template-columns: auto minmax(120px, 1fr) auto; min-height: 64px; padding: 9px 10px; }
   .factory-graph-mark { width: 36px; height: 36px; }
   .factory-graph-live { display: none; }
-  .factory-graph-close span { display: none; }
-  .factory-graph-summary { grid-template-columns: repeat(4, minmax(100px, 1fr)); overflow-x: auto; }
+  .factory-graph-close kbd { display: none; }
+  .factory-graph-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
   .factory-summary-cell { min-height: 51px; padding: 10px; }
   .factory-graph-summary span { font-size: 8px; white-space: nowrap; }
   .factory-graph-summary strong { font-size: 15px; }
   .factory-graph-controls { align-items: stretch; flex-wrap: wrap; gap: 6px; padding: 7px 10px; }
   .factory-graph-search { width: 100%; min-width: 0; }
-  .factory-graph-filters { flex: 1 1 auto; }
+  .factory-graph-filters { display: none; }
+  .factory-mobile-filter { display: flex; align-items: center; gap: 6px; color: #738183; font: 740 7px/1 var(--font-geist-mono, monospace); white-space: nowrap; }
+  .factory-mobile-filter select { height: 30px; padding: 0 24px 0 8px; border: 1px solid rgba(190, 206, 205, 0.18); border-radius: 0; outline: 0; background: #151e20; color: #b8c4c3; font-size: 9px; }
+  .factory-mobile-filter select:focus-visible { border-color: var(--graph-cyan); }
   .factory-graph-controls output { align-self: center; }
   .factory-graph-workspace { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .factory-graph-viewport { overflow: auto; cursor: default; touch-action: auto; }
