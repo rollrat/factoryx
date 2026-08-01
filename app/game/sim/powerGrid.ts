@@ -116,7 +116,8 @@ export class AdvancedPowerGrid {
   private readonly shedConsumerIds = new Set<string>();
   private lowSatisfactionSeconds = 0;
   private recoveryStableSeconds = 0;
-  private secondsSinceRecovery = Number.POSITIVE_INFINITY;
+  // A finite ready value keeps snapshots JSON-safe while allowing immediate first recovery.
+  private secondsSinceRecovery = RECOVERY_INTERVAL_SECONDS;
   private mainBreakerTripped = false;
 
   constructor(gridId: string, snapshot?: AdvancedPowerGridSnapshot) {
@@ -336,9 +337,7 @@ export class AdvancedPowerGrid {
     [snapshot.lowSatisfactionSeconds, snapshot.recoveryStableSeconds].forEach((value, index) => {
       assertNonNegative(value, index === 0 ? "lowSatisfactionSeconds" : "recoveryStableSeconds");
     });
-    if (Number.isNaN(snapshot.secondsSinceRecovery) || snapshot.secondsSinceRecovery < 0) {
-      throw new RangeError("secondsSinceRecovery must be non-negative");
-    }
+    assertNonNegative(snapshot.secondsSinceRecovery, "secondsSinceRecovery");
     this.batteryEnergy.clear();
     snapshot.batteries.forEach(({ id, storedMWh }) => this.batteryEnergy.set(id, storedMWh));
     this.shedConsumerIds.clear();

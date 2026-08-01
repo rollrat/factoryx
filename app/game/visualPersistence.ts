@@ -2,6 +2,7 @@ import { BrowserSaveStorage, createJsonSaveCodec } from "./persistence.ts";
 import { FactorySimulation, type FactorySimulationSnapshot } from "./simulation.ts";
 import { START_REGISTRY } from "./data/index.ts";
 import { DataDrivenWorld, type WorldSnapshot } from "./sim/world.ts";
+import { CampaignWorldRuntime, type CampaignWorldSnapshot } from "./sim/campaignWorld.ts";
 import type { CameraMode } from "./types.ts";
 
 export const VISUAL_RUNTIME_SAVE_KEY = "factoryx.visual-runtime.v1";
@@ -10,6 +11,7 @@ export type FactoryRuntimeSnapshot = Readonly<{
   version: 1;
   simulation: FactorySimulationSnapshot;
   world?: WorldSnapshot;
+  campaignWorld?: CampaignWorldSnapshot;
   credits: number;
   nextId: number;
   cameraMode: CameraMode;
@@ -38,9 +40,10 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
     "firstPersonPitch", "firstPersonYaw", "nextId", "playerPosition", "simulation", "version",
   ].sort();
   const expectedWithWorld = [...expected, "world"].sort();
+  const expectedWithCampaign = [...expected, "world", "campaignWorld"].sort();
   const matches = (candidate: readonly string[]) => keys.length === candidate.length
     && keys.every((key, index) => key === candidate[index]);
-  if (!matches(expected) && !matches(expectedWithWorld)) return false;
+  if (!matches(expected) && !matches(expectedWithWorld) && !matches(expectedWithCampaign)) return false;
   if (value.version !== 1
     || !Number.isSafeInteger(value.credits) || (value.credits as number) < 0
     || !Number.isSafeInteger(value.nextId) || (value.nextId as number) < 1
@@ -57,6 +60,13 @@ export const isFactoryRuntimeSnapshot = (value: unknown): value is FactoryRuntim
       if (!isRecord(value.world) || !isRecord(value.world.bounds)) return false;
       const bounds = value.world.bounds as WorldSnapshot["bounds"];
       new DataDrivenWorld({ registry: START_REGISTRY, bounds, snapshot: value.world as WorldSnapshot });
+    }
+    if (value.campaignWorld !== undefined) {
+      if (!isRecord(value.campaignWorld) || !isRecord(value.campaignWorld.world)) return false;
+      const campaignSnapshot = value.campaignWorld as CampaignWorldSnapshot;
+      const bounds = campaignSnapshot.world.bounds;
+      new CampaignWorldRuntime({ registry: START_REGISTRY, bounds, snapshot: campaignSnapshot });
+      if (value.world !== undefined && JSON.stringify(value.world) !== JSON.stringify(campaignSnapshot.world)) return false;
     }
     return true;
   } catch {

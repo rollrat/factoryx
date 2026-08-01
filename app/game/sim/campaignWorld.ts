@@ -51,6 +51,7 @@ export type CampaignWorldOptions = Readonly<{
   gridId?: string;
   unlockedIds?: readonly UnlockId[];
   constructionInventory?: readonly ItemStack[];
+  worldSnapshot?: WorldSnapshot;
   snapshot?: CampaignWorldSnapshot;
 }>;
 
@@ -68,6 +69,7 @@ export class CampaignWorldRuntime {
   private lastPowerResult: PowerGridResult | null = null;
 
   constructor(options: CampaignWorldOptions) {
+    if (options.snapshot && options.worldSnapshot) throw new Error("campaign and world snapshots are mutually exclusive");
     this.registry = options.registry;
     const gridId = options.snapshot?.gridId ?? options.gridId ?? "campaign-grid";
     if (options.snapshot && options.gridId !== undefined && options.gridId !== options.snapshot.gridId) {
@@ -78,7 +80,7 @@ export class CampaignWorldRuntime {
       bounds: options.bounds,
       unlockedIds: options.unlockedIds,
       constructionInventory: options.constructionInventory,
-      ...(options.snapshot ? { snapshot: options.snapshot.world } : {}),
+      ...(options.snapshot ? { snapshot: options.snapshot.world } : options.worldSnapshot ? { snapshot: options.worldSnapshot } : {}),
     });
     this.campaign = new CampaignProjectTracker(options.registry, options.snapshot?.campaign);
     this.powerGrid = new AdvancedPowerGrid(gridId, options.snapshot?.power);

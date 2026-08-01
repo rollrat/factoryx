@@ -24,7 +24,8 @@ import { animateProjectDockModel, createProjectDockModel } from "./models/projec
 import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
 import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
-import { DataDrivenWorld } from "./sim/world.ts";
+import type { DataDrivenWorld } from "./sim/world.ts";
+import { CampaignWorldRuntime, type PowerInstanceOverride } from "./sim/campaignWorld.ts";
 import {
   createFactoryRuntimeSaveStorage,
   type FactoryRuntimeSnapshot,
@@ -82,6 +83,7 @@ export class FactoryRuntime {
   private readonly materials = createFactoryMaterials();
   private readonly simulation: FactorySimulation;
   private readonly world: DataDrivenWorld;
+  private readonly campaignWorld: CampaignWorldRuntime;
   private readonly saveStorage: ReturnType<typeof createFactoryRuntimeSaveStorage>;
   private readonly groups = new Map<number, THREE.Group>();
   private readonly itemMeshes = new Map<number, THREE.Group>();
@@ -173,13 +175,16 @@ export class FactoryRuntime {
     const loaded = this.saveStorage.load();
     const restored = loaded.ok ? loaded.value?.snapshot ?? null : null;
     this.simulation = new FactorySimulation(24, restored?.simulation);
-    this.world = new DataDrivenWorld({
+    this.campaignWorld = new CampaignWorldRuntime({
       registry: START_REGISTRY,
       bounds: { minX: -12, maxX: 12, minZ: -12, maxZ: 12 },
       constructionInventory: CAMPAIGN_START_INVENTORY,
-      ...(restored?.world ? { snapshot: restored.world } : {}),
+      ...(restored?.campaignWorld
+        ? { snapshot: restored.campaignWorld }
+        : restored?.world ? { worldSnapshot: restored.world } : {}),
     });
-    if (restored && !restored.world) this.rebuildWorldFromLegacySave();
+    this.world = this.campaignWorld.world;
+    if (restored && !restored.world && !restored.campaignWorld) this.rebuildWorldFromLegacySave();
     if (restored) {
       this.credits = restored.credits;
       this.nextId = restored.nextId;
@@ -494,6 +499,7 @@ export class FactoryRuntime {
       version: 1,
       simulation: this.simulation.snapshot(),
       world: this.world.snapshot(),
+      campaignWorld: this.campaignWorld.snapshot(),
       credits: this.credits,
       nextId: this.nextId,
       cameraMode: this.cameraMode,
@@ -1297,11 +1303,62 @@ export class FactoryRuntime {
   }
 
   private publishPower() {
-    const power = this.simulation.getPowerGrid();
+    const campaignPower = this.campaignWorld.powerResult();
+    const power = campaignPower ? {
+      supplyMW: campaignPower.capacityMW,
+      demandMW: campaignPower.requestedMW,
+      servedMW: campaignPower.servedMW,
+      overloaded: campaignPower.satisfaction < 0.999 || campaignPower.mainBreakerTripped,
+    } : this.simulation.getPowerGrid();
     const signature = `${power.supplyMW}:${power.demandMW}:${power.servedMW}:${power.overloaded}`;
     if (signature === this.lastPowerSignature) return;
     this.lastPowerSignature = signature;
     this.callbacks.onPower(power);
+  }
+
+  private stepCampaignPower(delta: number) {
+    const overrides: Record<string, PowerInstanceOverride> = {};
+    this.simulation.structures.forEach((structure, id) => {
+      if (!structure.worldInstanceId) return;
+      const state = this.simulation.machines.get(id);
+      const definition = structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId) : null;
+      const fuelItemId = definition?.generatorPolicy?.fuelItemId;
+      overrides[structure.worldInstanceId] = {
+        connected: true,
+        active: state?.working ?? isTransportType(structure.type),
+        ...(fuelItemId ? {
+          fuelAvailable: Boolean(state && [...state.input, ...state.output, ...state.storedItems].includes(fuelItemId)),
+        } : {}),
+      };
+    });
+    const result = this.campaignWorld.stepPower(delta, overrides);
+    const poweredByWorldId = new Map(result.consumers.map((consumer) => [consumer.id, consumer.satisfaction >= 0.999]));
+    this.simulation.setExternalPowerAvailability(new Map(
+      [...this.simulation.structures.values()].map((structure) => [
+        structure.id,
+        structure.worldInstanceId ? poweredByWorldId.get(structure.worldInstanceId) ?? true : true,
+      ]),
+    ));
+  }
+
+  private syncPhaseOneCampaign() {
+    const stageId = "phase_1_settlement_package";
+    const campaignProgress = this.campaignWorld.campaign.progress(stageId);
+    if (!campaignProgress || campaignProgress.completed) return;
+    const visualProgress = this.simulation.getProjectProgress();
+    let changed = false;
+    visualProgress.deliveries.forEach((delivery) => {
+      const current = campaignProgress.deliveries.find(({ portId }) => portId === delivery.portId)?.delivered ?? 0;
+      const amount = delivery.delivered - current;
+      if (amount <= 0) return;
+      const result = this.campaignWorld.deliverProject(stageId, {
+        portId: delivery.portId,
+        itemId: delivery.itemId,
+        amount,
+      });
+      if (result.accepted) changed = true;
+    });
+    if (changed) this.publishConstructionState();
   }
 
   private publishProject() {
@@ -1353,7 +1410,9 @@ export class FactoryRuntime {
       this.updateFirstPerson(delta);
     }
 
+    this.stepCampaignPower(delta);
     this.simulation.update(delta);
+    this.syncPhaseOneCampaign();
     this.publishPower();
     this.publishProject();
     this.syncItems(delta);

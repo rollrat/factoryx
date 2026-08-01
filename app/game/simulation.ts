@@ -76,6 +76,7 @@ export class FactorySimulation {
   private nextItemId = 1;
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
   private readonly powerSupplyMW: number;
+  private externalPoweredByStructureId: ReadonlyMap<number, boolean> | null = null;
 
   constructor(powerSupplyMW = 24, snapshot?: FactorySimulationSnapshot) {
     this.powerSupplyMW = powerSupplyMW;
@@ -249,10 +250,27 @@ export class FactorySimulation {
   }
 
   getPowerGrid() {
-    return computePowerGrid(
+    const computed = computePowerGrid(
       [...this.structures.values()].map(({ id, type }) => ({ structureId: id, type })),
       this.powerSupplyMW,
     );
+    if (!this.externalPoweredByStructureId) return computed;
+    const structures = computed.structures.map((structure) => {
+      const powered = this.externalPoweredByStructureId?.get(structure.structureId) ?? structure.powered;
+      return { ...structure, powered, servedMW: powered ? structure.demandMW : 0 };
+    });
+    const servedMW = structures.reduce((total, structure) => total + structure.servedMW, 0);
+    return {
+      ...computed,
+      servedMW,
+      overloaded: structures.some(({ demandMW, powered }) => demandMW > 0 && !powered),
+      structures,
+      poweredByStructureId: new Map(structures.map(({ structureId, powered }) => [structureId, powered])),
+    };
+  }
+
+  setExternalPowerAvailability(poweredByStructureId: ReadonlyMap<number, boolean> | null) {
+    this.externalPoweredByStructureId = poweredByStructureId ? new Map(poweredByStructureId) : null;
   }
 
   getProjectProgress() {

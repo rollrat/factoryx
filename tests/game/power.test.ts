@@ -104,3 +104,13 @@ test("factory processing pauses deterministically when the grid sheds a machine"
   assert.equal(simulation.getSelectedInfo(30)?.runtimeState, "paused");
   assert.equal(simulation.getSelectedInfo(30)?.status, "전력 부족");
 });
+
+test("external campaign power availability overrides legacy dispatch without changing demand metadata", () => {
+  const factory = new FactorySimulation();
+  factory.addStructure({ id: 1, type: "miner", x: -8, z: -3, rotation: 0 });
+  factory.setExternalPowerAvailability(new Map([[1, false]]));
+  const grid = factory.getPowerGrid();
+  assert.equal(grid.poweredByStructureId.get(1), false);
+  assert.equal(grid.structures[0]?.demandMW, 4);
+  assert.equal(grid.structures[0]?.servedMW, 0);
+});
