@@ -215,6 +215,7 @@ export class FactorySimulation {
       if (next?.type === "belt" && !this.beltItems.has(next.id)) {
         this.beltItems.delete(beltId);
         item.progress -= 1;
+        item.incoming = direction;
         this.beltItems.set(next.id, item);
       } else {
         item.progress = 0.98;

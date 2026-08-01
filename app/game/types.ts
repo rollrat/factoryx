@@ -44,6 +44,7 @@ export type BeltItem = {
   id: number;
   type: ItemType;
   progress: number;
+  incoming?: Direction;
 };
 
 export type BeltBuildInfo = {

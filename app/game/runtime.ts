@@ -761,9 +761,21 @@ export class FactoryRuntime {
       }
       const belt = this.simulation.structures.get(beltId);
       if (!belt) return;
-      const direction = directionForRotation(belt.rotation);
-      const travel = (item.progress - 0.5) * 0.86;
-      mesh.position.set(belt.x + direction.x * travel, 0.48, belt.z + direction.z * travel);
+      const outgoing = directionForRotation(belt.rotation);
+      const incoming = item.incoming ?? outgoing;
+      const progress = THREE.MathUtils.clamp(item.progress, 0, 1);
+      const inverse = 1 - progress;
+      const startX = belt.x - incoming.x * 0.5;
+      const startZ = belt.z - incoming.z * 0.5;
+      const endX = belt.x + outgoing.x * 0.5;
+      const endZ = belt.z + outgoing.z * 0.5;
+      const x = inverse * inverse * startX
+        + 2 * inverse * progress * belt.x
+        + progress * progress * endX;
+      const z = inverse * inverse * startZ
+        + 2 * inverse * progress * belt.z
+        + progress * progress * endZ;
+      mesh.position.set(x, 0.48, z);
       mesh.rotation.y += delta * (item.type === "ore" ? 1.2 : item.type === "component" ? 2.2 : 0.35);
     });
     this.itemMeshes.forEach((mesh, id) => {
