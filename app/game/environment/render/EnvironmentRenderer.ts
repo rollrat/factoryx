@@ -37,6 +37,8 @@ export class EnvironmentRenderer {
   private propsVisible = true;
   private readonly fogColor = new THREE.Color(0x607877);
   private surfaceFogDensity: number;
+  private scatterDensity = 1;
+  private shadowDistance = 42;
 
   constructor(
     scene: THREE.Scene,
@@ -127,8 +129,18 @@ export class EnvironmentRenderer {
   }
   setTimeOfDay(value: number) { this.automaticCycle = false; this.sky.setTimeOfDay(value); }
   setSunAzimuth(value: number) { this.sky.setSunAzimuth(value); }
-  setShadowDistance(value: number) { this.sky.setShadowDistance(value); }
-  setPreviewQuality(value: EnvironmentQuality) { this.previewQuality = value; }
+  setShadowDistance(value: number) {
+    this.shadowDistance = THREE.MathUtils.clamp(value, 12, 96);
+    this.sky.setShadowDistance(this.previewQuality === "low" ? Math.min(this.shadowDistance, 24) : this.shadowDistance);
+  }
+  setPreviewQuality(value: EnvironmentQuality) {
+    this.previewQuality = value;
+    const densityMultiplier = value === "high" ? 1 : 0.48;
+    this.props.setDensity(this.scatterDensity * densityMultiplier);
+    this.terrainDetail.setPreviewQuality(value);
+    this.weather.setPreviewQuality(value);
+    this.sky.setShadowDistance(value === "high" ? this.shadowDistance : Math.min(this.shadowDistance, 24));
+  }
   setAuthoringStrokes(strokes: readonly TerrainAuthoringStroke[], region?: Readonly<{ x: number; z: number; radius: number }>) {
     this.sampler.setAuthoringStrokes(strokes);
     this.terrain.refreshFromSampler(region);
@@ -158,7 +170,8 @@ export class EnvironmentRenderer {
     this.terrainDetail.setIndustrialFootprints(footprints);
   }
   setScatterDensity(density: number) {
-    this.props.setDensity(density);
+    this.scatterDensity = THREE.MathUtils.clamp(density, 0, 1);
+    this.props.setDensity(this.scatterDensity * (this.previewQuality === "high" ? 1 : 0.48));
   }
   setLandmarksVisible(visible: boolean) {
     this.props.setLandmarksVisible(visible);

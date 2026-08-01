@@ -42,6 +42,7 @@ export class TerrainDetailRenderer {
   private lastCellX = Number.NaN;
   private lastCellZ = Number.NaN;
   private dirty = true;
+  private qualityScale = 1;
 
   constructor(sampler: TerrainSampler, quality: EnvironmentQuality) {
     this.sampler = sampler;
@@ -90,6 +91,13 @@ export class TerrainDetailRenderer {
     this.dirty = true;
   }
 
+  setPreviewQuality(quality: EnvironmentQuality) {
+    const next = quality === "high" ? 1 : 0.42;
+    if (next === this.qualityScale) return;
+    this.qualityScale = next;
+    this.dirty = true;
+  }
+
   update(camera: THREE.Camera) {
     const cellX = Math.floor(camera.position.x / 1.25);
     const cellZ = Math.floor(camera.position.z / 1.25);
@@ -113,7 +121,13 @@ export class TerrainDetailRenderer {
   }
 
   private rebuild(cameraX: number, cameraZ: number) {
-    const step = this.capacities.gravel > 100 ? 1.2 : 1.85;
+    const limits = {
+      cracks: Math.floor(this.capacities.cracks * this.qualityScale),
+      gravel: Math.floor(this.capacities.gravel * this.qualityScale),
+      wet: Math.floor(this.capacities.wet * this.qualityScale),
+      dust: Math.floor(this.capacities.dust * this.qualityScale),
+    };
+    const step = this.qualityScale < 1 || this.capacities.gravel <= 100 ? 1.85 : 1.2;
     const minX = Math.floor((cameraX - this.radius) / step);
     const maxX = Math.ceil((cameraX + this.radius) / step);
     const minZ = Math.floor((cameraZ - this.radius) / step);
@@ -132,17 +146,17 @@ export class TerrainDetailRenderer {
         const rotation = hash2(gridX, gridZ, 3) * Math.PI * 2;
         const scale = 0.62 + hash2(gridX, gridZ, 4) * 0.86;
 
-        if (sample.surface !== "submerged" && gravelCount < this.capacities.gravel && hash2(gridX, gridZ, 5) > 0.28) {
+        if (sample.surface !== "submerged" && gravelCount < limits.gravel && hash2(gridX, gridZ, 5) > 0.28) {
           this.writeMatrix(this.gravel, gravelCount++, x, sample.height + 0.045, z, sample.normal, rotation, scale);
         }
         if (["stable", "soft", "steep"].includes(sample.surface)
-          && crackCount < this.capacities.cracks && hash2(gridX, gridZ, 6) > 0.68) {
+          && crackCount < limits.cracks && hash2(gridX, gridZ, 6) > 0.68) {
           this.writeMatrix(this.cracks, crackCount++, x, sample.height + 0.026, z, sample.normal, rotation, scale);
         }
         const weatherWetness = this.weatherKind === "mist" ? this.weatherStrength * 0.48
           : this.weatherKind === "electrical_storm" ? this.weatherStrength * 0.7 : 0;
         const surfaceWetness = sample.surface === "submerged" ? 1 : sample.surface === "soft" ? 0.4 : sample.surface === "hazard" ? 0.24 : 0;
-        if (wetCount < this.capacities.wet && hash2(gridX, gridZ, 7) < Math.max(weatherWetness, surfaceWetness)) {
+        if (wetCount < limits.wet && hash2(gridX, gridZ, 7) < Math.max(weatherWetness, surfaceWetness)) {
           this.writeMatrix(this.wetPatches, wetCount++, x, sample.height + 0.021, z, sample.normal, rotation, scale * 1.2);
         }
       }
@@ -160,7 +174,7 @@ export class TerrainDetailRenderer {
         { horizontal: false, fixed: area.maxX + 0.34, from: area.minZ, to: area.maxZ },
       ];
       for (const edge of perimeter) {
-        for (let cursor = edge.from + 0.42; cursor < edge.to && dustCount < this.capacities.dust; cursor += 1.15) {
+        for (let cursor = edge.from + 0.42; cursor < edge.to && dustCount < limits.dust; cursor += 1.15) {
           const x = edge.horizontal ? cursor : edge.fixed;
           const z = edge.horizontal ? edge.fixed : cursor;
           if (Math.hypot(x - cameraX, z - cameraZ) > this.radius) continue;

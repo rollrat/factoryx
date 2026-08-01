@@ -27,8 +27,8 @@ export class DistantHorizonRenderer {
     const farMaterial = new THREE.MeshBasicMaterial({ color: 0x536665, fog: true, transparent: true, opacity: 0.43, depthWrite: false });
     this.nearRidges = new THREE.InstancedMesh(geometry, nearMaterial, nearCount);
     this.farRidges = new THREE.InstancedMesh(geometry, farMaterial, farCount);
-    this.populateRing(this.nearRidges, 154, 171, random, 30, 62);
-    this.populateRing(this.farRidges, 171, 188, random, 21, 48);
+    this.populateRing(this.nearRidges, 202, 222, random, 34, 68);
+    this.populateRing(this.farRidges, 224, 248, random, 24, 54);
     this.nearRidges.frustumCulled = false;
     this.farRidges.frustumCulled = false;
     this.root.position.y = -18;

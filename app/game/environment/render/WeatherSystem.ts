@@ -13,11 +13,13 @@ export class WeatherSystem {
   private phase = 0;
   private biomeId = "windglass_basin";
   private readonly positions: Float32Array;
+  private readonly particleCapacity: number;
   private readonly scene: THREE.Scene;
 
   constructor(scene: THREE.Scene, quality: EnvironmentQuality) {
     this.scene = scene;
     const count = quality === "high" ? 360 : 160;
+    this.particleCapacity = count;
     this.positions = new Float32Array(count * 3);
     for (let index = 0; index < count; index += 1) {
       const offset = index * 3;
@@ -33,6 +35,7 @@ export class WeatherSystem {
       geometry,
       new THREE.PointsMaterial({ color: 0xc0ad8e, size: 0.075, transparent: true, opacity: 0.28, depthWrite: false }),
     );
+    this.particles.geometry.setDrawRange(0, count);
     this.particles.frustumCulled = false;
     this.root.add(this.particles);
     this.stormLight.position.set(0, 34, 0);
@@ -48,6 +51,14 @@ export class WeatherSystem {
   getWeather() { return { kind: this.weather, strength: this.strength } as const; }
 
   setBiome(biomeId: string) { this.biomeId = biomeId; }
+
+  setPreviewQuality(quality: EnvironmentQuality) {
+    this.particles.geometry.setDrawRange(0, Math.min(this.particleCapacity, quality === "high" ? 360 : 160));
+  }
+
+  activeParticleCount() {
+    return this.particles.geometry.drawRange.count;
+  }
 
   update(delta: number, camera: THREE.Camera) {
     this.root.position.x = camera.position.x;

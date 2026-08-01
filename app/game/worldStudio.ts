@@ -127,6 +127,7 @@ export class WorldStudioRuntime {
     this.environment.setPreviewQuality(value);
     this.renderer.setPixelRatio(value === "high" ? Math.min(window.devicePixelRatio, 1.5) : 1);
     this.renderer.shadowMap.enabled = value === "high";
+    this.rebuildShadowOverlay();
     this.resize();
   }
   setOverlay(overlay: WorldStudioOverlay) { this.overlay = overlay; this.refreshTerrainColors(); this.applyOverlayVisibility(); }
@@ -309,9 +310,10 @@ export class WorldStudioRuntime {
     return new THREE.LineLoop(new THREE.BufferGeometry(), material);
   }
   private rebuildShadowOverlay() {
+    const effectiveDistance = this.quality === "high" ? this.shadowDistance : Math.min(this.shadowDistance, 24);
     const points = Array.from({ length: 64 }, (_, index) => {
       const angle = index / 64 * Math.PI * 2;
-      return new THREE.Vector3(Math.cos(angle) * this.shadowDistance, 0, Math.sin(angle) * this.shadowDistance);
+      return new THREE.Vector3(Math.cos(angle) * effectiveDistance, 0, Math.sin(angle) * effectiveDistance);
     });
     this.shadowOverlay.geometry.dispose();
     this.shadowOverlay.geometry = new THREE.BufferGeometry().setFromPoints(points);

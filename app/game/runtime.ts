@@ -169,7 +169,7 @@ export class FactoryRuntime {
   private environmentObstacles: EnvironmentObstacleIndex;
   private readonly buildGrid: THREE.GridHelper;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 400);
-  private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 180);
+  private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 320);
   private readonly materials = createFactoryMaterials();
   private readonly simulation: FactorySimulation;
   private readonly world: DataDrivenWorld;
