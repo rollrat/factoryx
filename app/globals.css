@@ -234,7 +234,7 @@ button {
   position: absolute;
   top: 70px;
   right: 14px;
-  width: 266px;
+  width: 286px;
   display: grid;
   grid-template-columns: 27px 1fr;
   transform: translateX(calc(100% + 24px));
@@ -268,6 +268,7 @@ button {
   width: 5px;
   height: 5px;
   background: var(--cyan);
+  box-shadow: 0 0 7px rgba(98, 215, 199, 0.45);
 }
 
 .inspector-body {
@@ -291,9 +292,13 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 2px;
+  min-height: 22px;
+  padding: 5px 7px;
+  border: 1px solid rgba(98, 215, 199, 0.26);
+  background: rgba(98, 215, 199, 0.07);
   color: #bcc9c8;
   font: 700 8px/1 var(--font-geist-mono), monospace;
+  white-space: nowrap;
 }
 
 .equipment-status i,
@@ -302,6 +307,63 @@ button {
   height: 6px;
   background: var(--cyan);
   box-shadow: 0 0 7px rgba(98, 215, 199, 0.5);
+}
+
+.equipment-status.status-starved {
+  border-color: rgba(230, 160, 75, 0.3);
+  background: rgba(230, 160, 75, 0.08);
+  color: #edc189;
+}
+
+.equipment-status.status-starved i,
+.inspector.status-starved .inspector-rail i {
+  background: var(--amber);
+  box-shadow: 0 0 7px rgba(230, 160, 75, 0.5);
+}
+
+.equipment-status.status-disconnected {
+  border-color: rgba(230, 160, 75, 0.3);
+  background: rgba(230, 160, 75, 0.08);
+  color: #edc189;
+}
+
+.equipment-status.status-disconnected i,
+.inspector.status-disconnected .inspector-rail i {
+  background: var(--amber);
+  box-shadow: 0 0 7px rgba(230, 160, 75, 0.5);
+}
+
+.equipment-status.status-blocked {
+  border-color: rgba(228, 92, 97, 0.38);
+  background: rgba(228, 92, 97, 0.1);
+  color: #f09598;
+}
+
+.equipment-status.status-blocked i,
+.inspector.status-blocked .inspector-rail i {
+  background: var(--danger);
+  box-shadow: 0 0 8px rgba(228, 92, 97, 0.56);
+}
+
+.equipment-status.status-idle {
+  border-color: rgba(190, 206, 205, 0.18);
+  background: rgba(190, 206, 205, 0.04);
+  color: var(--muted);
+}
+
+.equipment-status.status-idle i,
+.inspector.status-idle .inspector-rail i {
+  background: #788485;
+  box-shadow: none;
+}
+
+.equipment-recipe {
+  margin-top: 7px;
+  overflow: hidden;
+  color: #9eacab;
+  font: 650 9px/1.2 var(--font-geist-mono), monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .process-meter {
@@ -327,7 +389,99 @@ button {
 
 .process-track {
   height: 4px;
+  overflow: hidden;
   background: #303839;
+}
+
+.inspector.status-blocked .process-track > div {
+  background: var(--danger);
+}
+
+.inspector.status-starved .process-track > div {
+  background: var(--amber);
+}
+
+.inspector.status-disconnected .process-track > div {
+  background: var(--amber);
+}
+
+.equipment-flow {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) 42px minmax(64px, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 11px 0 7px;
+}
+
+.flow-node {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(190, 206, 205, 0.13);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.flow-node span {
+  color: var(--muted);
+  font: 700 7px/1 var(--font-geist-mono), monospace;
+  letter-spacing: 0.1em;
+}
+
+.flow-node strong {
+  overflow: hidden;
+  color: #e2e9e8;
+  font: 750 13px/1 var(--font-geist-mono), monospace;
+  text-overflow: ellipsis;
+}
+
+.flow-node small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.flow-output {
+  text-align: right;
+}
+
+.flow-path {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 14px;
+}
+
+.flow-path::before {
+  content: "";
+  position: absolute;
+  right: 2px;
+  left: 2px;
+  height: 1px;
+  background: rgba(190, 206, 205, 0.18);
+}
+
+.flow-path i {
+  z-index: 1;
+  width: 4px;
+  height: 4px;
+  transform: rotate(45deg);
+  border-top: 1px solid #697677;
+  border-right: 1px solid #697677;
+  background: var(--hud);
+}
+
+.flow-path.active i {
+  border-color: var(--cyan);
+  animation: equipment-flow-pulse 1.15s ease-in-out infinite;
+}
+
+.flow-path.active i:nth-child(2) { animation-delay: 120ms; }
+.flow-path.active i:nth-child(3) { animation-delay: 240ms; }
+
+@keyframes equipment-flow-pulse {
+  0%, 55%, 100% { opacity: 0.35; }
+  25% { opacity: 1; filter: drop-shadow(0 0 3px rgba(98, 215, 199, 0.8)); }
 }
 
 .equipment-data {
@@ -813,7 +967,7 @@ kbd {
   .inspector {
     top: 64px;
     right: 8px;
-    width: min(266px, calc(100vw - 16px));
+    width: min(286px, calc(100vw - 16px));
   }
 
   .build-dock {
@@ -858,6 +1012,23 @@ kbd {
 
   .objective-index {
     padding-right: 7px;
+  }
+
+  .inspector {
+    grid-template-columns: 22px 1fr;
+  }
+
+  .inspector-body {
+    padding: 11px 10px 9px;
+  }
+
+  .equipment-flow {
+    grid-template-columns: minmax(58px, 1fr) 34px minmax(58px, 1fr);
+    gap: 5px;
+  }
+
+  .equipment-data {
+    display: none;
   }
 
   .belt-build-panel {

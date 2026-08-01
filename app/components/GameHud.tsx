@@ -15,6 +15,41 @@ type GameHudProps = {
   onCameraModeChange: () => void;
 };
 
+type EquipmentStatus = "working" | "starved" | "blocked" | "disconnected" | "storing" | "idle";
+type SelectedDetails = NonNullable<SelectedInfo> & {
+  runtimeState?: string;
+  recipeName?: string;
+  inputCapacity?: number;
+  outputCapacity?: number;
+};
+
+const getEquipmentStatus = (selected: SelectedDetails): EquipmentStatus => {
+  const runtimeState = selected.runtimeState?.toLocaleLowerCase("ko-KR");
+  if (runtimeState === "working") return selected.type === "storage" ? "storing" : "working";
+  if (runtimeState === "starved") return "starved";
+  if (runtimeState === "blocked") return "blocked";
+  if (runtimeState === "disconnected") return "disconnected";
+  if (runtimeState === "storing") return "storing";
+
+  const status = selected.status.toLocaleLowerCase("ko-KR");
+  if (/막|출력|가득|blocked|jam|full/.test(status)) return "blocked";
+  if (/원료|재료|입력|부족|starv/.test(status)) return "starved";
+  if (selected.type === "storage" && (/보관|저장|입고/.test(status) || selected.inputCount > 0)) return "storing";
+  if (/가동|작업|운송|working|processing/.test(status)) return "working";
+  if (selected.progress > 0 && selected.progress < 1) return "working";
+  if (selected.outputCount > 0) return "blocked";
+  return "idle";
+};
+
+const STATUS_LABEL: Record<EquipmentStatus, string> = {
+  working: "가동 중",
+  starved: "원료 부족",
+  blocked: "출력 막힘",
+  disconnected: "연결 끊김",
+  storing: "저장 중",
+  idle: "대기",
+};
+
 export default function GameHud({
   activeTool,
   cameraMode,
@@ -30,6 +65,14 @@ export default function GameHud({
 }: GameHudProps) {
   const activeToolInfo = TOOL_INFO.find((tool) => tool.id === activeTool) ?? TOOL_INFO[0];
   const objectiveProgress = Math.min(100, (motors / 20) * 100);
+  const selectedDetails = selected as SelectedDetails | null;
+  const selectedStatus = selectedDetails ? getEquipmentStatus(selectedDetails) : "idle";
+  const selectedProgress = selectedDetails && Number.isFinite(selectedDetails.progress)
+    ? Math.max(0, Math.min(100, selectedDetails.progress * 100))
+    : 0;
+  const progressLabel = selectedDetails?.type === "storage"
+    ? "저장 용량"
+    : selectedDetails?.type === "belt" ? "운송 진행" : "공정 진행";
 
   return (
     <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
@@ -65,7 +108,11 @@ export default function GameHud({
         </div>
       </header>
 
-      <aside className={`inspector instrument-panel ${selected ? "visible" : ""}`} aria-hidden={!selected}>
+      <aside
+        className={`inspector instrument-panel status-${selectedStatus} ${selected ? "visible" : ""}`}
+        aria-hidden={!selected}
+        aria-label={selected ? `${TYPE_NAME[selected.type]} 설비 상태` : undefined}
+      >
         <div className="inspector-rail">
           <span>EQP</span>
           <i />
@@ -76,34 +123,55 @@ export default function GameHud({
               <span className="panel-label">선택 설비</span>
               <div className="inspector-title">{selected ? TYPE_NAME[selected.type] : "설비"}</div>
             </div>
-            <div className="equipment-status">
-              <i />
-              <span>{selected?.status ?? "대기"}</span>
+            <div className={`equipment-status status-${selectedStatus}`} aria-label={`상태: ${STATUS_LABEL[selectedStatus]}`}>
+              <i aria-hidden="true" />
+              <span>{STATUS_LABEL[selectedStatus]}</span>
             </div>
           </div>
 
+          {selectedDetails?.recipeName ? <div className="equipment-recipe">{selectedDetails.recipeName}</div> : null}
+
           <div className="process-meter">
             <div className="process-meter-head">
-              <span>공정 진행</span>
-              <strong>{selected ? `${Math.round(selected.progress * 100)}%` : "—"}</strong>
+              <span>{progressLabel}</span>
+              <strong>{selected ? `${Math.round(selectedProgress)}%` : "—"}</strong>
             </div>
-            <div className="process-track">
-              <div style={{ width: `${selected ? selected.progress * 100 : 0}%` }} />
+            <div
+              className="process-track"
+              role="progressbar"
+              aria-label={progressLabel}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(selectedProgress)}
+            >
+              <div style={{ width: `${selectedProgress}%` }} />
+            </div>
+          </div>
+
+          <div className="equipment-flow" aria-label={`입력 ${selected?.inputCount ?? 0}, 출력 ${selected?.outputCount ?? 0}`}>
+            <div className="flow-node flow-input">
+              <span>{selected?.type === "storage" ? "보관" : "입력"}</span>
+              <strong>
+                {selected?.inputCount ?? 0}
+                {selectedDetails?.inputCapacity !== undefined ? <small> / {selectedDetails.inputCapacity}</small> : null}
+              </strong>
+            </div>
+            <div className={`flow-path ${selectedStatus === "working" || selectedStatus === "storing" ? "active" : ""}`} aria-hidden="true">
+              <i /><i /><i />
+            </div>
+            <div className="flow-node flow-output">
+              <span>출력</span>
+              <strong>
+                {selected?.outputCount ?? 0}
+                {selectedDetails?.outputCapacity !== undefined ? <small> / {selectedDetails.outputCapacity}</small> : null}
+              </strong>
             </div>
           </div>
 
           <dl className="equipment-data">
             <div>
-              <dt>처리량</dt>
+              <dt>기준 처리량</dt>
               <dd>{selected ? TYPE_RATE[selected.type] : "—"}</dd>
-            </div>
-            <div>
-              <dt>입력 · 보관</dt>
-              <dd>{selected?.inputCount ?? 0}</dd>
-            </div>
-            <div>
-              <dt>출력 대기</dt>
-              <dd>{selected?.outputCount ?? 0}</dd>
             </div>
           </dl>
         </div>

@@ -67,9 +67,13 @@ export type SelectedInfo = {
   id: number;
   type: BuildType;
   status: string;
+  runtimeState?: MachineRuntimeState;
+  recipeName?: string;
   progress: number;
   inputCount: number;
+  inputCapacity?: number;
   outputCount: number;
+  outputCapacity?: number;
 } | null;
 
 export type GameCallbacks = {

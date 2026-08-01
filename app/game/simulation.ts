@@ -6,8 +6,9 @@ import {
   footprint,
   machinePorts,
   sameDirection,
-} from "./config";
-import type { BeltItem, BuildType, ItemType, MachineState, SelectedInfo, StructureData } from "./types";
+} from "./config.ts";
+import { FixedStepClock } from "./sim/clock.ts";
+import type { BeltItem, BuildType, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
 
 const PROCESS_TIME = {
   miner: 2.1,
@@ -21,6 +22,7 @@ export class FactorySimulation {
   readonly machines = new Map<number, MachineState>();
   readonly beltItems = new Map<number, BeltItem>();
 
+  private readonly clock = new FixedStepClock();
   private nextItemId = 1;
   private inputPorts = new Map<string, { machineId: number; inputIndex: number }>();
 
@@ -108,31 +110,73 @@ export class FactorySimulation {
         id,
         type: data.type,
         status: jammed ? "출력 막힘" : item ? "운송 중" : "가동 대기",
+        runtimeState: jammed ? "blocked" : item ? "working" : "idle",
+        recipeName: "단일 품목 운송",
         progress: item?.progress ?? 0,
         inputCount: item ? 1 : 0,
+        inputCapacity: 1,
         outputCount: jammed ? 1 : 0,
+        outputCapacity: 1,
       };
     }
     const state = this.machines.get(id);
     if (!state) return null;
     let status = "재료 대기";
+    let runtimeState: NonNullable<SelectedInfo>["runtimeState"] = "starved";
     if (data.type === "storage") {
-      if (state.stored >= STORAGE_CAPACITY) status = "가득 참";
-      else status = state.stored > 0 ? "보관 중" : this.hasInputConnection(data) ? "입고 대기" : "벨트 연결 필요";
+      if (state.stored >= STORAGE_CAPACITY) {
+        status = "가득 참";
+        runtimeState = "blocked";
+      } else if (!this.hasInputConnection(data)) {
+        status = "벨트 연결 필요";
+        runtimeState = "disconnected";
+      } else if (state.intakePulse > 0) {
+        status = "입고 중";
+        runtimeState = "working";
+      } else {
+        status = state.stored > 0 ? "보관 중" : "입고 대기";
+        runtimeState = "idle";
+      }
     }
-    else if (state.working) status = "가동 중";
-    else if (state.output.length > 0) status = this.hasOutputConnection(data) ? "출력 대기" : "벨트 연결 필요";
+    else if (state.working) {
+      status = "가동 중";
+      runtimeState = "working";
+    }
+    else if (state.output.length > 0) {
+      status = this.hasOutputConnection(data) ? "출력 정체" : "출력 벨트 연결 필요";
+      runtimeState = "blocked";
+    }
+    else if (data.type !== "miner" && !this.hasInputConnection(data)) {
+      status = "입력 벨트 연결 필요";
+      runtimeState = "disconnected";
+    }
     return {
       id,
       type: data.type,
       status,
+      runtimeState,
+      recipeName: data.type === "miner"
+        ? "철광석 채굴"
+        : data.type === "smelter"
+          ? "철 주괴 제련"
+          : data.type === "assembler"
+            ? "조립품 제작"
+            : "품목 보관",
       progress: data.type === "storage" ? state.stored / STORAGE_CAPACITY : state.progress,
       inputCount: data.type === "storage" ? state.stored : state.input.length,
+      inputCapacity: data.type === "storage" ? STORAGE_CAPACITY : data.type === "assembler" ? 4 : data.type === "smelter" ? 2 : 0,
       outputCount: state.output.length,
+      outputCapacity: data.type === "storage" ? STORAGE_CAPACITY : 1,
     };
   }
 
   update(delta: number) {
+    this.clock.advance(Math.min(Math.max(delta, 0), 0.25), (_tick, fixedDelta) => {
+      this.step(fixedDelta);
+    });
+  }
+
+  private step(delta: number) {
     this.updateMachines(delta);
     this.dispatchMachineOutputs();
     this.updateBelts(delta);
