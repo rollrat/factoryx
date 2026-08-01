@@ -10,11 +10,21 @@ import {
 import { FixedStepClock } from "./sim/clock.ts";
 import { MergerRouter, SplitterRouter } from "./sim/junction.ts";
 import { computePowerGrid, type PowerGridResult } from "./sim/power.ts";
+import { createPhaseOneProject } from "./sim/project.ts";
 import { START_REGISTRY } from "./data/index.ts";
 import { getRuntimeRecipe, resolveRuntimeRecipe, type RuntimeRecipe } from "./recipes/runtimeRecipes.ts";
 import type { BeltItem, BuildType, Direction, ItemType, MachineState, SelectedInfo, StructureData } from "./types.ts";
 
 const isTransport = (type: BuildType) => type === "belt" || type === "splitter" || type === "merger";
+const PROJECT_DOCK_INPUTS = new Map([
+  [cellKey(5, 7), "phase1_plate_in"],
+  [cellKey(5, 8), "phase1_block_in"],
+  [cellKey(5, 9), "phase1_fastener_in"],
+] as const);
+const isProjectDockCell = (cell: string) => {
+  const [x, z] = cell.split(",").map(Number);
+  return x >= 6 && x <= 11 && z >= 6 && z <= 11;
+};
 
 const aggregateItems = (items: readonly ItemType[]) => {
   const counts = new Map<ItemType, number>();
@@ -45,6 +55,7 @@ export class FactorySimulation {
   readonly beltItems = new Map<number, BeltItem>();
 
   private readonly clock = new FixedStepClock();
+  private readonly project = createPhaseOneProject();
   private powerGrid: PowerGridResult = computePowerGrid([]);
   private readonly splitterRouters = new Map<number, SplitterRouter<ItemType>>();
   private readonly mergerRouters = new Map<number, MergerRouter<ItemType>>();
@@ -106,7 +117,7 @@ export class FactorySimulation {
     });
     if (!inside) return false;
     if (type === "miner" && !ORE_ANCHORS.has(cellKey(x, z))) return false;
-    return cells.every((cell) => !this.occupancy.has(cell) && !reserved?.has(cell));
+    return cells.every((cell) => !isProjectDockCell(cell) && !this.occupancy.has(cell) && !reserved?.has(cell));
   }
 
   getStructureAt(x: number, z: number) {
@@ -145,11 +156,26 @@ export class FactorySimulation {
     return total;
   }
 
+  cycleAssemblerRecipe(id: number) {
+    const structure = this.structures.get(id);
+    const state = this.machines.get(id);
+    if (structure?.type !== "assembler" || !state) return null;
+    if (state.working || state.input.length > 0 || state.output.length > 0) return null;
+    const recipes = ["form_iron_plate", "form_iron_rod", "form_fastener_pack"] as const;
+    const currentIndex = recipes.indexOf(state.recipeId as typeof recipes[number]);
+    state.recipeId = recipes[(currentIndex + 1 + recipes.length) % recipes.length];
+    return getRuntimeRecipe(state.recipeId);
+  }
+
   getPowerGrid() {
     return computePowerGrid(
       [...this.structures.values()].map(({ id, type }) => ({ structureId: id, type })),
       this.powerSupplyMW,
     );
+  }
+
+  getProjectProgress() {
+    return this.project.progress();
   }
 
   getSelectedInfo(id: number): SelectedInfo {
@@ -316,6 +342,14 @@ export class FactorySimulation {
       if (item.progress < 1) return;
 
       const direction = directionForRotation(belt.rotation);
+      const projectPortId = PROJECT_DOCK_INPUTS.get(cellKey(belt.x, belt.z));
+      if (projectPortId && direction.x === 1 && direction.z === 0) {
+        const delivery = this.project.deliver({ portId: projectPortId, itemId: item.type, amount: 1 });
+        if (delivery.accepted) {
+          this.beltItems.delete(beltId);
+          return;
+        }
+      }
       const inputPort = this.inputPorts.get(cellKey(belt.x, belt.z));
       if (inputPort !== undefined) {
         const machine = this.structures.get(inputPort.machineId);
@@ -405,10 +439,12 @@ export class FactorySimulation {
       state.input.push(item);
       return true;
     }
-    if (machine.type === "assembler" && item === "iron_ingot" && state.input.length < 4) {
-      state.recipeId = "form_iron_plate";
-      state.input.push(item);
-      return true;
+    if (machine.type === "assembler" && state.input.length < 4) {
+      const acceptedItem = state.recipeId === "form_fastener_pack" ? "iron_rod" : "iron_ingot";
+      if (item === acceptedItem) {
+        state.input.push(item);
+        return true;
+      }
     }
     if (machine.type === "crusher" && item === "limestone" && state.input.length < 8) {
       state.recipeId = "crush_construction_block";

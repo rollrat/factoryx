@@ -206,13 +206,13 @@ button {
 
 .objective-readout {
   margin-left: auto;
-  width: min(360px, 34vw);
+  width: min(440px, 42vw);
   min-height: 46px;
   display: grid;
   grid-template-columns: auto 1fr auto;
-  grid-template-rows: 1fr 3px;
+  grid-template-rows: auto 3px auto;
   align-items: center;
-  gap: 0 12px;
+  gap: 5px 12px;
   padding: 7px 10px 8px 12px;
 }
 
@@ -237,8 +237,11 @@ button {
 }
 
 .objective-copy strong {
+  overflow: hidden;
   font-size: 11px;
   line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .objective-copy span {
@@ -265,6 +268,67 @@ button {
   background: #293032;
 }
 
+.objective-requirements {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 1px;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-color: #536264 transparent;
+  scrollbar-width: thin;
+}
+
+.objective-requirements li {
+  min-width: 0;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+  padding: 3px 6px;
+  border: 1px solid rgba(190, 206, 205, 0.13);
+  border-left: 2px solid var(--amber);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.objective-requirements li span {
+  max-width: 110px;
+  overflow: hidden;
+  color: #aab6b5;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.objective-requirements li strong {
+  color: #d6dfde;
+  font: 720 8px/1 var(--font-geist-mono), monospace;
+  white-space: nowrap;
+}
+
+.objective-requirements li.is-complete {
+  border-left-color: var(--cyan);
+  background: rgba(98, 215, 199, 0.07);
+}
+
+.objective-requirements li.is-complete strong,
+.objective-readout.is-completed .objective-index {
+  color: var(--cyan);
+}
+
+.objective-requirements li.is-empty {
+  color: var(--muted);
+  border-left-color: #697677;
+  font-size: 8px;
+}
+
+.objective-readout.is-completed .objective-track > div {
+  box-shadow: 0 0 7px rgba(98, 215, 199, 0.55);
+}
+
 .objective-track > div,
 .process-track > div {
   height: 100%;
@@ -274,7 +338,7 @@ button {
 
 .inspector {
   position: absolute;
-  top: 70px;
+  top: 98px;
   right: 14px;
   width: 286px;
   display: grid;
@@ -1122,7 +1186,7 @@ kbd {
   }
 
   .inspector {
-    top: 64px;
+    top: 96px;
     right: 8px;
     width: min(286px, calc(100vw - 16px));
   }
@@ -1174,6 +1238,22 @@ kbd {
 
   .objective-index {
     padding-right: 7px;
+  }
+
+  .objective-readout {
+    column-gap: 7px;
+  }
+
+  .objective-count {
+    font-size: 8px;
+  }
+
+  .objective-count b {
+    font-size: 12px;
+  }
+
+  .objective-requirements li span {
+    max-width: 72px;
   }
 
   .inspector {

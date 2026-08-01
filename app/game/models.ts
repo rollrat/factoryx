@@ -182,6 +182,22 @@ export const createItemModel = (type: ItemType, materials: FactoryMaterials) => 
     addBox(group, [0.34, 0.07, 0.24], [0, 0.02, 0], materials.pale);
     addBox(group, [0.27, 0.025, 0.17], [0, 0.065, 0], materials.steel, false);
   }
+  if (type === "iron_rod") {
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.38, 8), materials.pale);
+    rod.rotation.z = Math.PI / 2;
+    rod.castShadow = true;
+    group.add(rod);
+    addBox(group, [0.05, 0.13, 0.13], [0, 0, 0], materials.orange, false);
+  }
+  if (type === "fastener_pack") {
+    addBox(group, [0.28, 0.18, 0.22], [0, 0.07, 0], materials.dark);
+    for (const x of [-0.075, 0, 0.075]) {
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.24, 6), materials.pale);
+      pin.position.set(x, 0.14, 0);
+      pin.rotation.x = Math.PI / 2;
+      group.add(pin);
+    }
+  }
   if (type === "construction_block") {
     addBox(group, [0.3, 0.18, 0.24], [0, 0.07, 0], materials.limestone);
     addBox(group, [0.22, 0.025, 0.16], [0, 0.175, 0], materials.pale, false);

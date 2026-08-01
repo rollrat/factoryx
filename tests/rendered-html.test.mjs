@@ -30,7 +30,8 @@ test("server-renders the Factory X game shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>Factory X — Automation Prototype<\/title>/i);
   assert.match(html, />A-17</);
-  assert.match(html, />목표 01</);
+  assert.match(html, />PROJECT</);
+  assert.match(html, />기초 정착 패키지</);
   assert.match(html, /aria-label="건설 도구"/);
   assert.match(html, /aria-label="공장 전체 생산 계보 열기"/);
   assert.match(html, />생산 계보</);

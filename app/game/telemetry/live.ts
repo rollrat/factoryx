@@ -23,6 +23,8 @@ export const LEGACY_ITEM_IDS = {
   iron_ingot: "iron_ingot",
   copper_ingot: "copper_ingot",
   iron_plate: "iron_plate",
+  iron_rod: "iron_rod",
+  fastener_pack: "fastener_pack",
   limestone: "limestone",
   construction_block: "construction_block",
 } as const satisfies Record<ItemType, string>;

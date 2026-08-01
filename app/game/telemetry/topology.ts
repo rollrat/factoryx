@@ -72,6 +72,8 @@ const ITEM_INFO: Record<ItemType, Readonly<{ id: string; label: string; column: 
   iron_ingot: { id: "iron_ingot", label: "철 주괴", column: 3 },
   copper_ingot: { id: "copper_ingot", label: "구리 주괴", column: 3 },
   iron_plate: { id: "iron_plate", label: "철판", column: 5 },
+  iron_rod: { id: "iron_rod", label: "철봉", column: 5 },
+  fastener_pack: { id: "fastener_pack", label: "체결재 팩", column: 5 },
   limestone: { id: "limestone", label: "석회암", column: 1 },
   construction_block: { id: "construction_block", label: "건축 블록", column: 3 },
 };
@@ -167,7 +169,12 @@ const outputItemFor = (simulation: FactorySimulation, structure: StructureData &
     return "iron_ore";
   }
   if (structure.type === "crusher") return "construction_block";
-  if (structure.type === "assembler") return "iron_plate";
+  if (structure.type === "assembler") {
+    const recipeId = simulation.machines.get(structure.id)?.recipeId;
+    if (recipeId === "form_iron_rod") return "iron_rod";
+    if (recipeId === "form_fastener_pack") return "fastener_pack";
+    return "iron_plate";
+  }
   if (structure.type === "smelter") {
     return simulation.machines.get(structure.id)?.recipeId === "smelt_copper_ingot"
       ? "copper_ingot"
@@ -197,7 +204,11 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
       usedItems.add(copper ? "copper_ore" : "iron_ore");
       usedItems.add(copper ? "copper_ingot" : "iron_ingot");
     }
-    if (structure.type === "assembler") { usedItems.add("iron_ingot"); usedItems.add("iron_plate"); }
+    if (structure.type === "assembler") {
+      const outputItem = outputItemFor(simulation, structure) ?? "iron_plate";
+      usedItems.add(outputItem === "fastener_pack" ? "iron_rod" : "iron_ingot");
+      usedItems.add(outputItem);
+    }
     if (structure.type === "crusher") { usedItems.add("limestone"); usedItems.add("construction_block"); }
     if (structure.type === "storage") {
       simulation.machines.get(structure.id)?.storedItems.forEach((item) => usedItems.add(item));
@@ -226,6 +237,8 @@ export function buildRuntimeTopology(simulation: FactorySimulation): RuntimeTopo
     iron_ingot: 0,
     copper_ingot: 0,
     iron_plate: 0,
+    iron_rod: 0,
+    fastener_pack: 0,
     limestone: 0,
     construction_block: 0,
   };

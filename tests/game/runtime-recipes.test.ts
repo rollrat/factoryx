@@ -55,9 +55,9 @@ test("maps the visual assembler to the hydraulic iron plate recipe", () => {
   assert.equal(resolveRuntimeRecipe({ type: "assembler", inputItemId: "copper_ingot" }), null);
 });
 
-test("direct lookup exposes only the visual runtime recipe subset", () => {
+test("direct lookup exposes the visual start-tier recipe subset", () => {
   assert.equal(getRuntimeRecipe("form_iron_plate")?.outputs[0]?.amount, 2);
-  assert.equal(getRuntimeRecipe("form_iron_rod"), null);
+  assert.equal(getRuntimeRecipe("form_iron_rod")?.outputs[0]?.itemId, "iron_rod");
+  assert.equal(getRuntimeRecipe("form_fastener_pack")?.inputs[0]?.itemId, "iron_rod");
   assert.equal(getRuntimeRecipe("missing_recipe"), null);
 });
-

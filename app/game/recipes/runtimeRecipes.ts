@@ -7,6 +7,8 @@ export type RuntimeItemId =
   | "iron_ingot"
   | "copper_ingot"
   | "iron_plate"
+  | "iron_rod"
+  | "fastener_pack"
   | "limestone"
   | "construction_block";
 
@@ -50,6 +52,8 @@ const RUNTIME_RECIPE_IDS = new Set<RecipeId>([
   "smelt_iron_ingot",
   "smelt_copper_ingot",
   "form_iron_plate",
+  "form_iron_rod",
+  "form_fastener_pack",
   "crush_construction_block",
 ]);
 
@@ -59,6 +63,8 @@ const RUNTIME_ITEM_IDS = new Set<RuntimeItemId>([
   "iron_ingot",
   "copper_ingot",
   "iron_plate",
+  "iron_rod",
+  "fastener_pack",
   "limestone",
   "construction_block",
 ]);

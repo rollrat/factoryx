@@ -2,12 +2,27 @@ import { useEffect, useRef } from "react";
 import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 
+export type ProjectHudRequirement = Readonly<{
+  itemId: string;
+  name: string;
+  delivered: number;
+  total: number;
+}>;
+
+export type ProjectHudState = Readonly<{
+  stageName: string;
+  delivered: number;
+  total: number;
+  completed: boolean;
+  requirements: readonly ProjectHudRequirement[];
+}>;
+
 type GameHudProps = {
   activeTool: Tool;
   cameraMode: CameraMode;
   pointerLocked: boolean;
   credits: number;
-  motors: number;
+  project: ProjectHudState;
   powerSupply: number;
   powerDemand: number;
   powerServed: number;
@@ -104,7 +119,7 @@ export default function GameHud({
   cameraMode,
   pointerLocked,
   credits,
-  motors,
+  project,
   powerSupply,
   powerDemand,
   powerServed,
@@ -124,7 +139,11 @@ export default function GameHud({
     ? `${numericToolKeys[0]}–${numericToolKeys[numericToolKeys.length - 1]}`
     : numericToolKeys[0] ?? "숫자";
   const isPowerLimited = powerOverloaded || powerDemand > powerSupply || powerServed < powerDemand;
-  const objectiveProgress = Math.min(100, (motors / 20) * 100);
+  const projectDelivered = Math.max(0, Number.isFinite(project.delivered) ? project.delivered : 0);
+  const projectTotal = Math.max(0, Number.isFinite(project.total) ? project.total : 0);
+  const objectiveProgress = project.completed
+    ? 100
+    : projectTotal > 0 ? Math.min(100, (projectDelivered / projectTotal) * 100) : 0;
   const selectedDetails = selected as SelectedDetails | null;
   const selectedStatus = selectedDetails ? getEquipmentStatus(selectedDetails) : "idle";
   const selectedProgress = selectedDetails && Number.isFinite(selectedDetails.progress)
@@ -178,16 +197,36 @@ export default function GameHud({
           </div>
         </div>
 
-        <div className="objective-readout instrument-panel">
-          <span className="objective-index">목표 01</span>
+        <div className={`objective-readout instrument-panel ${project.completed ? "is-completed" : ""}`}>
+          <span className="objective-index">{project.completed ? "COMPLETE" : "PROJECT"}</span>
           <div className="objective-copy">
-            <strong>철판 생산</strong>
-            <span>철광석 → 철 주괴 → 철판</span>
+            <strong>{project.stageName}</strong>
+            <span>{project.requirements.length > 0 ? `${project.requirements.length}개 품목 납품 계약` : "납품 요구사항 없음"}</span>
           </div>
-          <span className="objective-count"><b>{motors}</b> / 20</span>
-          <div className="objective-track" aria-label={`철판 생산 진행률 ${motors}/20`}>
+          <span className="objective-count"><b>{projectDelivered.toLocaleString("ko-KR")}</b> / {projectTotal.toLocaleString("ko-KR")}</span>
+          <div
+            className="objective-track"
+            role="progressbar"
+            aria-label={`${project.stageName} 진행률`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(objectiveProgress)}
+          >
             <div style={{ width: `${objectiveProgress}%` }} />
           </div>
+          <ul className="objective-requirements" aria-label="프로젝트 납품 요구사항">
+            {project.requirements.length > 0 ? project.requirements.map((requirement) => {
+              const delivered = Math.max(0, Number.isFinite(requirement.delivered) ? requirement.delivered : 0);
+              const total = Math.max(0, Number.isFinite(requirement.total) ? requirement.total : 0);
+              const complete = total > 0 && delivered >= total;
+              return (
+                <li className={complete ? "is-complete" : ""} key={requirement.itemId} title={`${requirement.name} ${delivered}/${total}`}>
+                  <span>{requirement.name}</span>
+                  <strong>{delivered.toLocaleString("ko-KR")} / {total.toLocaleString("ko-KR")}</strong>
+                </li>
+              );
+            }) : <li className="is-empty">현재 단계에 필요한 품목이 없습니다</li>}
+          </ul>
         </div>
       </header>
 

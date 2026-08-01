@@ -74,6 +74,19 @@ export type PowerInfo = {
   overloaded: boolean;
 };
 
+export type ProjectInfo = {
+  stageName: string;
+  delivered: number;
+  total: number;
+  completed: boolean;
+  requirements: readonly Readonly<{
+    itemId: ItemType;
+    name: string;
+    delivered: number;
+    total: number;
+  }>[];
+};
+
 export type HistoryEntry = {
   added: StructureData[];
   removed: StructureData[];
@@ -105,6 +118,7 @@ export type GameCallbacks = {
   onPointerLock: (locked: boolean) => void;
   onBeltBuildInfo: (info: BeltBuildInfo) => void;
   onPower: (power: PowerInfo) => void;
+  onProject: (project: ProjectInfo) => void;
 };
 
 // New data-driven contracts live beside the legacy prototype types so the

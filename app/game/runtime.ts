@@ -18,6 +18,8 @@ import {
   createDistributionPoleModel,
   createFieldPowerCoreModel,
 } from "./models/power";
+import { animateProjectDockModel, createProjectDockModel } from "./models/projectDock";
+import { START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
 import { buildLiveTelemetry } from "./telemetry/live.ts";
 import { buildRuntimeTopology } from "./telemetry/topology.ts";
@@ -42,6 +44,7 @@ export class FactoryRuntime {
   private readonly scene = new THREE.Scene();
   private readonly powerCoreGroup: THREE.Group;
   private readonly powerPoleGroup: THREE.Group;
+  private readonly projectDockGroup: THREE.Group;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.OrthographicCamera(-16, 16, 10, -10, 0.1, 120);
   private readonly firstPersonCamera = new THREE.PerspectiveCamera(70, 1, 0.05, 80);
@@ -120,6 +123,7 @@ export class FactoryRuntime {
   private lastTime = performance.now();
   private elapsed = 0;
   private lastPowerSignature = "";
+  private lastProjectSignature = "";
   private lastMotorCount = -1;
   private selectedUiClock = 0;
 
@@ -147,12 +151,14 @@ export class FactoryRuntime {
     const powerModels = this.setupWorld();
     this.powerCoreGroup = powerModels.core;
     this.powerPoleGroup = powerModels.pole;
+    this.projectDockGroup = powerModels.projectDock;
     this.seedFactory();
     this.bindEvents();
     this.resize();
     this.updateCamera();
     this.callbacks.onCredits(this.credits);
     this.publishPower();
+    this.publishProject();
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
     this.callbacks.onPointerLock(false);
@@ -289,8 +295,11 @@ export class FactoryRuntime {
     const pole = createDistributionPoleModel(this.materials);
     pole.position.set(7.5, 0, -9.5);
     this.scene.add(pole);
+    const projectDock = createProjectDockModel(this.materials);
+    projectDock.position.set(8.5, 0, 8.5);
+    this.scene.add(projectDock);
     this.scene.add(this.hoverTile);
-    return { core, pole };
+    return { core, pole, projectDock };
   }
 
   private seedFactory() {
@@ -763,6 +772,16 @@ export class FactoryRuntime {
       x: "demolish",
     };
     if (tools[key]) this.setTool(tools[key]);
+    if (key === "f" && this.activeTool === "inspect" && this.selectedId !== null) {
+      const recipe = this.simulation.cycleAssemblerRecipe(this.selectedId);
+      if (recipe) {
+        this.callbacks.onSelected(this.simulation.getSelectedInfo(this.selectedId));
+        this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
+      } else {
+        this.callbacks.onToast("성형기가 비어 있고 정지한 상태에서만 레시피를 바꿀 수 있습니다");
+      }
+      return;
+    }
     if (key === "r") {
       this.rotation = (this.rotation + 1) % 4;
       if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(this.currentCell, false);
@@ -954,6 +973,18 @@ export class FactoryRuntime {
     };
     animateFieldPowerCoreModel(this.powerCoreGroup, powerState);
     animateDistributionPoleModel(this.powerPoleGroup, powerState);
+    const project = this.simulation.getProjectProgress();
+    const delivered = Object.fromEntries(project.deliveries.map((delivery) => [delivery.itemId, delivery.delivered]));
+    animateProjectDockModel(this.projectDockGroup, {
+      time: this.elapsed,
+      progress: project.totalProgress,
+      deliveryCounts: {
+        ironPlate: delivered.iron_plate ?? 0,
+        constructionBlock: delivered.construction_block ?? 0,
+        fastenerPack: delivered.fastener_pack ?? 0,
+      },
+      completed: project.completed,
+    });
   }
 
   private publishPower() {
@@ -962,6 +993,25 @@ export class FactoryRuntime {
     if (signature === this.lastPowerSignature) return;
     this.lastPowerSignature = signature;
     this.callbacks.onPower(power);
+  }
+
+  private publishProject() {
+    const progress = this.simulation.getProjectProgress();
+    const signature = progress.deliveries.map(({ delivered }) => delivered).join(":");
+    if (signature === this.lastProjectSignature) return;
+    this.lastProjectSignature = signature;
+    this.callbacks.onProject({
+      stageName: "기초 정착 패키지",
+      delivered: progress.deliveredTotal,
+      total: progress.requiredTotal,
+      completed: progress.completed,
+      requirements: progress.deliveries.map((delivery) => ({
+        itemId: delivery.itemId,
+        name: START_REGISTRY.items.get(delivery.itemId)?.name ?? delivery.itemId,
+        delivered: delivery.delivered,
+        total: delivery.required,
+      })),
+    });
   }
 
   private animate = (time: number) => {
@@ -992,6 +1042,7 @@ export class FactoryRuntime {
 
     this.simulation.update(delta);
     this.publishPower();
+    this.publishProject();
     this.syncItems(delta);
     this.animateMachines(delta);
     this.selectedUiClock += delta;

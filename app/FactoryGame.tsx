@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import GameHud from "./components/GameHud";
+import GameHud, { type ProjectHudState } from "./components/GameHud";
 import ProductionLineageOverlay from "./components/ProductionLineageOverlay";
 import { FactoryRuntime } from "./game/runtime";
 import type { RuntimeTopology } from "./game/telemetry/topology.ts";
@@ -21,6 +21,17 @@ const EMPTY_TOPOLOGY: RuntimeTopology = {
 };
 
 const INITIAL_POWER: PowerInfo = { supplyMW: 24, demandMW: 0, servedMW: 0, overloaded: false };
+const INITIAL_PROJECT: ProjectHudState = {
+  stageName: "기초 정착 패키지",
+  delivered: 0,
+  total: 240,
+  completed: false,
+  requirements: [
+    { itemId: "iron_plate", name: "철판", delivered: 0, total: 120 },
+    { itemId: "construction_block", name: "건축 블록", delivered: 0, total: 80 },
+    { itemId: "fastener_pack", name: "체결재 팩", delivered: 0, total: 40 },
+  ],
+};
 
 const topologyForOverlay = (topology: RuntimeTopology) => ({
   graph: {
@@ -60,7 +71,6 @@ export default function FactoryGame() {
   const [cameraMode, setCameraMode] = useState<CameraMode>("overview");
   const [pointerLocked, setPointerLocked] = useState(false);
   const [credits, setCredits] = useState(1200);
-  const [motors, setMotors] = useState(0);
   const [selected, setSelected] = useState<SelectedInfo>(null);
   const [beltBuildInfo, setBeltBuildInfo] = useState<BeltBuildInfo>(IDLE_BELT_BUILD);
   const [toast, setToast] = useState("출력 포트에서 벨트를 연결하세요");
@@ -68,6 +78,7 @@ export default function FactoryGame() {
   const [lineageOpen, setLineageOpen] = useState(false);
   const [topology, setTopology] = useState<RuntimeTopology>(EMPTY_TOPOLOGY);
   const [power, setPower] = useState<PowerInfo>(INITIAL_POWER);
+  const [project, setProject] = useState<ProjectHudState>(INITIAL_PROJECT);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -81,7 +92,7 @@ export default function FactoryGame() {
     if (!mount) return;
     const runtime = new FactoryRuntime(mount, {
       onCredits: setCredits,
-      onMotors: setMotors,
+      onMotors: () => {},
       onSelected: setSelected,
       onToast: showToast,
       onToolChange: setActiveTool,
@@ -89,6 +100,7 @@ export default function FactoryGame() {
       onPointerLock: setPointerLocked,
       onBeltBuildInfo: setBeltBuildInfo,
       onPower: setPower,
+      onProject: setProject,
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
@@ -127,7 +139,7 @@ export default function FactoryGame() {
         cameraMode={cameraMode}
         pointerLocked={pointerLocked}
         credits={credits}
-        motors={motors}
+        project={project}
         powerSupply={power.supplyMW}
         powerDemand={power.demandMW}
         powerServed={power.servedMW}
