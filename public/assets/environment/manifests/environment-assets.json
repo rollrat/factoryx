@@ -60,6 +60,63 @@
       "bytes": 43380
     },
     {
+      "id": "landmark_great_sail_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_great_sail_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_great_sail_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        1404,
+        589,
+        238
+      ],
+      "collisionTriangles": 58,
+      "bytes": 83480
+    },
+    {
+      "id": "landmark_iron_ribs_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_iron_ribs_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_iron_ribs_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        2612,
+        1016,
+        354
+      ],
+      "collisionTriangles": 36,
+      "bytes": 221304
+    },
+    {
+      "id": "landmark_pressure_vent_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_pressure_vent_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_pressure_vent_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        4084,
+        1777,
+        889
+      ],
+      "collisionTriangles": 80,
+      "bytes": 314380
+    },
+    {
       "id": "landmark_twin_needles_a",
       "kind": "environment_landmark",
       "url": "/assets/environment/models/landmark_twin_needles_a.glb",

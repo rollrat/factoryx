@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "landmark_great_sail_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         1404,
+                         589,
+                         238
+                     ],
+    "collisionTriangles":  58,
+    "errors":  [
+
+               ],
+    "glbBytes":  83480,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/landmark_great_sail_a.png"
+}

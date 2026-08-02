@@ -26,6 +26,9 @@ test("the Blender environment assets ship validated LOD GLBs", async () => {
     "flora_sail_membrane_a",
     "rock_layered_plate_a",
     "landmark_twin_needles_a",
+    "landmark_iron_ribs_a",
+    "landmark_great_sail_a",
+    "landmark_pressure_vent_a",
   ]) {
     const asset = manifest.assets.find(({ id }) => id === assetId);
     assert.ok(asset);

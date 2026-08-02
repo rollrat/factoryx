@@ -42,3 +42,12 @@ if ($LASTEXITCODE -ne 0) { throw "Layered plate asset build failed" }
 
 & (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_twin_needles_a\build_landmark_twin_needles_a.ps1") -BlenderPath $BlenderPath
 if ($LASTEXITCODE -ne 0) { throw "Twin needles landmark build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_iron_ribs_a\build_landmark_iron_ribs_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Iron ribs landmark build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_great_sail_a\build-landmark-great-sail-a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Great sail landmark build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_pressure_vent_a\build_landmark_pressure_vent_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Pressure vent landmark build failed" }

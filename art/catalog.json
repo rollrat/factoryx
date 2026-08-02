@@ -89,6 +89,39 @@
       "lodTriangleCaps": [9000, 3000, 900],
       "collisionTriangleCap": 256,
       "runtimeLandmarkId": "twin_needles"
+    },
+    {
+      "id": "landmark_iron_ribs_a",
+      "kind": "environment_landmark",
+      "family": "iron_ribs",
+      "source": "art/blender/environment/landmarks/landmark_iron_ribs_a/landmark_iron_ribs_a.blend",
+      "output": "public/assets/environment/models/landmark_iron_ribs_a.glb",
+      "preview": "public/assets/environment/previews/landmark_iron_ribs_a.png",
+      "lodTriangleCaps": [9000, 3000, 900],
+      "collisionTriangleCap": 256,
+      "runtimeLandmarkId": "iron_ribs"
+    },
+    {
+      "id": "landmark_great_sail_a",
+      "kind": "environment_landmark",
+      "family": "great_sail",
+      "source": "art/blender/environment/landmarks/landmark_great_sail_a/landmark_great_sail_a.blend",
+      "output": "public/assets/environment/models/landmark_great_sail_a.glb",
+      "preview": "public/assets/environment/previews/landmark_great_sail_a.png",
+      "lodTriangleCaps": [9000, 3000, 900],
+      "collisionTriangleCap": 256,
+      "runtimeLandmarkId": "great_sail"
+    },
+    {
+      "id": "landmark_pressure_vent_a",
+      "kind": "environment_landmark",
+      "family": "pressure_vent",
+      "source": "art/blender/environment/landmarks/landmark_pressure_vent_a/landmark_pressure_vent_a.blend",
+      "output": "public/assets/environment/models/landmark_pressure_vent_a.glb",
+      "preview": "public/assets/environment/previews/landmark_pressure_vent_a.png",
+      "lodTriangleCaps": [9000, 3000, 1200],
+      "collisionTriangleCap": 256,
+      "runtimeLandmarkId": "pressure_vent"
     }
   ]
 }

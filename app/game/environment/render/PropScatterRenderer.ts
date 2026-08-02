@@ -396,7 +396,13 @@ export class PropScatterRenderer {
       ["membrane", "flora_sail_membrane_a"],
       ["plate", "rock_layered_plate_a"],
     ];
-    let pending = assets.length + 1;
+    const landmarkAssets: ReadonlyArray<readonly [string, string]> = [
+      ["twin_needles", "landmark_twin_needles_a"],
+      ["iron_ribs", "landmark_iron_ribs_a"],
+      ["great_sail", "landmark_great_sail_a"],
+      ["pressure_vent", "landmark_pressure_vent_a"],
+    ];
+    let pending = assets.length + landmarkAssets.length;
     let failed = false;
     const settle = () => {
       pending -= 1;
@@ -424,36 +430,42 @@ export class PropScatterRenderer {
         settle();
       });
     });
-    void loadEnvironmentAsset("landmark_twin_needles_a").then((asset) => {
-      if (this.disposed) {
-        [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
-        return;
-      }
-      const group = this.root.getObjectByName("landmark:twin_needles");
-      const definition = this.definition.landmarks.find(({ id }) => id === "twin_needles");
-      if (!group || !definition) throw new Error("missing twin needles landmark target");
-      const fallbackMeshes = group.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
-      const material = fallbackMeshes[0]?.material;
-      if (!material) throw new Error("missing twin needles landmark material");
-      fallbackMeshes.forEach((mesh) => mesh.geometry.dispose());
-      group.clear();
-      const mesh = new THREE.Mesh(asset.lods[0], material);
-      asset.lods[0].computeBoundingBox();
-      const bounds = asset.lods[0].boundingBox!;
-      const size = new THREE.Vector3();
-      bounds.getSize(size);
-      const scale = definition.scale.y / Math.max(size.y, 0.001);
-      mesh.scale.setScalar(scale);
-      mesh.position.y = -bounds.min.y * scale;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData.externalLandmarkLods = asset.lods;
-      mesh.userData.externalAssetId = asset.id;
-      group.add(mesh);
-    }).catch((error: unknown) => {
-      failed = true;
-      console.warn("FactoryX landmark asset fallback: landmark_twin_needles_a", error);
-    }).finally(settle);
+    landmarkAssets.forEach(([landmarkId, assetId]) => {
+      void loadEnvironmentAsset(assetId).then((asset) => {
+        if (this.disposed) {
+          [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
+          return;
+        }
+        const group = this.root.getObjectByName(`landmark:${landmarkId}`);
+        const definition = this.definition.landmarks.find(({ id }) => id === landmarkId);
+        if (!group || !definition) throw new Error(`missing ${landmarkId} landmark target`);
+        const fallbackMeshes = group.children.filter((child): child is THREE.Mesh => (
+          child instanceof THREE.Mesh && !child.name && !child.userData.externalAssetId
+        ));
+        const material = fallbackMeshes[0]?.material;
+        if (!material) throw new Error(`missing ${landmarkId} landmark material`);
+        fallbackMeshes.forEach((mesh) => {
+          group.remove(mesh);
+          mesh.geometry.dispose();
+        });
+        const mesh = new THREE.Mesh(asset.lods[0], material);
+        asset.lods[0].computeBoundingBox();
+        const bounds = asset.lods[0].boundingBox!;
+        const size = new THREE.Vector3();
+        bounds.getSize(size);
+        const scale = definition.scale.y / Math.max(size.y, 0.001);
+        mesh.scale.setScalar(scale);
+        mesh.position.y = -bounds.min.y * scale;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData.externalLandmarkLods = asset.lods;
+        mesh.userData.externalAssetId = asset.id;
+        group.add(mesh);
+      }).catch((error: unknown) => {
+        failed = true;
+        console.warn(`FactoryX landmark asset fallback: ${assetId}`, error);
+      }).finally(settle);
+    });
   }
 
   private updateInstanceMatrices(mesh: THREE.InstancedMesh, animate: boolean) {

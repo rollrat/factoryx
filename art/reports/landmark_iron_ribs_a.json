@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "landmark_iron_ribs_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         2612,
+                         1016,
+                         354
+                     ],
+    "collisionTriangles":  36,
+    "errors":  [
+
+               ],
+    "glbBytes":  221304,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/landmark_iron_ribs_a.png"
+}
