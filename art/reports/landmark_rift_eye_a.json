@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "landmark_rift_eye_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         1302,
+                         316,
+                         82
+                     ],
+    "collisionTriangles":  60,
+    "errors":  [
+
+               ],
+    "glbBytes":  102136,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/landmark_rift_eye_a.png"
+}

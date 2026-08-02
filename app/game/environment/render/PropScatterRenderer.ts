@@ -401,6 +401,8 @@ export class PropScatterRenderer {
       ["iron_ribs", "landmark_iron_ribs_a"],
       ["great_sail", "landmark_great_sail_a"],
       ["pressure_vent", "landmark_pressure_vent_a"],
+      ["crown_fault", "landmark_crown_fault_a"],
+      ["rift_eye", "landmark_rift_eye_a"],
     ];
     let pending = assets.length + landmarkAssets.length;
     let failed = false;
@@ -453,9 +455,12 @@ export class PropScatterRenderer {
         const bounds = asset.lods[0].boundingBox!;
         const size = new THREE.Vector3();
         bounds.getSize(size);
-        const scale = definition.scale.y / Math.max(size.y, 0.001);
-        mesh.scale.setScalar(scale);
-        mesh.position.y = -bounds.min.y * scale;
+        mesh.scale.set(
+          definition.scale.x / Math.max(size.x, 0.001),
+          definition.scale.y / Math.max(size.y, 0.001),
+          definition.scale.z / Math.max(size.z, 0.001),
+        );
+        mesh.position.y = -bounds.min.y * mesh.scale.y;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.userData.externalLandmarkLods = asset.lods;

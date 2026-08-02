@@ -51,3 +51,19 @@ if ($LASTEXITCODE -ne 0) { throw "Great sail landmark build failed" }
 
 & (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_pressure_vent_a\build_landmark_pressure_vent_a.ps1") -BlenderPath $BlenderPath
 if ($LASTEXITCODE -ne 0) { throw "Pressure vent landmark build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_crown_fault_a\build_landmark_crown_fault_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Crown fault landmark build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_rift_eye_a\build-landmark-rift-eye-a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Rift eye landmark build failed" }
+
+# Every asset-specific builder stays isolated; the orchestrator owns the final shared manifest merge.
+$Catalog = Get-Content -LiteralPath (Join-Path $ProjectRoot "art\catalog.json") -Raw | ConvertFrom-Json
+foreach ($Asset in $Catalog.assets) {
+  node (Join-Path $ProjectRoot "tools\assets\validate-environment-glb.mjs") `
+    (Join-Path $ProjectRoot $Asset.output) `
+    (Join-Path $ProjectRoot "art\reports\$($Asset.id).json") `
+    (Join-Path $ProjectRoot "public\assets\environment\manifests\environment-assets.json")
+  if ($LASTEXITCODE -ne 0) { throw "Manifest merge failed for $($Asset.id)" }
+}

@@ -69,16 +69,20 @@ def slab_mesh(asset_id: str, lod: int) -> tuple[bpy.types.Mesh, list[int]]:
         ],
         [
             (-0.10, 0.00, 0.00, 1.48, 0.73, 0.30, -0.15, 0),
-            (0.08, -0.04, 0.25, 1.34, 0.68, 0.24, 0.20, 1),
             (-0.20, 0.05, 0.47, 1.25, 0.62, 0.28, -0.28, 0),
             (0.13, 0.02, 0.71, 1.08, 0.56, 0.23, 0.31, 1),
             (-0.08, -0.02, 0.94, 0.98, 0.49, 0.25, -0.24, 0),
             (0.22, 0.06, 1.17, 0.83, 0.43, 0.27, 0.22, 1),
+            # Keep the same crown landmark as LOD0; LOD1 removes an
+            # intermediate layer rather than shortening the asset silhouette.
+            (-0.21, 0.10, 1.70, 0.51, 0.31, 0.24, 0.26, 1),
         ],
         [
             (-0.10, 0.00, 0.00, 1.48, 0.73, 0.30, -0.15, 0),
-            (-0.15, 0.04, 0.47, 1.25, 0.62, 0.28, -0.28, 1),
-            (0.02, 0.00, 0.94, 0.98, 0.49, 0.25, 0.22, 0),
+            # Far LOD carries a base, a mid shelf, and the true crown.  This
+            # deliberately preserves the full footprint and vertical profile.
+            (-0.08, -0.02, 0.94, 0.98, 0.49, 0.25, -0.24, 0),
+            (-0.21, 0.10, 1.70, 0.51, 0.31, 0.24, 0.26, 1),
         ],
     )
     # Six deliberately irregular perimeter samples.  These preserve a broad,

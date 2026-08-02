@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "landmark_crown_fault_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         604,
+                         322,
+                         110
+                     ],
+    "collisionTriangles":  48,
+    "errors":  [
+
+               ],
+    "glbBytes":  66592,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/landmark_crown_fault_a.png"
+}

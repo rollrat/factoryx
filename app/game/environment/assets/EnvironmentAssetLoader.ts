@@ -40,8 +40,12 @@ const loadManifest = () => {
 };
 
 const bakedGeometry = (object: THREE.Object3D, name: string) => {
-  const node = object.getObjectByName(name);
-  if (!(node instanceof THREE.Mesh)) throw new Error(`missing environment asset mesh ${name}`);
+  const container = object.getObjectByName(name);
+  let node = container instanceof THREE.Mesh ? container : undefined;
+  container?.traverse((child) => {
+    if (!node && child instanceof THREE.Mesh) node = child;
+  });
+  if (!node) throw new Error(`missing environment asset mesh group ${name}`);
   object.updateMatrixWorld(true);
   const geometry = node.geometry.clone();
   geometry.applyMatrix4(node.matrixWorld);
@@ -57,12 +61,12 @@ export const loadEnvironmentAsset = (assetId: string): Promise<LoadedEnvironment
     const asset = manifest.assets.find(({ id }) => id === assetId);
     if (!asset) throw new Error(`unknown environment asset ${assetId}`);
     const gltf = await new GLTFLoader().loadAsync(asset.url);
-    const lods = asset.lodNodes.map((name) => bakedGeometry(gltf.scene, `${assetId}_lod${name.at(-1)}`)) as [
+    const lods = asset.lodNodes.map((name) => bakedGeometry(gltf.scene, name)) as [
       THREE.BufferGeometry,
       THREE.BufferGeometry,
       THREE.BufferGeometry,
     ];
-    const collision = bakedGeometry(gltf.scene, `${assetId}_collision`);
+    const collision = bakedGeometry(gltf.scene, asset.collisionNode);
     gltf.scene.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       child.geometry.dispose();

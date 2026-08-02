@@ -60,6 +60,25 @@
       "bytes": 43380
     },
     {
+      "id": "landmark_crown_fault_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_crown_fault_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_crown_fault_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        604,
+        322,
+        110
+      ],
+      "collisionTriangles": 48,
+      "bytes": 66592
+    },
+    {
       "id": "landmark_great_sail_a",
       "kind": "environment_landmark",
       "url": "/assets/environment/models/landmark_great_sail_a.glb",
@@ -117,6 +136,25 @@
       "bytes": 314380
     },
     {
+      "id": "landmark_rift_eye_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_rift_eye_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_rift_eye_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        1302,
+        316,
+        82
+      ],
+      "collisionTriangles": 60,
+      "bytes": 102136
+    },
+    {
       "id": "landmark_twin_needles_a",
       "kind": "environment_landmark",
       "url": "/assets/environment/models/landmark_twin_needles_a.glb",
@@ -167,11 +205,11 @@
       "collisionNode": "COL_SIMPLE",
       "lodTriangles": [
         856,
-        504,
+        508,
         84
       ],
       "collisionTriangles": 20,
-      "bytes": 86776
+      "bytes": 87040
     },
     {
       "id": "rock_layered_plate_a",

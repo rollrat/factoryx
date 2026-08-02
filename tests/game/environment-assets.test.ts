@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const manifestUrl = new URL("../../public/assets/environment/manifests/environment-assets.json", import.meta.url);
+const catalogUrl = new URL("../../art/catalog.json", import.meta.url);
 const modelUrl = (assetId: string) => new URL(`../../public/assets/environment/models/${assetId}.glb`, import.meta.url);
 
 test("the Blender environment assets ship validated LOD GLBs", async () => {
@@ -16,26 +17,23 @@ test("the Blender environment assets ship validated LOD GLBs", async () => {
       collisionTriangles: number;
     }>;
   };
+  const catalog = JSON.parse(await readFile(catalogUrl, "utf8")) as {
+    assets: Array<{ id: string; lodTriangleCaps: number[]; collisionTriangleCap: number }>;
+  };
   assert.equal(manifest.schemaVersion, 1);
-  for (const assetId of [
-    "rock_basalt_medium_a",
-    "rock_windglass_shard_cluster_a",
-    "rock_hematite_slab_a",
-    "flora_wind_fan_a",
-    "flora_marsh_tube_a",
-    "flora_sail_membrane_a",
-    "rock_layered_plate_a",
-    "landmark_twin_needles_a",
-    "landmark_iron_ribs_a",
-    "landmark_great_sail_a",
-    "landmark_pressure_vent_a",
-  ]) {
+  assert.deepEqual(
+    manifest.assets.map(({ id }) => id).sort(),
+    catalog.assets.map(({ id }) => id).sort(),
+    "catalog and runtime manifest must cover the same assets",
+  );
+  for (const { id: assetId, lodTriangleCaps, collisionTriangleCap } of catalog.assets) {
     const asset = manifest.assets.find(({ id }) => id === assetId);
     assert.ok(asset);
     assert.deepEqual(asset.lodNodes, ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"]);
     assert.ok(asset.lodTriangles[0] > asset.lodTriangles[1]);
     assert.ok(asset.lodTriangles[1] > asset.lodTriangles[2]);
-    assert.ok(asset.collisionTriangles <= 128);
+    asset.lodTriangles.forEach((triangles, lod) => assert.ok(triangles <= lodTriangleCaps[lod], `${assetId} LOD${lod} exceeds cap`));
+    assert.ok(asset.collisionTriangles <= collisionTriangleCap);
 
     const binary = await readFile(modelUrl(assetId));
     assert.equal(binary.readUInt32LE(0), 0x46546c67);
