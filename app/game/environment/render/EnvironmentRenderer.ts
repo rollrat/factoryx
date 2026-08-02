@@ -60,6 +60,7 @@ export class EnvironmentRenderer {
   private scatterDensity = 1;
   private shadowDistance = 42;
   private readonly sourceCavesEnabled: boolean;
+  private readonly sourcePresentationEnabled: boolean;
 
   constructor(
     scene: THREE.Scene,
@@ -91,10 +92,15 @@ export class EnvironmentRenderer {
     this.sourceWater = new WaterSourceRenderer(options.worldSource);
     this.sourceCaves = new CaveSourceRenderer(options.worldSource);
     this.sourceCavesEnabled = options.worldSource !== undefined;
+    this.sourcePresentationEnabled = options.worldSource !== undefined;
     this.sourceCaves.setVisible(false);
-    if (this.sourceCavesEnabled) {
+    if (this.sourcePresentationEnabled) {
       this.caves.root.visible = false;
       this.caves.surfaceEntrances.visible = false;
+      this.surfaceFeatures.root.visible = false;
+      this.cliffKit.root.visible = false;
+      this.terrainDetail.root.visible = false;
+      this.props.root.visible = false;
     }
     this.root.add(
       this.terrain.root,
@@ -126,14 +132,16 @@ export class EnvironmentRenderer {
       this.terrain.updateChunks(activeChunks, this.chunks.takeEvictions());
       const currentWeather = this.weather.getWeather();
       this.sky.setWeatherInfluence(currentWeather.kind, currentWeather.strength);
-      this.props.setWindStrength(0.55 + currentWeather.strength * (currentWeather.kind === "mineral_wind" ? 1.2 : 0.55));
-      this.props.update(delta, camera, activeChunks);
-      this.terrainDetail.setWeather(currentWeather.kind, currentWeather.strength);
-      this.terrainDetail.update(camera);
+      if (!this.sourcePresentationEnabled) {
+        this.props.setWindStrength(0.55 + currentWeather.strength * (currentWeather.kind === "mineral_wind" ? 1.2 : 0.55));
+        this.props.update(delta, camera, activeChunks);
+        this.terrainDetail.setWeather(currentWeather.kind, currentWeather.strength);
+        this.terrainDetail.update(camera);
+        this.surfaceFeatures.update(delta);
+        this.cliffKit.update(camera);
+      }
       this.distantHorizon.setWeather(currentWeather.kind, currentWeather.strength);
       this.distantHorizon.update(camera);
-      this.surfaceFeatures.update(delta);
-      this.cliffKit.update(camera);
     }
     this.exploration.update(delta, this.activeStratumId);
     if (this.activeStratumId === "surface" && this.scene.fog instanceof THREE.FogExp2) {
@@ -212,7 +220,10 @@ export class EnvironmentRenderer {
     this.surfaceFogDensity = THREE.MathUtils.clamp(value, 0, 0.04);
     if (this.activeStratumId === "surface" && this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = this.surfaceFogDensity;
   }
-  setPropsVisible(visible: boolean) { this.propsVisible = visible; this.props.root.visible = visible && this.activeStratumId === "surface"; }
+  setPropsVisible(visible: boolean) {
+    this.propsVisible = visible;
+    this.props.root.visible = visible && this.activeStratumId === "surface" && !this.sourcePresentationEnabled;
+  }
   setIndustrialFootprints(footprints: readonly IndustrialFootprint[]) {
     this.terrainDetail.setIndustrialFootprints(footprints);
   }
@@ -226,16 +237,16 @@ export class EnvironmentRenderer {
       if (child.name.startsWith("landmark:")) child.visible = visible;
     });
   }
-  setCliffDebugVisible(visible: boolean) { this.cliffKit.setDebugVisible(visible); }
+  setCliffDebugVisible(visible: boolean) { this.cliffKit.setDebugVisible(visible && !this.sourcePresentationEnabled); }
   setStratum(stratumId: string) {
     this.activeStratumId = stratumId;
     const surface = stratumId === "surface";
     this.terrain.root.visible = surface;
-    this.terrainDetail.root.visible = surface;
+    this.terrainDetail.root.visible = surface && !this.sourcePresentationEnabled;
     this.distantHorizon.root.visible = surface;
-    this.surfaceFeatures.root.visible = surface;
-    this.cliffKit.root.visible = surface;
-    this.props.root.visible = surface && this.propsVisible;
+    this.surfaceFeatures.root.visible = surface && !this.sourcePresentationEnabled;
+    this.cliffKit.root.visible = surface && !this.sourcePresentationEnabled;
+    this.props.root.visible = surface && this.propsVisible && !this.sourcePresentationEnabled;
     this.sourceWater.root.visible = surface;
     this.sourceCaves.setVisible(!surface);
     this.exploration.root.visible = true;
@@ -276,10 +287,10 @@ export class EnvironmentRenderer {
       this.caves.setCutaway(visible);
     }
     this.terrain.root.visible = !visible;
-    this.terrainDetail.root.visible = !visible;
-    this.surfaceFeatures.root.visible = !visible;
-    this.cliffKit.root.visible = !visible;
-    this.props.root.visible = !visible && this.propsVisible;
+    this.terrainDetail.root.visible = !visible && !this.sourcePresentationEnabled;
+    this.surfaceFeatures.root.visible = !visible && !this.sourcePresentationEnabled;
+    this.cliffKit.root.visible = !visible && !this.sourcePresentationEnabled;
+    this.props.root.visible = !visible && this.propsVisible && !this.sourcePresentationEnabled;
     this.sourceWater.root.visible = !visible;
     this.sourceCaves.setVisible(visible);
     this.distantHorizon.root.visible = !visible;

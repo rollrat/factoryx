@@ -75,6 +75,8 @@ test("EnvironmentRenderer composes authored water and cave layers from the same 
   assert.equal(environment.sourceWater.root.visible, true);
   assert.equal(environment.sourceCaves.root.visible, false);
   assert.equal(environment.caves.surfaceEntrances.visible, false, "authored source caves replace legacy cave markers");
+  assert.equal(environment.props.root.visible, false, "legacy scatter stays hidden from source-authored terrain");
+  assert.equal(environment.surfaceFeatures.root.visible, false, "legacy water and cliff features do not overlap source layers");
 
   environment.setStratum("thermal_rift_subsurface");
   assert.equal(environment.sourceWater.root.visible, false);
@@ -85,4 +87,19 @@ test("EnvironmentRenderer composes authored water and cave layers from the same 
   assert.equal(environment.sourceCaves.root.visible, true);
 
   environment.dispose();
+});
+
+test("source-preview environment disposal is safe before a legacy editor environment is rebuilt", () => {
+  const scene = new THREE.Scene();
+  const sourceSampler = new WorldSourceEnvironmentSampler(IRONWIND_WORLD_SOURCE_V3);
+  const preview = new EnvironmentRenderer(scene, A17_ENVIRONMENT, "low", {
+    terrainBakeSampler: sourceSampler,
+    terrainBakeSource: terrainBakeSourceIdentity(sourceSampler.source),
+    worldSource: sourceSampler.source,
+  });
+  preview.dispose();
+  const legacy = new EnvironmentRenderer(scene, A17_ENVIRONMENT, "low");
+  assert.equal(legacy.terrain.usesExternalBakeSampler(), false);
+  assert.equal(legacy.sourceWater.waterBodyCount(), 0);
+  legacy.dispose();
 });

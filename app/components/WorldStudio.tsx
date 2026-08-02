@@ -77,6 +77,11 @@ export default function WorldStudio() {
   const [notice, setNotice] = useState("좌클릭 드래그로 지형을 편집하세요. Alt+드래그는 카메라 회전입니다.");
   const [sourceHash, setSourceHash] = useState("계산 중");
   const [sourceOrigin, setSourceOrigin] = useState("기본 철풍 source");
+  const [sourcePreviewEnabled, setSourcePreviewEnabled] = useState(false);
+
+  const applyWorldSourcePreview = (source: WorldSourceV3 | null) => {
+    runtimeRef.current?.setWorldSourcePreview(source);
+  };
 
   const syncControls = (document: WorldStudioDocument) => {
     setTime(document.timeOfDay); setSunAzimuth(document.sunAzimuth); setFog(document.fogDensity);
@@ -157,7 +162,19 @@ export default function WorldStudio() {
     const hash = await computeWorldSourceContentHash(result.value);
     setSourceHash(hash.slice("sha256:".length, "sha256:".length + 12));
     setSourceOrigin(file.name);
-    setNotice("WorldSourceV3를 검증해 작업 메모리에 불러왔습니다. 렌더 지형 적용은 다음 bake 단계에서 수행합니다.");
+    if (sourcePreviewEnabled) {
+      applyWorldSourcePreview(result.value);
+      setNotice("WorldSourceV3를 검증하고 현재 검수 미리보기에 즉시 적용했습니다.");
+    } else {
+      setNotice("WorldSourceV3를 검증해 작업 메모리에 불러왔습니다. v3 소스 검수를 켜면 현재 미리보기에 적용됩니다.");
+    }
+  };
+  const setWorldSourcePreviewEnabled = (enabled: boolean) => {
+    setSourcePreviewEnabled(enabled);
+    applyWorldSourcePreview(enabled ? worldSourceRef.current : null);
+    setNotice(enabled
+      ? "v3 소스 검수 모드가 켜졌습니다. 현재 WorldSourceV3가 미리보기에 적용되었습니다."
+      : "v3 소스 검수 모드가 꺼졌습니다. 기존 v2 편집 미리보기로 돌아왔습니다.");
   };
   const updateLandmark = (x: number, z: number, rotation: number) => {
     setLandmarkX(x); setLandmarkZ(z); setLandmarkRotation(rotation);
@@ -186,7 +203,11 @@ export default function WorldStudio() {
       </header>
 
       <div className={styles.workspace}>
-        <aside className={styles.leftPanel} aria-label="환경 편집 도구">
+        <aside
+          className={styles.leftPanel}
+          aria-label="환경 편집 도구"
+          inert={sourcePreviewEnabled ? true : undefined}
+        >
           <section><span className={styles.eyebrow}>01 / TERRAIN</span><h2>지형 브러시</h2>
             <div className={styles.toolGrid}>{BRUSHES.map((item) => <button key={item.id} type="button" data-active={brush === item.id} onClick={() => { setBrush(item.id); runtimeRef.current?.setBrush(item.id); }}><kbd>{item.key}</kbd>{item.label}</button>)}</div>
             <label><span>반경 <output>{radius}m</output></span><input type="range" min="1" max="24" value={radius} onChange={(event) => { const value = Number(event.target.value); setRadius(value); runtimeRef.current?.setBrushRadius(value); }} /></label>
@@ -240,7 +261,23 @@ export default function WorldStudio() {
             </div>
           </section>
           <section className={styles.legend}><span className={styles.eyebrow}>BUILDABILITY</span><p><i data-color="ok" />바로 건설</p><p><i data-color="warn" />기초 필요</p><p><i data-color="bad" />건설 금지</p></section>
-          <section><span className={styles.eyebrow}>07 / WORLD SOURCE V3</span><h2>소스 계약</h2><p>{sourceOrigin}</p><p><code>sha256:{sourceHash}</code></p><small>검증·해시만 적용됨 · 렌더 bake 연결 대기</small></section>
+          <section><span className={styles.eyebrow}>07 / WORLD SOURCE V3</span><h2>소스 계약</h2><p>{sourceOrigin}</p><p><code>sha256:{sourceHash}</code></p>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={sourcePreviewEnabled}
+                onChange={(event) => setWorldSourcePreviewEnabled(event.target.checked)}
+                aria-label="v3 소스 검수 미리보기 토글"
+                aria-describedby="world-source-preview-description"
+              />
+              v3 소스 검수
+            </label>
+            <small id="world-source-preview-description">
+              {sourcePreviewEnabled
+                ? "검증된 v3 원본이 현재 미리보기에 적용 중입니다. 이 모드는 기존 v2 브러시 편집을 변경하지 않습니다."
+                : "기존 v2 브러시 편집 미리보기입니다. v3 원본을 화면에서 검수하려면 토글을 켜세요."}
+            </small>
+          </section>
         </aside>
       </div>
     </main>

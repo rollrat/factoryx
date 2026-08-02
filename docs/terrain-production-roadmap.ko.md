@@ -794,7 +794,7 @@ P5 수계와 P6 동굴은 `waterfall socket`, `cave.portal`, 높이장 제거 �
 
 초기 필수 범위는 source 계약, sampler, chunk LOD, 절벽 키트, 수계·동굴 source 표현, 바이옴 재질과 맑은 하늘까지 연결됐다. 다음 순서만 진행한다.
 
-1. World Studio에 legacy 편집 모드와 v3 source 검수 모드를 명확히 분리한 토글을 추가한다.
+1. 완료: World Studio에 legacy 편집 모드와 v3 source 검수 모드를 명확히 분리한 토글을 추가했다.
 2. v3 source 모드에서 지형·수계·동굴·건설 판정이 같은 sampler를 쓰는 고정 카메라 검수를 수행한다.
 3. 한 개 동굴 입구의 지표 제거, 전환 GLB, production shell과 portal culling을 완성한다.
 4. 실제 Web Worker queue와 비동기 GPU upload를 연결한 뒤 5분 왕복 soak를 기록한다.

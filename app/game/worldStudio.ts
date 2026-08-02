@@ -1,9 +1,17 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { A17_ENVIRONMENT, A17_TERRAIN_REVIEW_CAMERAS, BIOMES, EnvironmentRenderer } from "./environment/index.ts";
+import {
+  A17_ENVIRONMENT,
+  A17_TERRAIN_REVIEW_CAMERAS,
+  BIOMES,
+  EnvironmentRenderer,
+  WorldSourceEnvironmentSampler,
+  terrainBakeSourceIdentity,
+} from "./environment/index.ts";
 import { RESOURCE_ANCHORS } from "./data/resourceAnchors.ts";
 import type { EnvironmentQuality, SurfaceType } from "./environment/types.ts";
 import type { WeatherKind } from "./environment/render/WeatherSystem.ts";
+import type { WorldSourceV3 } from "./environment/worldSourceV3/types.ts";
 import {
   parseWorldStudioDocument,
   WORLD_STUDIO_DOCUMENT_VERSION,
@@ -29,6 +37,12 @@ export type WorldStudioView = BuiltinWorldStudioView
 export type WorldStudioStroke = TerrainAuthoringStroke;
 export type WorldStudioDocument = WorldStudioEnvironmentDocument;
 export type WorldStudioStats = Readonly<{ fps: number; frameMs: number; drawCalls: number; triangles: number; activeChunks: number; visibleProps: number; assetStatus: "loading" | "ready" | "fallback" }>;
+export type WorldSourcePreviewInfo = Readonly<{
+  mode: "legacy" | "source";
+  waterCount: number;
+  caveCounts: Readonly<{ rooms: number; corridors: number; entrances: number }>;
+  usesExternalBakeSampler: boolean;
+}>;
 
 const SURFACE_COLORS: Readonly<Record<SurfaceType, number>> = {
   stable: 0x52d7c5, soft: 0xe7a34d, steep: 0xeb654f, submerged: 0x4f8fbd, hazard: 0xd74968, cave_floor: 0xa98ac0,
@@ -36,11 +50,13 @@ const SURFACE_COLORS: Readonly<Record<SurfaceType, number>> = {
 const LOD_COLORS = [0x55e0c2, 0xe8b456, 0xd96567] as const;
 
 export class WorldStudioRuntime {
+  private readonly mount: HTMLDivElement;
+  private readonly onStats: (stats: WorldStudioStats) => void;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 500);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: OrbitControls;
-  private readonly environment: EnvironmentRenderer;
+  private environment: EnvironmentRenderer;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly brushCursor: THREE.Mesh;
@@ -67,12 +83,16 @@ export class WorldStudioRuntime {
   private weather: WeatherKind = "clear";
   private weatherStrength = 0;
   private scatterDensity = 1;
+  private propsVisible = true;
   private landmarksVisible = true;
   private resourceAnchorsVisible = true;
   private quality: EnvironmentQuality = "high";
   private shadowDistance = 42;
+  private worldSourcePreview: WorldSourceEnvironmentSampler | null = null;
 
-  constructor(private readonly mount: HTMLDivElement, private readonly onStats: (stats: WorldStudioStats) => void) {
+  constructor(mount: HTMLDivElement, onStats: (stats: WorldStudioStats) => void) {
+    this.mount = mount;
+    this.onStats = onStats;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
@@ -118,9 +138,15 @@ export class WorldStudioRuntime {
   setBrushStrength(strength: number) { this.brushStrength = THREE.MathUtils.clamp(strength, 0.05, 2); }
   setBiome(id: string) { if (BIOMES.some((biome) => biome.id === id)) this.biomeId = id; }
   setSurface(surface: SurfaceType) { this.surface = surface; }
-  setPropsVisible(visible: boolean) { this.environment.setPropsVisible(visible); }
+  setPropsVisible(visible: boolean) {
+    this.propsVisible = visible;
+    this.environment.setPropsVisible(this.worldSourcePreview ? false : visible);
+  }
   setScatterDensity(value: number) { this.scatterDensity = THREE.MathUtils.clamp(value, 0, 1); this.environment.setScatterDensity(this.scatterDensity); }
-  setLandmarksVisible(visible: boolean) { this.landmarksVisible = visible; this.environment.setLandmarksVisible(visible); }
+  setLandmarksVisible(visible: boolean) {
+    this.landmarksVisible = visible;
+    this.environment.setLandmarksVisible(this.worldSourcePreview ? false : visible);
+  }
   setResourceAnchorsVisible(visible: boolean) { this.resourceAnchorsVisible = visible; this.applyOverlayVisibility(); }
   setLandmarkOffset(id: string, offset: LandmarkAuthoringOffset) {
     if (!A17_ENVIRONMENT.landmarks.some((landmark) => landmark.id === id)) return;
@@ -139,6 +165,43 @@ export class WorldStudioRuntime {
     this.renderer.shadowMap.enabled = value === "high";
     this.rebuildShadowOverlay();
     this.resize();
+  }
+  /**
+   * Switches between legacy authoring and an immutable WorldSourceV3 review.
+   * Source construction happens before disposing the current environment so an
+   * invalid source leaves the active editor session untouched.
+   */
+  setWorldSourcePreview(source: WorldSourceV3 | null) {
+    const previewSampler = source ? new WorldSourceEnvironmentSampler(source) : null;
+    const next = previewSampler
+      ? new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, this.quality, {
+        terrainBakeSampler: previewSampler,
+        terrainBakeSource: terrainBakeSourceIdentity(previewSampler.source),
+        worldSource: previewSampler.source,
+      })
+      : new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, this.quality);
+    const previous = this.environment;
+    this.environment = next;
+    this.worldSourcePreview = previewSampler;
+    previous.dispose();
+    this.pointerPainting = false;
+    this.brushCursor.visible = false;
+    this.environment.terrain.setEditorMode(previewSampler === null);
+    this.reapplyEnvironmentSettings();
+    this.refreshDebugHeights();
+    if (!previewSampler) this.refreshTerrainColors();
+    this.applyOverlayVisibility();
+  }
+  worldSourcePreviewInfo(): WorldSourcePreviewInfo {
+    if (!this.worldSourcePreview) {
+      return { mode: "legacy", waterCount: 0, caveCounts: { rooms: 0, corridors: 0, entrances: 0 }, usesExternalBakeSampler: false };
+    }
+    return {
+      mode: "source",
+      waterCount: this.environment.sourceWater.waterBodyCount(),
+      caveCounts: this.environment.sourceCaves.renderCounts(),
+      usesExternalBakeSampler: this.environment.terrain.usesExternalBakeSampler(),
+    };
   }
   setOverlay(overlay: WorldStudioOverlay) {
     this.overlay = overlay;
@@ -259,6 +322,7 @@ export class WorldStudioRuntime {
     return this.raycaster.intersectObject(this.environment.terrain.terrain, false)[0]?.point ?? null;
   }
   private onPointerMove = (event: PointerEvent) => {
+    if (this.worldSourcePreview) { this.brushCursor.visible = false; return; }
     const point = this.pickTerrain(event);
     this.brushCursor.visible = point !== null;
     if (!point) return;
@@ -266,7 +330,7 @@ export class WorldStudioRuntime {
     if (this.pointerPainting && event.buttons === 1) this.paint(point.x, point.z);
   };
   private onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0 || event.altKey) return;
+    if (this.worldSourcePreview || event.button !== 0 || event.altKey) return;
     const point = this.pickTerrain(event);
     if (!point) return;
     this.pointerPainting = true;
@@ -276,6 +340,7 @@ export class WorldStudioRuntime {
   private onPointerUp = () => { this.pointerPainting = false; this.controls.enabled = true; };
 
   private paint(x: number, z: number) {
+    if (this.worldSourcePreview) return;
     const previous = this.strokes.at(-1);
     if (previous && previous.brush === this.brush && Math.hypot(previous.x - x, previous.z - z) < this.brushRadius * 0.18) return;
     const targetHeight = this.environment.sampler.heightAt(x, z);
@@ -357,7 +422,31 @@ export class WorldStudioRuntime {
     this.shadowOverlay.visible = this.overlay === "shadow";
   }
   private refreshDebugHeights() {
-    this.resourceOverlay.children.forEach((group) => { group.position.y = this.environment.sampler.heightAt(group.position.x, group.position.z) + 0.12; });
+    this.resourceOverlay.children.forEach((group) => { group.position.y = this.terrainHeightAt(group.position.x, group.position.z) + 0.12; });
+  }
+
+  private reapplyEnvironmentSettings() {
+    if (!this.worldSourcePreview) this.environment.setAuthoringStrokes(this.strokes);
+    this.environment.setTimeOfDay(this.timeOfDay);
+    this.environment.setSunAzimuth(this.sunAzimuth);
+    this.environment.setFogDensity(this.fogDensity);
+    this.environment.setWeather(this.weather, this.weatherStrength);
+    this.environment.setPreviewQuality(this.quality);
+    this.environment.setScatterDensity(this.scatterDensity);
+    this.environment.setPropsVisible(this.worldSourcePreview ? false : this.propsVisible);
+    this.environment.setLandmarksVisible(this.worldSourcePreview ? false : this.landmarksVisible);
+    this.environment.setLandmarkOffsets(this.landmarkOffsets);
+    this.environment.setShadowDistance(this.shadowDistance);
+    this.environment.setCliffDebugVisible(this.overlay === "cliffs");
+  }
+
+  private terrainHeightAt(x: number, z: number) {
+    if (!this.worldSourcePreview) return this.environment.sampler.heightAt(x, z);
+    const { bounds } = this.worldSourcePreview.source;
+    return this.worldSourcePreview.sample(
+      THREE.MathUtils.clamp(x, bounds.minX, bounds.maxXExclusive - Number.EPSILON),
+      THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZExclusive - Number.EPSILON),
+    ).height;
   }
   private updateChunkOverlay() {
     if (!this.chunkOverlay.visible) return;
@@ -375,7 +464,7 @@ export class WorldStudioRuntime {
     this.frameAverage += ((delta * 1000) - this.frameAverage) * 0.08; this.statsClock += delta;
     this.controls.update();
     this.environment.update(delta, this.camera);
-    this.shadowOverlay.position.set(this.camera.position.x, this.environment.sampler.heightAt(this.camera.position.x, this.camera.position.z) + 0.35, this.camera.position.z);
+    this.shadowOverlay.position.set(this.camera.position.x, this.terrainHeightAt(this.camera.position.x, this.camera.position.z) + 0.35, this.camera.position.z);
     this.updateChunkOverlay();
     this.renderer.render(this.scene, this.camera);
     if (this.statsClock >= 0.3) {
