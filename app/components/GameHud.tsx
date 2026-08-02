@@ -205,13 +205,17 @@ export default function GameHud({
       : isSplitter ? "연결된 출력으로 균등 분배" : isMerger ? "준비된 입력을 순차 병합" : null);
   const canCycleRecipe = Boolean(selectedDetails?.buildingId
     && (START_REGISTRY.buildings.get(selectedDetails.buildingId)?.recipeIds.length ?? 0) > 1);
+  const firstPersonHint = activeTool === "inspect" ? "클릭 · 설비 선택"
+    : activeTool === "belt" ? "클릭 · 경로 시작 / 완료"
+      : activeTool === "demolish" ? "클릭 · 조준 설비 철거"
+        : "클릭 · 조준 위치에 배치  ·  R 회전";
 
   useEffect(() => {
     activeToolButtonRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTool]);
 
   return (
-    <div className={`hud ${cameraMode === "firstPerson" ? "first-person" : ""}`}>
+    <div className={`hud tool-${activeTool} ${cameraMode === "firstPerson" ? "first-person" : ""} ${pointerLocked ? "pointer-locked" : ""}`}>
       <header className="status-rail">
         <div className="sector-tag instrument-panel">
           <span className="sector-mark">FX</span>
@@ -443,6 +447,7 @@ export default function GameHud({
 
       {cameraMode === "firstPerson" ? <div className="crosshair" aria-hidden="true"><i /></div> : null}
       {cameraMode === "firstPerson" && !pointerLocked ? <div className="pointer-lock-tip">클릭하여 시점 제어</div> : null}
+      {cameraMode === "firstPerson" && pointerLocked ? <div className="first-person-action-tip">{firstPersonHint}</div> : null}
       <button className="lineage-launch-button instrument-panel" onClick={onLineageToggle} aria-label="공장 전체 생산 계보 열기">
         <span>⌘</span>
         <strong>생산 계보</strong>

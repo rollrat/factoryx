@@ -1,6 +1,6 @@
 import type { MachineRuntimeState } from "./sim/contracts.ts";
 import type { RuntimeItemId } from "./recipes/runtimeRecipes.ts";
-import type { BuildingId, RecipeId } from "./domain/types.ts";
+import type { BuildingId, RecipeId, UnlockId } from "./domain/types.ts";
 import type { EquipmentOperationalState, EquipmentStatusCause } from "./presentation/equipmentStatus.ts";
 
 export type Tool =

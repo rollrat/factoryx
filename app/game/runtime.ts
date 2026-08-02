@@ -51,6 +51,15 @@ import {
   type EquipmentStatusCause,
 } from "./presentation/equipmentStatus.ts";
 import {
+  createInitialFirstPersonActionState,
+  transitionFirstPersonAction,
+  type FirstPersonActionCommand,
+  type FirstPersonActionEvent,
+  type FirstPersonActionState,
+  type FirstPersonActionTarget,
+  type FirstPersonToolSelection,
+} from "./interaction/firstPersonActions.ts";
+import {
   FIRST_PERSON_LOCOMOTION,
   initialVerticalLocomotionState,
   updatePlanarVelocity,
@@ -267,6 +276,7 @@ export class FactoryRuntime {
   private cameraAngularVelocity = 0;
   private cameraZoom = 1;
   private cameraMode: CameraMode = "overview";
+  private firstPersonAction: FirstPersonActionState = createInitialFirstPersonActionState();
   private readonly cameraTarget = new THREE.Vector3(0, 0, 0);
   private readonly desiredTarget = new THREE.Vector3(0, 0, 0);
   private readonly playerPosition = new THREE.Vector3(0, 1.62, 5.5);
@@ -448,6 +458,108 @@ export class FactoryRuntime {
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
     this.buildGrid.visible = tool !== "inspect";
     this.updateGhost();
+    if (this.cameraMode === "firstPerson") this.syncFirstPersonTool();
+  }
+
+  private syncFirstPersonTool() {
+    let selection: FirstPersonToolSelection;
+    if (this.activeTool === "inspect") selection = { tool: "inspect" };
+    else if (this.activeTool === "demolish") selection = { tool: "demolish" };
+    else if (this.activeTool === "belt") selection = { tool: "belt", rotation: this.rotation as 0 | 1 | 2 | 3 };
+    else if (this.selectedBuildingId) {
+      selection = { tool: "build", buildingId: this.selectedBuildingId, rotation: this.rotation as 0 | 1 | 2 | 3 };
+    } else selection = { tool: "inspect" };
+    this.firstPersonAction = transitionFirstPersonAction(this.firstPersonAction, {
+      type: "tool_switch",
+      selection,
+    }).state;
+  }
+
+  private firstPersonAim() {
+    this.pointer.set(0, 0);
+    this.raycaster.setFromCamera(this.pointer, this.firstPersonCamera);
+    const structureHit = this.raycaster.intersectObjects(Array.from(this.groups.values()), true)
+      .find(({ distance, object }) => distance <= 12 && typeof object.userData.structureId === "number");
+    const structureId = structureHit && typeof structureHit.object.userData.structureId === "number"
+      ? structureHit.object.userData.structureId as number
+      : null;
+    const interactionRoot = this.activeStratumId === "surface"
+      ? this.environment.terrain.root
+      : this.environment.caves.interactionRoot;
+    const terrainHit = this.raycaster.intersectObject(interactionRoot, true).find(({ distance }) => distance <= 12);
+    const cell = terrainHit ? worldPointToAnchorCell(terrainHit.point) : null;
+    return {
+      structureId,
+      cell: cell ? {
+        x: THREE.MathUtils.clamp(cell.x, this.world.bounds.minX, this.world.bounds.maxX),
+        z: THREE.MathUtils.clamp(cell.z, this.world.bounds.minZ, this.world.bounds.maxZ),
+      } : null,
+    };
+  }
+
+  private firstPersonTarget(aim: ReturnType<FactoryRuntime["firstPersonAim"]>): FirstPersonActionTarget {
+    if ((this.activeTool === "inspect" || this.activeTool === "demolish") && aim.structureId !== null) {
+      return { kind: "structure", ownerId: `structure:${aim.structureId}` };
+    }
+    if (aim.cell) return {
+      kind: "cell",
+      anchor: { ...aim.cell, stratumId: this.activeStratumId },
+    };
+    return { kind: "none" };
+  }
+
+  private dispatchFirstPersonAction(event: FirstPersonActionEvent) {
+    const previous = this.firstPersonAction;
+    const transition = transitionFirstPersonAction(previous, event);
+    this.firstPersonAction = transition.state;
+    if (previous.mode !== "belt_route" && transition.state.mode === "belt_route") {
+      this.beltStart = { x: transition.state.start.x, z: transition.state.start.z };
+      this.currentCell = { ...this.beltStart };
+      this.updateBeltPreview(this.currentCell, false);
+    }
+    transition.commands.forEach((command) => this.executeFirstPersonCommand(command));
+  }
+
+  private executeFirstPersonCommand(command: FirstPersonActionCommand) {
+    if (command.type === "request_pointer_lock") {
+      void this.renderer.domElement.requestPointerLock();
+      return;
+    }
+    if (command.type === "release_pointer_lock") {
+      if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+      return;
+    }
+    if (command.type === "confirm_build") {
+      this.currentCell = { x: command.anchor.x, z: command.anchor.z };
+      this.rotation = command.rotation;
+      this.updateGhost();
+      this.commitMachine(this.activeTool as BuildType);
+      return;
+    }
+    if (command.type === "commit_belt") {
+      this.beltStart = { x: command.start.x, z: command.start.z };
+      this.currentCell = { x: command.end.x, z: command.end.z };
+      this.updateBeltPreview(this.currentCell, false);
+      this.commitBelts();
+      this.beltStart = null;
+      if (this.beltPreview) this.scene.remove(this.beltPreview);
+      this.beltPreview = null;
+      this.beltPreviewCells = [];
+      this.updateBeltBuildInfo(false);
+      return;
+    }
+    if (command.type === "demolish") {
+      const id = Number(command.ownerId.replace("structure:", ""));
+      if (Number.isSafeInteger(id)) this.demolishStructure(id);
+      return;
+    }
+    const start = [...this.simulation.structures.values()].find(({ worldInstanceId }) => worldInstanceId === command.start.ownerId);
+    const end = [...this.simulation.structures.values()].find(({ worldInstanceId }) => worldInstanceId === command.end.ownerId);
+    if (!start || !end) return;
+    this.selectStructure(start.id);
+    this.connectSelectedPowerCable();
+    this.selectStructure(end.id);
+    this.connectSelectedPowerCable();
   }
 
   toggleEnvironmentAudio() {
@@ -474,6 +586,7 @@ export class FactoryRuntime {
     this.setTool(type);
     this.selectedBuildingId = buildingId;
     this.updateGhost();
+    if (this.cameraMode === "firstPerson") this.syncFirstPersonTool();
     this.callbacks.onToast(`${definition.name} 배치 · R 회전`);
     return true;
   }
@@ -767,6 +880,7 @@ export class FactoryRuntime {
       this.verticalLocomotion = initialVerticalLocomotionState();
       this.headBobPhase = 0;
       this.cameraMode = "firstPerson";
+      this.firstPersonAction = createInitialFirstPersonActionState();
       this.setTool("inspect");
       this.selectStructure(null);
       this.hoverTile.visible = false;
@@ -775,6 +889,7 @@ export class FactoryRuntime {
       this.callbacks.onToast("1인칭 탐험 모드 · 화면을 클릭해 둘러보세요");
     } else {
       this.cameraMode = "overview";
+      this.firstPersonAction = createInitialFirstPersonActionState();
       if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
       this.hoverTile.visible = true;
       this.renderer.domElement.style.cursor = "default";
@@ -1056,8 +1171,8 @@ export class FactoryRuntime {
       const group = createPowerCableConnectionModel(cable, START_REGISTRY, this.materials);
       group.userData.connectionKey = key;
       group.userData.strata = [
-        this.world.instance(cable.from.ownerId)?.stratumId ?? "surface",
-        this.world.instance(cable.to.ownerId)?.stratumId ?? "surface",
+        this.world.instance(cable.source.ownerId)?.stratumId ?? "surface",
+        this.world.instance(cable.target.ownerId)?.stratumId ?? "surface",
       ];
       group.visible = (group.userData.strata as string[]).includes(this.activeStratumId);
       this.connectionGroups.set(key, group);
@@ -1685,6 +1800,45 @@ export class FactoryRuntime {
     this.callbacks.onToast(connected ? `출력 포트 연결 · 벨트 ${added.length}칸` : `컨베이어 ${added.length}칸 설치 완료`);
   }
 
+  private demolishStructure(id: number) {
+    const structure = this.simulation.structures.get(id);
+    if (!structure) {
+      this.callbacks.onToast("철거할 설비를 조준하세요");
+      return;
+    }
+    if (structure.worldInstanceId) {
+      const constructionInstance = this.world.instance(structure.worldInstanceId);
+      this.worldProduction.snapshot();
+      const demolition = this.worldHistory.execute(
+        this.world,
+        "demolish",
+        `철거 · ${structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId)?.name : structure.worldInstanceId}`,
+        () => {
+          const result = this.worldProduction.demolish(structure.worldInstanceId!);
+          if (result.ok && constructionInstance) this.campaignWorld.refundConstructionCreditFor(constructionInstance);
+          return result;
+        },
+        this.constructionCreditLedger(),
+      );
+      if (!demolition.ok) {
+        this.callbacks.onToast("이 설비는 철거할 수 없습니다");
+        return;
+      }
+    }
+    const removed = this.removeStructure(id);
+    if (!removed) return;
+    if (removed.worldInstanceId) {
+      this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
+      this.publishConstructionState();
+      this.callbacks.onToast(`${removed.buildingId ? START_REGISTRY.buildings.get(removed.buildingId)?.name : TYPE_NAME[removed.type]} 철거 · 재료 회수`);
+      return;
+    }
+    const refund = Math.floor(COST[removed.type] * 0.5);
+    this.history.push({ added: [], removed: [removed], creditDelta: refund });
+    this.changeCredits(this.credits + refund);
+    this.callbacks.onToast(`${TYPE_NAME[removed.type]} 철거 · ${refund} 환급`);
+  }
+
   private undo() {
     if (this.worldHistory.canUndo) {
       const result = this.worldHistory.undo(this.world);
@@ -1781,9 +1935,16 @@ export class FactoryRuntime {
     if (this.inputLocked) return;
     this.renderer.domElement.focus();
     if (this.cameraMode === "firstPerson") {
-      if (event.button === 0 && document.pointerLockElement !== this.renderer.domElement) {
-        void this.renderer.domElement.requestPointerLock();
+      if (event.button !== 0) return;
+      const aim = this.firstPersonAim();
+      if (document.pointerLockElement === this.renderer.domElement && this.activeTool === "inspect") {
+        this.selectStructure(aim.structureId);
+        if (aim.structureId !== null) {
+          this.dispatchFirstPersonAction({ type: "inspect_target", ownerId: `structure:${aim.structureId}` });
+        }
+        return;
       }
+      this.dispatchFirstPersonAction({ type: "primary_click", target: this.firstPersonTarget(aim) });
       return;
     }
     this.pointerDown = { x: event.clientX, y: event.clientY };
@@ -1888,7 +2049,11 @@ export class FactoryRuntime {
   private onWheel = (event: WheelEvent) => {
     if (this.inputLocked) return;
     event.preventDefault();
-    if (this.cameraMode === "firstPerson") return;
+    if (this.cameraMode === "firstPerson") {
+      this.dispatchFirstPersonAction({ type: "cancel" });
+      this.setTool("inspect");
+      return;
+    }
     this.cameraZoom = THREE.MathUtils.clamp(this.cameraZoom * Math.exp(-event.deltaY * 0.001), 0.72, 2.2);
   };
 
@@ -1972,7 +2137,6 @@ export class FactoryRuntime {
       this.toggleStratum();
       return;
     }
-    if (this.cameraMode === "firstPerson") return;
     const tools: Record<string, Tool> = {
       "1": "inspect",
       "2": "belt",
@@ -1996,15 +2160,21 @@ export class FactoryRuntime {
     }
     if (key === "r") {
       this.rotation = (this.rotation + 1) % 4;
+      if (this.cameraMode === "firstPerson") {
+        this.dispatchFirstPersonAction({ type: "rotate" });
+      }
       if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(this.currentCell, false);
       else this.updateGhost();
       this.callbacks.onToast(this.activeTool === "belt" ? "벨트 시작 방향을 회전했습니다" : "설비 방향을 회전했습니다");
     }
-    if (key === "q" || key === "e") {
+    if (this.cameraMode === "overview" && (key === "q" || key === "e")) {
       this.desiredCameraAngle += key === "q" ? -Math.PI / 2 : Math.PI / 2;
       this.callbacks.onToast(key === "q" ? "카메라를 왼쪽으로 회전" : "카메라를 오른쪽으로 회전");
     }
-    if (key === "escape") this.setTool("inspect");
+    if (key === "escape") {
+      if (this.cameraMode === "firstPerson") this.dispatchFirstPersonAction({ type: "cancel" });
+      this.setTool("inspect");
+    }
     if (key === "z" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       if (event.shiftKey) this.redo();
@@ -2030,6 +2200,9 @@ export class FactoryRuntime {
 
   private onPointerLockChange = () => {
     const locked = document.pointerLockElement === this.renderer.domElement;
+    if (this.cameraMode === "firstPerson") {
+      this.dispatchFirstPersonAction({ type: locked ? "pointer_lock_acquired" : "pointer_lock_lost" });
+    }
     this.callbacks.onPointerLock(locked);
     if (this.cameraMode === "firstPerson") this.renderer.domElement.style.cursor = locked ? "none" : "crosshair";
   };
@@ -2484,6 +2657,14 @@ export class FactoryRuntime {
       this.updateCamera();
     } else {
       this.updateFirstPerson(delta);
+      if (!this.inputLocked && document.pointerLockElement === this.renderer.domElement) {
+        const aim = this.firstPersonAim();
+        if (aim.cell) {
+          this.currentCell = aim.cell;
+          if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(aim.cell, false);
+          else if (this.activeTool !== "inspect" && this.activeTool !== "demolish") this.updateGhost();
+        }
+      }
     }
 
     this.stepCampaignPower(delta);

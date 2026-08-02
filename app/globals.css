@@ -1318,6 +1318,16 @@ kbd {
 .crosshair i::before { left: 10px; top: 0; width: 1px; height: 6px; }
 .crosshair i::after { left: 10px; bottom: 0; width: 1px; height: 6px; }
 
+.hud.tool-belt .crosshair::before,
+.hud.tool-belt .crosshair::after,
+.hud.tool-belt .crosshair i::before,
+.hud.tool-belt .crosshair i::after { background: var(--amber); }
+
+.hud.tool-demolish .crosshair::before,
+.hud.tool-demolish .crosshair::after,
+.hud.tool-demolish .crosshair i::before,
+.hud.tool-demolish .crosshair i::after { background: #ff5268; }
+
 .pointer-lock-tip {
   position: absolute;
   left: 50%;
@@ -1330,13 +1340,31 @@ kbd {
   font-size: 8px;
 }
 
+.first-person-action-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 26px);
+  transform: translateX(-50%);
+  padding: 4px 7px;
+  background: rgba(8, 12, 13, 0.78);
+  color: #aab5b4;
+  font: 700 8px/1 var(--font-geist-mono), monospace;
+  letter-spacing: 0.03em;
+}
+
 .hud.first-person .build-dock {
-  opacity: 0;
+  opacity: 0.38;
   pointer-events: none;
 }
 
 .hud.first-person .build-dock {
   transform: translate(-50%, 14px);
+}
+
+.hud.first-person:not(.pointer-locked) .build-dock {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
 }
 
 .hud.first-person .objective-readout,
