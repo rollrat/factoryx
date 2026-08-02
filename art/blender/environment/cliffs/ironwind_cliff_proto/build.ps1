@@ -14,3 +14,12 @@ if ($LASTEXITCODE -ne 0) { throw "Ironwind cliff prototype build failed" }
 
 node $Validator $OutputDir
 if ($LASTEXITCODE -ne 0) { throw "Ironwind cliff prototype validation failed" }
+
+$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..\..")
+$ModelDir = Join-Path $ProjectRoot "public\assets\environment\models"
+$PreviewDir = Join-Path $ProjectRoot "public\assets\environment\previews"
+New-Item -ItemType Directory -Force -Path $ModelDir, $PreviewDir | Out-Null
+foreach ($AssetId in @("ironwind_cliff_straight_16m", "ironwind_cliff_outer_corner", "ironwind_natural_arch")) {
+  Copy-Item -LiteralPath (Join-Path $OutputDir "$AssetId.glb") -Destination (Join-Path $ModelDir "$AssetId.glb") -Force
+  Copy-Item -LiteralPath (Join-Path $OutputDir "${AssetId}_preview_front.png") -Destination (Join-Path $PreviewDir "$AssetId.png") -Force
+}

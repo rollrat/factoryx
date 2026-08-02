@@ -144,6 +144,39 @@
       "lodTriangleCaps": [9000, 3000, 900],
       "collisionTriangleCap": 128,
       "runtimeLandmarkId": "rift_eye"
+    },
+    {
+      "id": "ironwind_cliff_straight_16m",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_cliff_straight_16m.blend",
+      "output": "public/assets/environment/models/ironwind_cliff_straight_16m.glb",
+      "preview": "public/assets/environment/previews/ironwind_cliff_straight_16m.png",
+      "lodTriangleCaps": [900, 400, 140],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "straight_16m"
+    },
+    {
+      "id": "ironwind_cliff_outer_corner",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_cliff_outer_corner.blend",
+      "output": "public/assets/environment/models/ironwind_cliff_outer_corner.glb",
+      "preview": "public/assets/environment/previews/ironwind_cliff_outer_corner.png",
+      "lodTriangleCaps": [1000, 500, 200],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "outer_corner"
+    },
+    {
+      "id": "ironwind_natural_arch",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_natural_arch.blend",
+      "output": "public/assets/environment/models/ironwind_natural_arch.glb",
+      "preview": "public/assets/environment/previews/ironwind_natural_arch.png",
+      "lodTriangleCaps": [400, 240, 160],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "natural_arch"
     }
   ]
 }

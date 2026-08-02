@@ -11,10 +11,14 @@ test("the Blender environment assets ship validated LOD GLBs", async () => {
     schemaVersion: number;
     assets: Array<{
       id: string;
+      kind: string;
       url: string;
       lodNodes: string[];
       lodTriangles: number[];
+      collisionNode: string;
+      collisionNodes?: string[];
       collisionTriangles: number;
+      socketNode?: string;
     }>;
   };
   const catalog = JSON.parse(await readFile(catalogUrl, "utf8")) as {
@@ -43,12 +47,33 @@ test("the Blender environment assets ship validated LOD GLBs", async () => {
       nodes: Array<{ name?: string; extras?: Record<string, unknown> }>;
     };
     const names = new Set(gltf.nodes.map(({ name }) => name));
+    const collisionNodes = asset.collisionNodes ?? [asset.collisionNode];
     for (const name of [
       `FX_${assetId}`, "VIS_LOD0", "VIS_LOD1", "VIS_LOD2",
-      "COL_SIMPLE", "SOCKETS", "FX_POINTS", "META",
+      ...collisionNodes, asset.socketNode ?? "SOCKETS", "META",
       `${assetId}_lod0`, `${assetId}_lod1`, `${assetId}_lod2`,
     ]) assert.ok(names.has(name), `missing ${name}`);
+    if (asset.kind !== "environment_cliff") assert.ok(names.has("FX_POINTS"), `missing FX_POINTS`);
     const root = gltf.nodes.find(({ name }) => name === `FX_${assetId}`);
     assert.equal(root?.extras?.fx_asset_id, assetId);
+  }
+});
+
+test("the Ironwind cliff kit publishes its collision and socket contracts", async () => {
+  const manifest = JSON.parse(await readFile(manifestUrl, "utf8")) as {
+    assets: Array<{ id: string; kind: string; collisionNode: string; collisionNodes?: string[]; socketNode?: string }>;
+  };
+  const expected = new Map<string, string[]>([
+    ["ironwind_cliff_straight_16m", ["COL_WALL", "COL_WALKABLE"]],
+    ["ironwind_cliff_outer_corner", ["COL_WALL", "COL_WALKABLE"]],
+    ["ironwind_natural_arch", ["COL_WALL"]],
+  ]);
+  for (const [id, collisions] of expected) {
+    const asset = manifest.assets.find((candidate) => candidate.id === id);
+    assert.ok(asset, `missing ${id}`);
+    assert.equal(asset.kind, "environment_cliff");
+    assert.equal(asset.collisionNode, "COL_WALL");
+    assert.deepEqual(asset.collisionNodes, collisions);
+    assert.equal(asset.socketNode, "SOCKETS");
   }
 });

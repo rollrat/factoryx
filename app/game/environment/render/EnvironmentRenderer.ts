@@ -15,6 +15,8 @@ import type { LandmarkAuthoringOffset, TerrainAuthoringStroke } from "../authori
 import { TerrainDetailRenderer, type IndustrialFootprint } from "./TerrainDetailRenderer.ts";
 import { DistantHorizonRenderer } from "./DistantHorizonRenderer.ts";
 import { SurfaceFeatureRenderer } from "./SurfaceFeatureRenderer.ts";
+import { IRONWIND_CLIFF_PLACEMENTS } from "../data/ironwindCliffPlacements.ts";
+import { CliffKitRenderer } from "./CliffKitRenderer.ts";
 
 export class EnvironmentRenderer {
   readonly sampler: TerrainSampler;
@@ -28,6 +30,7 @@ export class EnvironmentRenderer {
   readonly terrainDetail: TerrainDetailRenderer;
   readonly distantHorizon: DistantHorizonRenderer;
   readonly surfaceFeatures: SurfaceFeatureRenderer;
+  readonly cliffKit: CliffKitRenderer;
   readonly root = new THREE.Group();
   private readonly scene: THREE.Scene;
   readonly definition: EnvironmentDefinition;
@@ -65,9 +68,11 @@ export class EnvironmentRenderer {
     this.terrainDetail = new TerrainDetailRenderer(this.sampler, quality);
     this.distantHorizon = new DistantHorizonRenderer(definition.seed, quality);
     this.surfaceFeatures = new SurfaceFeatureRenderer(definition, this.sampler, quality);
+    this.cliffKit = new CliffKitRenderer(IRONWIND_CLIFF_PLACEMENTS, quality);
     this.root.add(
       this.terrain.root,
       this.surfaceFeatures.root,
+      this.cliffKit.root,
       this.terrainDetail.root,
       this.props.root,
       this.distantHorizon.root,
@@ -99,6 +104,7 @@ export class EnvironmentRenderer {
       this.distantHorizon.setWeather(currentWeather.kind, currentWeather.strength);
       this.distantHorizon.update(camera);
       this.surfaceFeatures.update(delta);
+      this.cliffKit.update(camera);
     }
     this.exploration.update(delta, this.activeStratumId);
     if (this.activeStratumId === "surface" && this.scene.fog instanceof THREE.FogExp2) {
@@ -145,6 +151,7 @@ export class EnvironmentRenderer {
     this.props.setDensity(this.scatterDensity * densityMultiplier);
     this.terrainDetail.setPreviewQuality(value);
     this.weather.setPreviewQuality(value);
+    this.cliffKit.setPreviewQuality(value);
     this.sky.setShadowDistance(value === "high" ? this.shadowDistance : Math.min(this.shadowDistance, 24));
   }
   setAuthoringStrokes(strokes: readonly TerrainAuthoringStroke[], region?: Readonly<{ x: number; z: number; radius: number }>) {
@@ -192,6 +199,7 @@ export class EnvironmentRenderer {
     this.terrainDetail.root.visible = surface;
     this.distantHorizon.root.visible = surface;
     this.surfaceFeatures.root.visible = surface;
+    this.cliffKit.root.visible = surface;
     this.props.root.visible = surface && this.propsVisible;
     this.exploration.root.visible = true;
     this.sky.root.visible = surface;
@@ -223,6 +231,7 @@ export class EnvironmentRenderer {
     this.terrain.root.visible = !visible;
     this.terrainDetail.root.visible = !visible;
     this.surfaceFeatures.root.visible = !visible;
+    this.cliffKit.root.visible = !visible;
     this.props.root.visible = !visible && this.propsVisible;
     this.distantHorizon.root.visible = !visible;
     this.sky.root.visible = !visible;
@@ -232,12 +241,19 @@ export class EnvironmentRenderer {
   }
 
   stats(renderer?: THREE.WebGLRenderer): EnvironmentFrameStats {
+    const propAssets = this.props.assetStatus();
+    const cliffAssets = this.cliffKit.assetStatus();
+    const assetStatus = propAssets === "fallback" || cliffAssets === "fallback"
+      ? "fallback"
+      : propAssets === "ready" && cliffAssets === "ready"
+        ? "ready"
+        : "loading";
     return {
       activeChunks: this.chunks.snapshot().length,
       visibleProps: this.props.visibleInstanceCount(),
       triangles: renderer?.info.render.triangles ?? 0,
       drawCalls: renderer?.info.render.calls ?? 0,
-      assetStatus: this.props.assetStatus(),
+      assetStatus,
     };
   }
 
@@ -247,6 +263,7 @@ export class EnvironmentRenderer {
     this.terrainDetail.dispose();
     this.distantHorizon.dispose();
     this.surfaceFeatures.dispose();
+    this.cliffKit.dispose();
     this.props.dispose();
     this.sky.dispose();
     this.weather.dispose();

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import type { TerrainSampler } from "../terrain/TerrainSampler.ts";
+import { sampleIronwindTopography } from "../data/ironwindTopography.ts";
 
 /** Water, shoreline and exposed strata derived from the authoritative terrain sampler. */
 export class SurfaceFeatureRenderer {
@@ -80,6 +81,8 @@ export class SurfaceFeatureRenderer {
     for (let z = definition.worldBounds.minZ + cliffStep; z < definition.worldBounds.maxZ; z += cliffStep) {
       for (let x = definition.worldBounds.minX + cliffStep; x < definition.worldBounds.maxX; x += cliffStep) {
         const sample = sampler.sample(x, z);
+        const ironwind = sampleIronwindTopography(x, z, sample.height);
+        if (ironwind.influence > 0.7 && ironwind.region === "fault_wall") continue;
         if (sample.slopeDegrees < 24 || cliffEntries.length >= (quality === "high" ? 240 : 100)) continue;
         const hash = Math.sin(x * 17.17 + z * 41.73) * 43758.5453;
         if (hash - Math.floor(hash) < 0.44) continue;

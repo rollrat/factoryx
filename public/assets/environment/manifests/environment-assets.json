@@ -248,6 +248,77 @@
       ],
       "collisionTriangles": 20,
       "bytes": 34604
+    },
+    {
+      "id": "ironwind_cliff_straight_16m",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_cliff_straight_16m.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_cliff_straight_16m.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_WALL",
+      "collisionNodes": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        736,
+        336,
+        108
+      ],
+      "collisionTriangles": 24,
+      "bytes": 69256
+    },
+    {
+      "id": "ironwind_cliff_outer_corner",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_cliff_outer_corner.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_cliff_outer_corner.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_WALL",
+      "collisionNodes": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        840,
+        440,
+        168
+      ],
+      "collisionTriangles": 48,
+      "bytes": 85228
+    },
+    {
+      "id": "ironwind_natural_arch",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_natural_arch.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_natural_arch.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_WALL",
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        288,
+        192,
+        132
+      ],
+      "collisionTriangles": 36,
+      "bytes": 45516
     }
   ]
 }
