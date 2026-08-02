@@ -3,6 +3,7 @@ import { TOOL_INFO, TYPE_NAME, TYPE_RATE } from "../game/config";
 import { START_REGISTRY } from "../game/data/index.ts";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 import type { EnvironmentRuntimeInfo } from "../game/environment/types.ts";
+import type { EquipmentOperationalState } from "../game/presentation/equipmentStatus.ts";
 
 export type ProjectHudRequirement = Readonly<{
   itemId: string;
@@ -55,7 +56,23 @@ type SelectedDetails = NonNullable<SelectedInfo> & {
   outputItems?: readonly Readonly<{ itemId: string; name: string; amount: number }>[];
 };
 
+const OPERATIONAL_CLASS: Record<EquipmentOperationalState, EquipmentStatus> = {
+  tripped: "blocked",
+  unconnected: "disconnected",
+  shed: "disconnected",
+  fuel_starved: "starved",
+  power_limited: "starved",
+  missing_input: "starved",
+  output_blocked: "blocked",
+  recipe_missing: "idle",
+  manual_off: "idle",
+  restoring: "idle",
+  idle: "idle",
+  working: "working",
+};
+
 const getEquipmentStatus = (selected: SelectedDetails): EquipmentStatus => {
+  if (selected.operationalState) return OPERATIONAL_CLASS[selected.operationalState];
   const runtimeState = selected.runtimeState?.toLocaleLowerCase("ko-KR");
   if (runtimeState === "working") return selected.type === "storage" ? "storing" : "working";
   if (runtimeState === "starved") return "starved";
@@ -162,6 +179,7 @@ export default function GameHud({
     : projectTotal > 0 ? Math.min(100, (projectDelivered / projectTotal) * 100) : 0;
   const selectedDetails = selected as SelectedDetails | null;
   const selectedStatus = selectedDetails ? getEquipmentStatus(selectedDetails) : "idle";
+  const selectedStatusLabel = selectedDetails?.operationalLabel ?? STATUS_LABEL[selectedStatus];
   const selectedProgress = selectedDetails && Number.isFinite(selectedDetails.progress)
     ? Math.max(0, Math.min(100, selectedDetails.progress * 100))
     : 0;
@@ -273,9 +291,9 @@ export default function GameHud({
               <span className="panel-label">선택 설비</span>
               <div className="inspector-title">{selectedName}</div>
             </div>
-            <div className={`equipment-status status-${selectedStatus}`} aria-label={`상태: ${STATUS_LABEL[selectedStatus]}`}>
+            <div className={`equipment-status status-${selectedStatus}`} aria-label={`상태: ${selectedStatusLabel}`}>
               <i aria-hidden="true" />
-              <span>{STATUS_LABEL[selectedStatus]}</span>
+              <span>{selectedStatusLabel}</span>
             </div>
           </div>
 
@@ -284,6 +302,17 @@ export default function GameHud({
               <div className="equipment-recipe">{equipmentMode}</div>
               {canCycleRecipe ? <button type="button" onClick={onRecipeCycle}>레시피 변경 <kbd>F</kbd></button> : null}
             </div>
+          ) : null}
+
+          {selectedDetails?.statusCauses?.length ? (
+            <ul className="equipment-causes" aria-label="설비 상태 원인">
+              {selectedDetails.statusCauses.slice(0, 3).map((cause) => (
+                <li key={cause.code}>
+                  <strong>{cause.label}</strong>
+                  {cause.detail ? <span>{cause.detail}</span> : null}
+                </li>
+              ))}
+            </ul>
           ) : null}
 
           <div className="process-meter">

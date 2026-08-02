@@ -396,7 +396,27 @@ button {
 .inspector.visible {
   transform: translateX(0);
   opacity: 1;
+  pointer-events: auto;
 }
+
+.equipment-causes {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.equipment-causes li {
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border-left: 2px solid var(--amber);
+  background: rgba(230, 160, 75, 0.07);
+}
+
+.equipment-causes strong { color: #e0b273; font-size: 9px; }
+.equipment-causes span { color: var(--muted); font-size: 8px; line-height: 1.35; }
 
 .inspector-rail {
   display: flex;
@@ -1310,8 +1330,7 @@ kbd {
   font-size: 8px;
 }
 
-.hud.first-person .build-dock,
-.hud.first-person .inspector {
+.hud.first-person .build-dock {
   opacity: 0;
   pointer-events: none;
 }

@@ -46,6 +46,11 @@ import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
 import { projectPlacement, worldPointToAnchorCell } from "./domain/placement.ts";
 import {
+  reduceEquipmentStatus,
+  type EquipmentOperationalState,
+  type EquipmentStatusCause,
+} from "./presentation/equipmentStatus.ts";
+import {
   FIRST_PERSON_LOCOMOTION,
   initialVerticalLocomotionState,
   updatePlanarVelocity,
@@ -238,6 +243,7 @@ export class FactoryRuntime {
   private nextId = 1;
   private credits = 1200;
   private selectedId: number | null = null;
+  private selectionHelper: THREE.BoxHelper | null = null;
   private powerCableStartId: string | null = null;
   private activeTool: Tool = "inspect";
   private rotation = 0;
@@ -793,6 +799,7 @@ export class FactoryRuntime {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     window.removeEventListener("pagehide", this.onPageHide);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+    this.clearSelectionHelper();
     this.environment.dispose();
     this.environmentAudio.dispose();
     this.renderer.dispose();
@@ -1445,8 +1452,31 @@ export class FactoryRuntime {
   }
 
   private selectStructure(id: number | null) {
+    this.clearSelectionHelper();
     this.selectedId = id;
+    const group = id === null ? null : this.groups.get(id);
+    if (group) {
+      this.selectionHelper = new THREE.BoxHelper(group, 0x6fffe9);
+      this.selectionHelper.name = "selected-building-outline";
+      this.selectionHelper.renderOrder = 100;
+      const material = this.selectionHelper.material as THREE.LineBasicMaterial;
+      material.transparent = true;
+      material.opacity = 0.95;
+      material.depthTest = false;
+      material.toneMapped = false;
+      this.scene.add(this.selectionHelper);
+    }
     this.callbacks.onSelected(id === null ? null : this.selectedInfo(id));
+  }
+
+  private clearSelectionHelper() {
+    if (!this.selectionHelper) return;
+    this.scene.remove(this.selectionHelper);
+    this.selectionHelper.geometry.dispose();
+    const material = this.selectionHelper.material;
+    if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+    else material.dispose();
+    this.selectionHelper = null;
   }
 
   private selectedInfo(id: number): SelectedInfo {
@@ -1466,19 +1496,46 @@ export class FactoryRuntime {
     const total = (inventories: typeof state.inputs, key: "amount" | "capacity") => (
       inventories.reduce((sum, inventory) => sum + inventory[key], 0)
     );
-    const status = {
-      working: "가동 중",
-      starved: "원료 부족",
-      blocked: "출력 막힘",
-      disconnected: "연결 끊김",
-      paused: state.powerSatisfaction < 0.999 ? "전력 부족" : "일시 정지",
-      idle: recipe ? "가동 대기" : "물류 대기",
-    }[state.runtimeState];
+    const activeStates: EquipmentOperationalState[] = [];
+    const causes: EquipmentStatusCause[] = [];
+    const addCause = (stateName: EquipmentOperationalState, code: string, label: string, detail?: string) => {
+      activeStates.push(stateName);
+      causes.push({ state: stateName, code, label, ...(detail ? { detail } : {}) });
+    };
+    const powerNode = this.powerTopology.nodes.find(({ instanceId }) => instanceId === data.worldInstanceId);
+    const powerGrid = powerNode
+      ? this.physicalPower.powerResults().find(({ gridId }) => gridId === powerNode.gridId)
+      : null;
+    const powerConsumer = powerGrid?.consumers.find(({ id: consumerId }) => consumerId === data.worldInstanceId);
+    const restartState = powerNode
+      ? this.physicalPower.snapshot().restartStates.find(({ gridId }) => gridId === powerNode.gridId)?.state
+      : null;
+    const fuelState = this.physicalPower.generatorFuelState(data.worldInstanceId);
+    if (powerGrid?.mainBreakerTripped) addCause("tripped", "grid_breaker_tripped", "보호 차단기가 동작했습니다", "전력 제어판에서 순차 재기동을 시작하세요.");
+    if (powerNode?.connectionState === "disconnected") addCause("unconnected", "power_unconnected", "전력망에 연결되지 않았습니다", "전력 포트와 배전 설비 사이의 케이블을 확인하세요.");
+    if (powerConsumer?.shed) addCause("shed", "load_shed", "부하 우선순위에 의해 차단되었습니다", `현재 우선순위 P${powerConsumer.priority}`);
+    if (fuelState?.operationState === "fuel_starved") addCause("fuel_starved", "generator_fuel_empty", "발전 연료가 없습니다", `${START_REGISTRY.items.get(fuelState.fuelItemId)?.name ?? fuelState.fuelItemId}을 공급하세요.`);
+    if (state.powerSatisfaction > 0 && state.powerSatisfaction < 0.999) addCause("power_limited", "power_satisfaction_low", "필요 전력을 모두 받지 못합니다", `공급률 ${Math.round(state.powerSatisfaction * 100)}%`);
+    if (state.runtimeState === "starved") addCause("missing_input", "process_input_missing", "공정 입력이 부족합니다");
+    if (state.runtimeState === "blocked") addCause("output_blocked", "process_output_blocked", "출력 버퍼 또는 연결 경로가 막혔습니다");
+    if (definition.recipeIds.length > 0 && !recipe) addCause("recipe_missing", "recipe_not_selected", "레시피가 선택되지 않았습니다");
+    if (state.runtimeState === "paused" && state.powerSatisfaction >= 0.999) addCause("manual_off", "simulation_paused", "설비가 수동 정지 상태입니다");
+    if (restartState === "restoring") addCause("restoring", "grid_restoring", "전력망을 순차 복구하고 있습니다");
+    if (state.runtimeState === "disconnected" && state.connectedPortIds.length === 0) addCause("unconnected", "logistics_unconnected", "필수 물류 포트가 연결되지 않았습니다");
+    const statusPresentation = reduceEquipmentStatus({
+      activeStates,
+      causes,
+      fallbackState: state.runtimeState === "working" ? "working" : "idle",
+    });
     return {
       id,
       type: data.type,
       buildingId: definition.id,
-      status,
+      status: statusPresentation.primaryLabel,
+      operationalState: statusPresentation.primaryState,
+      operationalLabel: statusPresentation.primaryLabel,
+      statusCauses: statusPresentation.causes,
+      powerSatisfaction: state.powerSatisfaction,
       runtimeState: state.runtimeState,
       recipeName: recipe?.name ?? (definition.recipeIds.length > 0 ? "레시피 선택 필요" : "물류 처리"),
       progress: state.progress,
@@ -2461,6 +2518,7 @@ export class FactoryRuntime {
       this.publishEnvironment();
     }
     this.selectedUiClock += delta;
+    this.selectionHelper?.update();
     if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;
       this.callbacks.onSelected(this.selectedInfo(this.selectedId));

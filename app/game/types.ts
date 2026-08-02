@@ -1,6 +1,7 @@
 import type { MachineRuntimeState } from "./sim/contracts.ts";
 import type { RuntimeItemId } from "./recipes/runtimeRecipes.ts";
 import type { BuildingId, RecipeId } from "./domain/types.ts";
+import type { EquipmentOperationalState, EquipmentStatusCause } from "./presentation/equipmentStatus.ts";
 
 export type Tool =
   | "inspect"
@@ -100,6 +101,10 @@ export type SelectedInfo = {
   type: BuildType;
   buildingId?: BuildingId;
   status: string;
+  operationalState?: EquipmentOperationalState;
+  operationalLabel?: string;
+  statusCauses?: readonly EquipmentStatusCause[];
+  powerSatisfaction?: number;
   runtimeState?: MachineRuntimeState;
   recipeName?: string;
   inputItems?: readonly Readonly<{ itemId: ItemType; name: string; amount: number }>[];
