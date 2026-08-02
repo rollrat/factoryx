@@ -11,17 +11,21 @@ import bpy
 from mathutils import Vector
 
 
-ASSETS = (
-    "ironwind_cliff_straight_16m",
-    "ironwind_cliff_outer_corner",
-    "ironwind_natural_arch",
-)
+ASSET_KINDS = {
+    "ironwind_cliff_straight_16m": "straight",
+    "ironwind_cliff_outer_corner": "corner",
+    "ironwind_natural_arch": "arch",
+    "ironwind_cliff_arch_transition": "transition",
+    "ironwind_talus_cluster": "talus",
+    "ironwind_cliff_breached_16m": "breached",
+}
 
 
 def arguments() -> argparse.Namespace:
     values = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--assets", default="all", help="Comma-separated asset ids or 'all'")
     return parser.parse_args(values)
 
 
@@ -301,6 +305,76 @@ def build_arch(asset_id: str, master: bpy.types.Collection, root: bpy.types.Obje
         obj["fx_lod_level"] = lod
 
 
+def build_transition(asset_id: str, master: bpy.types.Collection, root: bpy.types.Object, materials: list[bpy.types.Material]) -> None:
+    """Full-height straight seam tapering into the lower shoulder of an arch."""
+    for lod, segments in enumerate((9, 6, 4)):
+        target, parent = add_lod_container(master, root, lod)
+        writer = MeshWriter()
+        bands = (7, 5, 3)[lod]
+        band_height = 12.0 / bands
+        for index in range(bands):
+            z0 = index * band_height
+            z1 = (index + 1) * band_height
+            if z0 < 8.0:
+                x1 = 8.0
+            else:
+                taper = min(1.0, (z0 - 8.0) / 4.0)
+                x1 = 5.0 - taper * 3.5
+            writer.irregular_band(
+                -8.0, x1, z0, z1, 4.2 - index * 0.08,
+                max(2, round(segments * (x1 + 8.0) / 16.0)),
+                4.2 + index * 1.31, index % 3,
+            )
+        if lod < 2:
+            writer.talus(5.4, 3.0, 1.7, 2.7, 4.1, 1)
+            writer.talus(7.0, 2.2, 1.4, 2.0, 5.6, 0)
+        obj = writer.object(f"{asset_id}_lod{lod}", target, parent, materials)
+        obj["fx_asset_role"] = "visual"
+        obj["fx_lod_level"] = lod
+
+
+def build_talus_cluster(asset_id: str, master: bpy.types.Collection, root: bpy.types.Object, materials: list[bpy.types.Material]) -> None:
+    """Sparse, large-scale cliff-foot cluster; not a pebble scatter."""
+    rocks = (
+        (-4.7, 3.0, 2.1, 3.2, 0.8), (-1.8, 3.8, 2.5, 3.8, 2.2),
+        (1.5, 3.2, 2.2, 2.9, 3.7), (4.3, 2.7, 1.9, 2.5, 5.1),
+        (0.0, 2.4, 1.6, 2.0, 6.4),
+    )
+    limits = (5, 4, 3)
+    for lod in range(3):
+        target, parent = add_lod_container(master, root, lod)
+        writer = MeshWriter()
+        for index, (x, width, depth, height, seed) in enumerate(rocks[:limits[lod]]):
+            writer.talus(x, width, depth, height, seed, index % 3)
+        obj = writer.object(f"{asset_id}_lod{lod}", target, parent, materials)
+        obj["fx_asset_role"] = "visual"
+        obj["fx_lod_level"] = lod
+
+
+def build_breached(asset_id: str, master: bpy.types.Collection, root: bpy.types.Object, materials: list[bpy.types.Material]) -> None:
+    """A collapsed 16m wall variant with a readable central break and rubble apron."""
+    for lod, segments in enumerate((8, 5, 3)):
+        target, parent = add_lod_container(master, root, lod)
+        writer = MeshWriter()
+        bands = (7, 5, 3)[lod]
+        band_height = 12.0 / bands
+        for index in range(bands):
+            z0 = index * band_height
+            z1 = (index + 1) * band_height
+            left_end = -1.7 - index * 0.22
+            right_start = 2.0 + index * 0.18
+            writer.irregular_band(-8.0, left_end, z0, z1, 4.1, max(2, segments - 2), 7.0 + index, index % 3)
+            if z0 < 10.3:
+                writer.irregular_band(right_start, 8.0, z0, min(z1, 10.4), 4.0, max(2, segments - 2), 9.5 + index, (index + 1) % 3)
+        if lod < 2:
+            writer.talus(-0.9, 3.4, 2.0, 2.3, 7.8, 1)
+            writer.talus(1.5, 3.0, 1.8, 1.9, 9.2, 0)
+            writer.talus(0.2, 2.4, 1.5, 1.4, 10.7, 2)
+        obj = writer.object(f"{asset_id}_lod{lod}", target, parent, materials)
+        obj["fx_asset_role"] = "visual"
+        obj["fx_lod_level"] = lod
+
+
 def collision_box(
     name: str,
     target: bpy.types.Collection,
@@ -319,20 +393,31 @@ def collision_box(
 
 
 def add_collision(asset_id: str, kind: str, master: bpy.types.Collection, root: bpy.types.Object, material: bpy.types.Material) -> None:
-    wall_collection = new_collection("COL_WALL", master)
-    wall = new_empty("COL_WALL", wall_collection, root)
-    wall["fx_collision_type"] = "wall"
+    collision_name = "COL_BUILD_EXCLUSION" if kind == "talus" else "COL_WALL"
+    wall_collection = new_collection(collision_name, master)
+    wall = new_empty(collision_name, wall_collection, root)
+    wall["fx_collision_type"] = "build_exclusion" if kind == "talus" else "wall"
     if kind == "straight":
         collision_box(f"{asset_id}_wall", wall_collection, wall, (-8.0, -0.35, 0.0), (8.0, 3.9, 12.0), material)
     elif kind == "corner":
         collision_box(f"{asset_id}_wall_x", wall_collection, wall, (-8.0, -0.35, 0.0), (0.0, 3.9, 12.0), material)
         collision_box(f"{asset_id}_wall_y", wall_collection, wall, (-3.9, 0.0, 0.0), (0.35, 8.0, 12.0), material)
-    else:
+    elif kind == "arch":
         collision_box(f"{asset_id}_wall_left", wall_collection, wall, (-8.0, -2.5, 0.0), (-4.0, 2.5, 8.0), material)
         collision_box(f"{asset_id}_wall_right", wall_collection, wall, (4.0, -2.5, 0.0), (8.0, 2.5, 8.0), material)
         collision_box(f"{asset_id}_wall_crown", wall_collection, wall, (-4.0, -2.5, 6.35), (4.0, 2.5, 11.8), material)
+    elif kind == "transition":
+        collision_box(f"{asset_id}_wall_lower", wall_collection, wall, (-8.0, -0.3, 0.0), (8.0, 4.0, 8.0), material)
+        collision_box(f"{asset_id}_wall_upper", wall_collection, wall, (-8.0, -0.25, 8.0), (2.0, 3.9, 12.0), material)
+    elif kind == "breached":
+        collision_box(f"{asset_id}_wall_left", wall_collection, wall, (-8.0, -0.3, 0.0), (-1.7, 3.9, 12.0), material)
+        collision_box(f"{asset_id}_wall_right", wall_collection, wall, (2.0, -0.3, 0.0), (8.0, 3.9, 10.4), material)
+        collision_box(f"{asset_id}_rubble", wall_collection, wall, (-1.8, -1.2, 0.0), (2.4, 0.4, 2.1), material)
+    elif kind == "talus":
+        collision_box(f"{asset_id}_exclusion_left", wall_collection, wall, (-6.2, -2.4, 0.0), (-0.1, 0.5, 3.6), material)
+        collision_box(f"{asset_id}_exclusion_right", wall_collection, wall, (-0.5, -2.2, 0.0), (5.7, 0.5, 3.0), material)
 
-    if kind != "arch":
+    if kind in {"straight", "corner"}:
         walk_collection = new_collection("COL_WALKABLE", master)
         walkable = new_empty("COL_WALKABLE", walk_collection, root)
         walkable["fx_collision_type"] = "walkable"
@@ -359,11 +444,28 @@ def add_sockets(asset_id: str, kind: str, master: bpy.types.Collection, root: bp
             "cliff.top": (-2.0, 2.0, 12.0), "cliff.bottom": (0.0, 0.0, 0.0),
             "talus.attach": (-0.6, -0.6, 0.0),
         }
-    else:
+    elif kind == "arch":
         values = {
             "cliff.start": (-8.0, 0.0, 0.0), "cliff.end": (8.0, 0.0, 0.0),
             "cliff.top": (0.0, 0.0, 11.8), "cliff.bottom": (0.0, 0.0, 0.0),
             "talus.attach": (-6.0, -2.6, 0.0), "cave.portal": (0.0, 0.0, 3.0),
+        }
+    elif kind == "transition":
+        values = {
+            "cliff.start": (-8.0, 0.0, 0.0), "cliff.end": (8.0, 0.0, 0.0),
+            "cliff.top": (-3.0, 2.0, 12.0), "cliff.bottom": (0.0, 0.0, 0.0),
+            "talus.attach": (5.5, -0.8, 0.0), "arch.attach": (8.0, 0.0, 0.0),
+        }
+    elif kind == "breached":
+        values = {
+            "cliff.start": (-8.0, 0.0, 0.0), "cliff.end": (8.0, 0.0, 0.0),
+            "cliff.top": (-5.0, 2.0, 12.0), "cliff.bottom": (0.0, 0.0, 0.0),
+            "talus.attach": (0.0, -0.9, 0.0), "breach.center": (0.15, 0.0, 0.0),
+        }
+    else:
+        values = {
+            "talus.attach": (0.0, 0.0, 0.0),
+            "talus.start": (-6.0, 0.0, 0.0), "talus.end": (6.0, 0.0, 0.0),
         }
     for semantic, location in values.items():
         socket = new_empty(semantic, target, parent, location)
@@ -488,12 +590,15 @@ def build_asset(output_dir: Path, asset_id: str, kind: str) -> dict[str, object]
     root["fx_source_up"] = "+Z"
     root["fx_forward"] = "+Z_glTF"
     root["fx_pivot_convention"] = "ground_center"
+    collision_nodes = ["COL_BUILD_EXCLUSION"] if kind == "talus" else ["COL_WALL"]
+    if kind in {"straight", "corner"}:
+        collision_nodes.append("COL_WALKABLE")
     root["factoryx"] = json.dumps(
         {
             "schemaVersion": 2, "assetId": asset_id, "kind": "environment_cliff",
             "unitMeters": 1, "coordinateSystem": {"handedness": "right", "up": "+Y", "forward": "+Z"},
             "pivotConvention": "ground_center", "lodNodes": ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
-            "collisionNodes": ["COL_WALL"] + ([] if kind == "arch" else ["COL_WALKABLE"]),
+            "collisionNodes": collision_nodes,
             "socketContainer": "SOCKETS", "moduleKind": kind,
         }, separators=(",", ":"),
     )
@@ -508,8 +613,16 @@ def build_asset(output_dir: Path, asset_id: str, kind: str) -> dict[str, object]
         build_straight(asset_id, master, root, materials)
     elif kind == "corner":
         build_corner(asset_id, master, root, materials)
-    else:
+    elif kind == "arch":
         build_arch(asset_id, master, root, materials)
+    elif kind == "transition":
+        build_transition(asset_id, master, root, materials)
+    elif kind == "talus":
+        build_talus_cluster(asset_id, master, root, materials)
+    elif kind == "breached":
+        build_breached(asset_id, master, root, materials)
+    else:
+        raise ValueError(f"unknown cliff module kind {kind}")
     add_collision(asset_id, kind, master, root, collision)
     add_sockets(asset_id, kind, master, root)
     meta_target = new_collection("META", master)
@@ -523,9 +636,10 @@ def build_asset(output_dir: Path, asset_id: str, kind: str) -> dict[str, object]
     glb_path = output_dir / f"{asset_id}.glb"
     bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
     export_asset(glb_path, root, master)
-    previews = render_views(scene, camera, output_dir, asset_id, 5.7 if kind != "arch" else 5.0)
+    target_z = 1.5 if kind == "talus" else (5.0 if kind == "arch" else 5.7)
+    previews = render_views(scene, camera, output_dir, asset_id, target_z)
     lod_triangles = [triangle_count(f"VIS_LOD{lod}") for lod in range(3)]
-    collision_triangles = triangle_count("COL_WALL") + triangle_count("COL_WALKABLE")
+    collision_triangles = sum(triangle_count(node_name) for node_name in collision_nodes)
     return {
         "id": asset_id,
         "kind": f"cliff_{kind}",
@@ -537,7 +651,7 @@ def build_asset(output_dir: Path, asset_id: str, kind: str) -> dict[str, object]
         "pivot": "ground_center",
         "lodNodes": ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
         "lodTriangles": lod_triangles,
-        "collisionNodes": ["COL_WALL"] + ([] if kind == "arch" else ["COL_WALKABLE"]),
+        "collisionNodes": collision_nodes,
         "collisionTriangles": collision_triangles,
         "socketContainer": "SOCKETS",
         "previews": previews,
@@ -549,9 +663,21 @@ def main() -> None:
     args = arguments()
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    entries = []
-    for asset_id, kind in zip(ASSETS, ("straight", "corner", "arch")):
-        entries.append(build_asset(output_dir, asset_id, kind))
+    if args.assets == "all":
+        selected = list(ASSET_KINDS)
+    else:
+        selected = [value.strip() for value in args.assets.split(",") if value.strip()]
+        unknown = [asset_id for asset_id in selected if asset_id not in ASSET_KINDS]
+        if unknown:
+            raise ValueError(f"unknown assets: {', '.join(unknown)}")
+    existing_entries: dict[str, dict[str, object]] = {}
+    manifest_path = output_dir / "manifest.json"
+    if manifest_path.exists():
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        existing_entries = {entry["id"]: entry for entry in existing.get("assets", [])}
+    for asset_id in selected:
+        existing_entries[asset_id] = build_asset(output_dir, asset_id, ASSET_KINDS[asset_id])
+    entries = [existing_entries[asset_id] for asset_id in ASSET_KINDS if asset_id in existing_entries]
     manifest = {
         "schemaVersion": 2,
         "kitId": "ironwind_cliff_proto",
@@ -562,12 +688,12 @@ def main() -> None:
             "gltfUp": "+Y",
             "pivot": "ground_center",
             "requiredLods": ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
-            "requiredCollision": ["COL_WALL"],
+            "collisionByAsset": {entry["id"]: entry["collisionNodes"] for entry in entries},
             "requiredSocketContainer": "SOCKETS",
         },
         "assets": entries,
     }
-    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print("FACTORYX_CLIFF_KIT_BUILT=ironwind_cliff_proto")
 
 

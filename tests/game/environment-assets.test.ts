@@ -67,12 +67,15 @@ test("the Ironwind cliff kit publishes its collision and socket contracts", asyn
     ["ironwind_cliff_straight_16m", ["COL_WALL", "COL_WALKABLE"]],
     ["ironwind_cliff_outer_corner", ["COL_WALL", "COL_WALKABLE"]],
     ["ironwind_natural_arch", ["COL_WALL"]],
+    ["ironwind_cliff_arch_transition", ["COL_WALL"]],
+    ["ironwind_talus_cluster", ["COL_BUILD_EXCLUSION"]],
+    ["ironwind_cliff_breached_16m", ["COL_WALL"]],
   ]);
   for (const [id, collisions] of expected) {
     const asset = manifest.assets.find((candidate) => candidate.id === id);
     assert.ok(asset, `missing ${id}`);
     assert.equal(asset.kind, "environment_cliff");
-    assert.equal(asset.collisionNode, "COL_WALL");
+    assert.equal(asset.collisionNode, collisions[0]);
     assert.deepEqual(asset.collisionNodes, collisions);
     assert.equal(asset.socketNode, "SOCKETS");
   }

@@ -1,5 +1,6 @@
 import type { WorldPoint2 } from "../../sim/firstPersonCollision.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
+import { cliffMovementBlocked } from "./IronwindCliffCollision.ts";
 
 export type TerrainMovementResult = Readonly<{
   position: WorldPoint2;
@@ -39,10 +40,17 @@ const canTraverse = (sampler: TerrainSampler, from: WorldPoint2, to: WorldPoint2
   const end = sampler.sample(to.x, to.z, stratumId);
   const startInfrastructure = infrastructureHeightAt(from.x, from.z, surfaces);
   const endInfrastructure = infrastructureHeightAt(to.x, to.z, surfaces);
+  const startElevation = startInfrastructure ?? start.height;
+  const endElevation = endInfrastructure ?? end.height;
   if (endInfrastructure === null && end.surface === "submerged") return false;
   if (endInfrastructure === null && end.surface === "hazard" && !hazardTraversal?.(to, stratumId)) return false;
   if (endInfrastructure === null && end.slopeDegrees > 38) return false;
-  return Math.abs((endInfrastructure ?? end.height) - (startInfrastructure ?? start.height)) <= 0.72;
+  const followsAuthoredCrossing = stratumId === "surface"
+    && sampler.accessRouteAt(from.x, from.z) !== null
+    && sampler.accessRouteAt(to.x, to.z) !== null;
+  if (stratumId === "surface" && !followsAuthoredCrossing
+    && cliffMovementBlocked(from, to, startElevation, endElevation)) return false;
+  return Math.abs(endElevation - startElevation) <= 0.72;
 };
 
 /** Axis-separated terrain traversal preserves wall sliding against authored cliffs. */

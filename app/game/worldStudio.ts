@@ -14,7 +14,7 @@ import {
 } from "./environment/authoring.ts";
 
 export type WorldStudioBrush = TerrainAuthoringBrush;
-export type WorldStudioOverlay = "none" | "biome" | "surface" | "buildability" | "chunks" | "resources" | "shadow";
+export type WorldStudioOverlay = "none" | "biome" | "surface" | "buildability" | "chunks" | "resources" | "shadow" | "cliffs";
 type BuiltinWorldStudioView =
   | "overview"
   | "firstPerson"
@@ -140,7 +140,12 @@ export class WorldStudioRuntime {
     this.rebuildShadowOverlay();
     this.resize();
   }
-  setOverlay(overlay: WorldStudioOverlay) { this.overlay = overlay; this.refreshTerrainColors(); this.applyOverlayVisibility(); }
+  setOverlay(overlay: WorldStudioOverlay) {
+    this.overlay = overlay;
+    this.environment.setCliffDebugVisible(overlay === "cliffs");
+    this.refreshTerrainColors();
+    this.applyOverlayVisibility();
+  }
 
   setView(view: WorldStudioView) {
     const reviewCameraIds = {

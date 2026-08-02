@@ -10,3 +10,11 @@ test("cliff-kit LOD keeps nearby silhouettes detailed and reduces distant geomet
   assert.equal(cliffLodForDistance(20, "low"), 1);
   assert.equal(cliffLodForDistance(90, "low"), 2);
 });
+
+test("cliff-kit LOD hysteresis does not thrash near distance thresholds", () => {
+  assert.equal(cliffLodForDistance(60, "high", 0), 0);
+  assert.equal(cliffLodForDistance(60, "high", 1), 1);
+  assert.equal(cliffLodForDistance(135, "high", 1), 1);
+  assert.equal(cliffLodForDistance(120, "high", 2), 2);
+  assert.equal(cliffLodForDistance(110, "high", 2), 1);
+});

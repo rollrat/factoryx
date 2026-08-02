@@ -30,6 +30,7 @@ const OVERLAYS: readonly { id: WorldStudioOverlay; label: string }[] = [
   { id: "none", label: "자연색" }, { id: "biome", label: "바이옴" }, { id: "surface", label: "표면" },
   { id: "buildability", label: "건설 판정" }, { id: "chunks", label: "청크 LOD" },
   { id: "resources", label: "자원 광맥" }, { id: "shadow", label: "그림자 범위" },
+  { id: "cliffs", label: "절벽 소켓" },
 ];
 const VIEWS: readonly { id: WorldStudioView; label: string }[] = [
   { id: "overview", label: "전체" }, { id: "firstPerson", label: "1인칭" }, { id: "production", label: "생산선" },

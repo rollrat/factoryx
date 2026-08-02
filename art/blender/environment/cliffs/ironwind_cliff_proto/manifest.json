@@ -12,9 +12,28 @@
       "VIS_LOD1",
       "VIS_LOD2"
     ],
-    "requiredCollision": [
-      "COL_WALL"
-    ],
+    "collisionByAsset": {
+      "ironwind_cliff_straight_16m": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "ironwind_cliff_outer_corner": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "ironwind_natural_arch": [
+        "COL_WALL"
+      ],
+      "ironwind_cliff_arch_transition": [
+        "COL_WALL"
+      ],
+      "ironwind_talus_cluster": [
+        "COL_BUILD_EXCLUSION"
+      ],
+      "ironwind_cliff_breached_16m": [
+        "COL_WALL"
+      ]
+    },
     "requiredSocketContainer": "SOCKETS"
   },
   "assets": [
@@ -136,6 +155,123 @@
         "ironwind_natural_arch_preview_top.png"
       ],
       "glbBytes": 45516
+    },
+    {
+      "id": "ironwind_cliff_arch_transition",
+      "kind": "cliff_transition",
+      "source": "ironwind_cliff_arch_transition.blend",
+      "output": "ironwind_cliff_arch_transition.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        516,
+        268,
+        100
+      ],
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "collisionTriangles": 24,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_cliff_arch_transition_preview_front.png",
+        "ironwind_cliff_arch_transition_preview_left.png",
+        "ironwind_cliff_arch_transition_preview_right.png",
+        "ironwind_cliff_arch_transition_preview_top.png"
+      ],
+      "glbBytes": 55188
+    },
+    {
+      "id": "ironwind_talus_cluster",
+      "kind": "cliff_talus",
+      "source": "ironwind_talus_cluster.blend",
+      "output": "ironwind_talus_cluster.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        60,
+        48,
+        36
+      ],
+      "collisionNodes": [
+        "COL_BUILD_EXCLUSION"
+      ],
+      "collisionTriangles": 24,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_talus_cluster_preview_front.png",
+        "ironwind_talus_cluster_preview_left.png",
+        "ironwind_talus_cluster_preview_right.png",
+        "ironwind_talus_cluster_preview_top.png"
+      ],
+      "glbBytes": 17212
+    },
+    {
+      "id": "ironwind_cliff_breached_16m",
+      "kind": "cliff_breached",
+      "source": "ironwind_cliff_breached_16m.blend",
+      "output": "ironwind_cliff_breached_16m.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        764,
+        316,
+        120
+      ],
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "collisionTriangles": 36,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_cliff_breached_16m_preview_front.png",
+        "ironwind_cliff_breached_16m_preview_left.png",
+        "ironwind_cliff_breached_16m_preview_right.png",
+        "ironwind_cliff_breached_16m_preview_top.png"
+      ],
+      "glbBytes": 72632
     }
   ],
   "validation": {
@@ -157,6 +293,24 @@
       {
         "assetId": "ironwind_natural_arch",
         "bytes": 45516,
+        "nodeCount": 19,
+        "errors": []
+      },
+      {
+        "assetId": "ironwind_cliff_arch_transition",
+        "bytes": 55188,
+        "nodeCount": 18,
+        "errors": []
+      },
+      {
+        "assetId": "ironwind_talus_cluster",
+        "bytes": 17212,
+        "nodeCount": 15,
+        "errors": []
+      },
+      {
+        "assetId": "ironwind_cliff_breached_16m",
+        "bytes": 72632,
         "nodeCount": 19,
         "errors": []
       }

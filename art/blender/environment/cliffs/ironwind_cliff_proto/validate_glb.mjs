@@ -4,7 +4,7 @@ import path from "node:path";
 const outputDir = path.resolve(process.argv[2] ?? ".");
 const manifestPath = path.join(outputDir, "manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const required = ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2", "COL_WALL", "SOCKETS", "META"];
+const required = ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2", "SOCKETS", "META"];
 
 const results = [];
 for (const asset of manifest.assets) {
@@ -27,9 +27,15 @@ for (const asset of manifest.assets) {
   })();
   if (embedded.coordinateSystem?.up !== "+Y") errors.push("embedded contract is not +Y up");
   if (embedded.unitMeters !== 1) errors.push("embedded contract is not 1m/unit");
-  const socketNames = asset.kind.endsWith("arch")
+  const socketNames = asset.kind === "cliff_arch"
     ? ["cliff.start", "cliff.end", "cliff.top", "cliff.bottom", "talus.attach", "cave.portal"]
-    : ["cliff.start", "cliff.end", "cliff.top", "cliff.bottom", "talus.attach"];
+    : asset.kind === "cliff_transition"
+      ? ["cliff.start", "cliff.end", "cliff.top", "cliff.bottom", "talus.attach", "arch.attach"]
+      : asset.kind === "cliff_breached"
+        ? ["cliff.start", "cliff.end", "cliff.top", "cliff.bottom", "talus.attach", "breach.center"]
+        : asset.kind === "cliff_talus"
+          ? ["talus.attach", "talus.start", "talus.end"]
+          : ["cliff.start", "cliff.end", "cliff.top", "cliff.bottom", "talus.attach"];
   for (const socket of socketNames) if (!nodes.has(socket)) errors.push(`missing socket: ${socket}`);
   if (asset.lodTriangles.some((value, index, all) => index > 0 && value >= all[index - 1])) {
     errors.push("LOD triangle counts are not strictly descending");

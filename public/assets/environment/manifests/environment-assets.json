@@ -319,6 +319,75 @@
       ],
       "collisionTriangles": 36,
       "bytes": 45516
+    },
+    {
+      "id": "ironwind_cliff_arch_transition",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_cliff_arch_transition.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_cliff_arch_transition.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_WALL",
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        516,
+        268,
+        100
+      ],
+      "collisionTriangles": 24,
+      "bytes": 55188
+    },
+    {
+      "id": "ironwind_talus_cluster",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_talus_cluster.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_talus_cluster.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_BUILD_EXCLUSION",
+      "collisionNodes": [
+        "COL_BUILD_EXCLUSION"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        60,
+        48,
+        36
+      ],
+      "collisionTriangles": 24,
+      "bytes": 17212
+    },
+    {
+      "id": "ironwind_cliff_breached_16m",
+      "kind": "environment_cliff",
+      "url": "/assets/environment/models/ironwind_cliff_breached_16m.glb",
+      "previewUrl": "/assets/environment/previews/ironwind_cliff_breached_16m.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_WALL",
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "socketNode": "SOCKETS",
+      "lodTriangles": [
+        764,
+        316,
+        120
+      ],
+      "collisionTriangles": 36,
+      "bytes": 72632
     }
   ]
 }

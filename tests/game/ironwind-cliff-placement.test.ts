@@ -14,15 +14,20 @@ test("Ironwind cliff placement is deterministic and exposes stable runtime contr
   assert.ok(IRONWIND_CLIFF_PLACEMENTS.some(({ assetId }) => assetId === "ironwind_cliff_straight_16m"));
   assert.equal(IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_cliff_outer_corner").length, 1);
   assert.equal(IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_natural_arch").length, 1);
+  assert.equal(IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_cliff_arch_transition").length, 1);
+  assert.equal(IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_cliff_breached_16m").length, 1);
+  assert.equal(IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_talus_cluster").length, 3);
   IRONWIND_CLIFF_PLACEMENTS.forEach(({ transform, metadata }) => {
     assert.ok(Number.isFinite(transform.position.x + transform.position.y + transform.position.z));
     assert.deepEqual(metadata.lod.nodes, ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"]);
-    assert.ok(metadata.collision.nodes.includes("COL_WALL"));
+    assert.ok(metadata.collision.nodes.includes(
+      metadata.collision.mode === "build_exclusion" ? "COL_BUILD_EXCLUSION" : "COL_WALL",
+    ));
   });
 });
 
 test("sixteen metre straight modules meet without visible seam gaps", () => {
-  const straights = IRONWIND_CLIFF_PLACEMENTS.filter(({ assetId }) => assetId === "ironwind_cliff_straight_16m");
+  const straights = IRONWIND_CLIFF_PLACEMENTS.filter(({ id }) => id.startsWith("ironwind-cliff:straight:"));
   assert.ok(straights.length >= 5);
   straights.forEach(({ metadata, transform }) => {
     const span = distance(metadata.seams.start, metadata.seams.end);

@@ -7,6 +7,9 @@ FactoryX 철풍 단층지의 첫 회색 지형 키트다. 재질 디테일보다
 - `ironwind_cliff_straight_16m`: 길이 16m 직선 단층벽
 - `ironwind_cliff_outer_corner`: 두 직선이 90도로 만나는 바깥 코너
 - `ironwind_natural_arch`: 폭 16m, 약 8m 폭의 통과 공간을 가진 자연 아치
+- `ironwind_cliff_arch_transition`: 12m 직선 절벽에서 아치 어깨로 낮아지는 접합 모듈
+- `ironwind_talus_cluster`: 절벽 기부를 가리는 12m 폭의 대형 붕적암 군집
+- `ironwind_cliff_breached_16m`: 중앙이 무너진 16m 직선 절벽 변형
 
 각 GLB에는 다음 노드와 glTF `extras`가 들어 있다.
 
@@ -23,6 +26,12 @@ Blender 원본은 Blender 표준인 Z-up이며 `1 Blender unit = 1m`다. GLB 내
 
 ```powershell
 ./art/blender/environment/cliffs/ironwind_cliff_proto/build.ps1
+```
+
+선택한 자산만 다시 생성할 수 있다. 이 방식은 Blender 저장·렌더의 비결정적 바이너리 변경이 기존 승인 자산에 생기는 것을 막는다.
+
+```powershell
+./art/blender/environment/cliffs/ironwind_cliff_proto/build.ps1 -Assets "ironwind_cliff_arch_transition,ironwind_talus_cluster,ironwind_cliff_breached_16m"
 ```
 
 스크립트는 세 개의 `.blend`와 `.glb`, 자산별 네 방향 PNG, `manifest.json`을 생성한 다음 노드·소켓·단위·LOD 감소 계약을 검사한다.

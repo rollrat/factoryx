@@ -177,6 +177,39 @@
       "lodTriangleCaps": [400, 240, 160],
       "collisionTriangleCap": 64,
       "runtimeCliffId": "natural_arch"
+    },
+    {
+      "id": "ironwind_cliff_arch_transition",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_cliff_arch_transition.blend",
+      "output": "public/assets/environment/models/ironwind_cliff_arch_transition.glb",
+      "preview": "public/assets/environment/previews/ironwind_cliff_arch_transition.png",
+      "lodTriangleCaps": [650, 340, 140],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "arch_transition"
+    },
+    {
+      "id": "ironwind_talus_cluster",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_talus_cluster.blend",
+      "output": "public/assets/environment/models/ironwind_talus_cluster.glb",
+      "preview": "public/assets/environment/previews/ironwind_talus_cluster.png",
+      "lodTriangleCaps": [100, 70, 50],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "talus_cluster"
+    },
+    {
+      "id": "ironwind_cliff_breached_16m",
+      "kind": "environment_cliff",
+      "family": "ironwind_cliff_proto",
+      "source": "art/blender/environment/cliffs/ironwind_cliff_proto/ironwind_cliff_breached_16m.blend",
+      "output": "public/assets/environment/models/ironwind_cliff_breached_16m.glb",
+      "preview": "public/assets/environment/previews/ironwind_cliff_breached_16m.png",
+      "lodTriangleCaps": [900, 400, 160],
+      "collisionTriangleCap": 64,
+      "runtimeCliffId": "breached_16m"
     }
   ]
 }

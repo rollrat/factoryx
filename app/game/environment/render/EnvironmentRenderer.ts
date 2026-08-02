@@ -192,6 +192,7 @@ export class EnvironmentRenderer {
       if (child.name.startsWith("landmark:")) child.visible = visible;
     });
   }
+  setCliffDebugVisible(visible: boolean) { this.cliffKit.setDebugVisible(visible); }
   setStratum(stratumId: string) {
     this.activeStratumId = stratumId;
     const surface = stratumId === "surface";

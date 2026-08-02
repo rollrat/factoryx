@@ -3,7 +3,10 @@ import { IRONWIND_TOPOGRAPHY } from "./ironwindTopography.ts";
 export type IronwindCliffAssetId =
   | "ironwind_cliff_straight_16m"
   | "ironwind_cliff_outer_corner"
-  | "ironwind_natural_arch";
+  | "ironwind_natural_arch"
+  | "ironwind_cliff_arch_transition"
+  | "ironwind_talus_cluster"
+  | "ironwind_cliff_breached_16m";
 
 export type WorldVector3 = Readonly<{ x: number; y: number; z: number }>;
 export type WorldTransform = Readonly<{
@@ -21,7 +24,7 @@ export type CliffPlacementMetadata = Readonly<{
   }>;
   collision: Readonly<{
     nodes: readonly string[];
-    mode: "wall" | "arch_opening";
+    mode: "wall" | "arch_opening" | "build_exclusion";
   }>;
   seams: Readonly<{
     start: WorldVector3;
@@ -50,6 +53,9 @@ const LOD_NODES = ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"] as const;
 const STRAIGHT_TRIANGLES = [736, 336, 108] as const;
 const CORNER_TRIANGLES = [840, 440, 168] as const;
 const ARCH_TRIANGLES = [288, 192, 132] as const;
+const TRANSITION_TRIANGLES = [516, 268, 100] as const;
+const TALUS_TRIANGLES = [60, 48, 36] as const;
+const BREACHED_TRIANGLES = [764, 316, 120] as const;
 
 const faultXAt = (z: number) => IRONWIND_TOPOGRAPHY.fault.baseX
   + Math.sin((z + 18) * IRONWIND_TOPOGRAPHY.fault.wavelength) * IRONWIND_TOPOGRAPHY.fault.amplitude;
@@ -74,18 +80,29 @@ export const createIronwindCliffPlacements = (): readonly IronwindCliffPlacement
     if (index === 3) return [];
     const from = faultPoints[index];
     const length = Math.hypot(to.x - from.x, to.z - from.z);
+    const assetId: IronwindCliffAssetId = index === 2
+      ? "ironwind_cliff_breached_16m"
+      : index === 4
+        ? "ironwind_cliff_arch_transition"
+        : "ironwind_cliff_straight_16m";
+    const triangles = assetId === "ironwind_cliff_breached_16m"
+      ? BREACHED_TRIANGLES
+      : assetId === "ironwind_cliff_arch_transition"
+        ? TRANSITION_TRIANGLES
+        : STRAIGHT_TRIANGLES;
+    const heading = index === 4 ? headingFor(to, from) : headingFor(from, to);
     return [{
       id: `ironwind-cliff:straight:${String(index).padStart(2, "0")}`,
-      assetId: "ironwind_cliff_straight_16m",
+      assetId,
       transform: {
         position: point3((from.x + to.x) * 0.5, baseY, (from.z + to.z) * 0.5),
-        rotation: point3(0, headingFor(from, to), 0),
+        rotation: point3(0, heading, 0),
         scale: point3(length / MODULE_LENGTH, CLIFF_HEIGHT_SCALE, 1),
       },
       metadata: {
         moduleLength: MODULE_LENGTH,
-        lod: { nodes: LOD_NODES, distances: LOD_DISTANCES, triangles: STRAIGHT_TRIANGLES },
-        collision: { nodes: ["COL_WALL", "COL_WALKABLE"], mode: "wall" },
+        lod: { nodes: LOD_NODES, distances: LOD_DISTANCES, triangles },
+        collision: { nodes: assetId === "ironwind_cliff_straight_16m" ? ["COL_WALL", "COL_WALKABLE"] : ["COL_WALL"], mode: "wall" },
         seams: { start: point3(from.x, baseY, from.z), end: point3(to.x, baseY, to.z) },
       },
     }];
@@ -118,11 +135,20 @@ export const createIronwindCliffPlacements = (): readonly IronwindCliffPlacement
 
   const vehicleFrom = { x: 38, z: -25 };
   const vehicleTo = { x: 69, z: -53 };
-  const vehicleProgress = 0.4;
-  const archPosition = {
-    x: vehicleFrom.x + (vehicleTo.x - vehicleFrom.x) * vehicleProgress,
-    z: vehicleFrom.z + (vehicleTo.z - vehicleFrom.z) * vehicleProgress,
-  };
+  const vehiclePointAt = (progress: number) => ({
+    x: vehicleFrom.x + (vehicleTo.x - vehicleFrom.x) * progress,
+    z: vehicleFrom.z + (vehicleTo.z - vehicleFrom.z) * progress,
+  });
+  let lowerProgress = 0;
+  let upperProgress = 1;
+  for (let iteration = 0; iteration < 32; iteration += 1) {
+    const progress = (lowerProgress + upperProgress) * 0.5;
+    const point = vehiclePointAt(progress);
+    if (point.x < faultXAt(point.z)) lowerProgress = progress;
+    else upperProgress = progress;
+  }
+  const vehicleProgress = (lowerProgress + upperProgress) * 0.5;
+  const archPosition = vehiclePointAt(vehicleProgress);
   const archWidthScale = 1.35;
   const archClearanceWidth = 8 * archWidthScale;
   const archHeading = Math.atan2(vehicleTo.x - vehicleFrom.x, vehicleTo.z - vehicleFrom.z);
@@ -155,7 +181,32 @@ export const createIronwindCliffPlacements = (): readonly IronwindCliffPlacement
     },
   };
 
-  return [...straights, corner, arch];
+  const talus = straights.filter(({ id }) => ["00", "01", "05"].some((suffix) => id.endsWith(suffix)))
+    .map((wall, index): IronwindCliffPlacement => {
+      const heading = wall.transform.rotation.y;
+      const tangent = { x: Math.cos(heading), z: -Math.sin(heading) };
+      const halfLength = 6;
+      return {
+        id: `ironwind-cliff:talus:${String(index).padStart(2, "0")}`,
+        assetId: "ironwind_talus_cluster",
+        transform: {
+          position: wall.transform.position,
+          rotation: wall.transform.rotation,
+          scale: point3(0.92 + index * 0.06, 1, 0.9 + (index % 2) * 0.12),
+        },
+        metadata: {
+          moduleLength: 12,
+          lod: { nodes: LOD_NODES, distances: LOD_DISTANCES, triangles: TALUS_TRIANGLES },
+          collision: { nodes: ["COL_BUILD_EXCLUSION"], mode: "build_exclusion" },
+          seams: {
+            start: point3(wall.transform.position.x - tangent.x * halfLength, baseY, wall.transform.position.z - tangent.z * halfLength),
+            end: point3(wall.transform.position.x + tangent.x * halfLength, baseY, wall.transform.position.z + tangent.z * halfLength),
+          },
+        },
+      };
+    });
+
+  return [...straights, corner, arch, ...talus];
 };
 
 export const IRONWIND_CLIFF_PLACEMENTS = createIronwindCliffPlacements();
