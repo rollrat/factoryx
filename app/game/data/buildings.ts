@@ -87,6 +87,20 @@ const conveyorPorts = (accepted: readonly ItemId[]) => [
   solid("solid_out", "output", 1, 0, 0.5, 0, 1, accepted),
 ] as const;
 
+const conveyorCornerPorts = (accepted: readonly ItemId[], clockwise: boolean) => [
+  port(
+    "solid_in",
+    "input",
+    "solid",
+    "belt_standard",
+    { x: 0, z: clockwise ? 1 : -1 },
+    { x: 0, y: 0.36, z: clockwise ? 0.5 : -0.5 },
+    { x: 0, z: clockwise ? 1 : -1 },
+    accepted,
+  ),
+  solid("solid_out", "output", 1, 0, 0.5, 0, 1, accepted),
+] as const;
+
 const consumerPower = (sizeX: number, z = 1) => power("power_in", "input", "power_local", sizeX, z, sizeX / 2, z - 0.5, 1);
 
 const cost = (...entries: ReadonlyArray<readonly [ItemId, number]>) =>
@@ -114,8 +128,14 @@ const POWER_LOADS: Readonly<Record<string, Readonly<{ activeMW: number; idleMW: 
 
 const OPERATIONAL_SPECS: Readonly<Record<string, Partial<BuildingDefinition>>> = {
   conveyor_mk1: { transportPolicy: { throughputPerMinute: 60 } },
+  conveyor_corner_cw_mk1: { transportPolicy: { throughputPerMinute: 60 } },
+  conveyor_corner_ccw_mk1: { transportPolicy: { throughputPerMinute: 60 } },
   conveyor_mk2: { transportPolicy: { throughputPerMinute: 120 } },
+  conveyor_corner_cw_mk2: { transportPolicy: { throughputPerMinute: 120 } },
+  conveyor_corner_ccw_mk2: { transportPolicy: { throughputPerMinute: 120 } },
   conveyor_mk3: { transportPolicy: { throughputPerMinute: 240 } },
+  conveyor_corner_cw_mk3: { transportPolicy: { throughputPerMinute: 240 } },
+  conveyor_corner_ccw_mk3: { transportPolicy: { throughputPerMinute: 240 } },
   fluid_extractor: { fluidStoragePolicy: { capacityM3: 100, throughputM3PerMinute: 60, locksFluidType: true } },
   fractionation_refinery: { fluidStoragePolicy: { capacityM3: 200, throughputM3PerMinute: 60, locksFluidType: true } },
   pipe_mk1: { transportPolicy: { throughputPerMinute: 60 }, fluidStoragePolicy: { capacityM3: 4, throughputM3PerMinute: 60, locksFluidType: true } },
@@ -305,8 +325,14 @@ export const START_BUILDINGS = [
 
   // 고체 물류
   building("conveyor_mk1", "컨베이어 Mk.1", "start", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["iron_plate", 1])),
+  building("conveyor_corner_cw_mk1", "컨베이어 우회전 Mk.1", "start", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, true), [], cost(["iron_plate", 1])),
+  building("conveyor_corner_ccw_mk1", "컨베이어 좌회전 Mk.1", "start", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, false), [], cost(["iron_plate", 1])),
   building("conveyor_mk2", "컨베이어 Mk.2", "phase_1_complete", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["iron_plate", 1], ["fastener_pack", 1])),
+  building("conveyor_corner_cw_mk2", "컨베이어 우회전 Mk.2", "phase_1_complete", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, true), [], cost(["iron_plate", 1], ["fastener_pack", 1])),
+  building("conveyor_corner_ccw_mk2", "컨베이어 좌회전 Mk.2", "phase_1_complete", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, false), [], cost(["iron_plate", 1], ["fastener_pack", 1])),
   building("conveyor_mk3", "컨베이어 Mk.3", "phase_3_complete", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["steel_billet", 1], ["industrial_motor", 1])),
+  building("conveyor_corner_cw_mk3", "컨베이어 우회전 Mk.3", "phase_3_complete", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, true), [], cost(["steel_billet", 1], ["industrial_motor", 1])),
+  building("conveyor_corner_ccw_mk3", "컨베이어 좌회전 Mk.3", "phase_3_complete", { x: 1, z: 1 }, conveyorCornerPorts(SOLID_ITEMS, false), [], cost(["steel_billet", 1], ["industrial_motor", 1])),
   building(
     "splitter", "분배기", "start", { x: 2, z: 2 },
     [

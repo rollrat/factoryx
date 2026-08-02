@@ -65,6 +65,44 @@ const addBox = (
   return mesh;
 };
 
+const createConveyorCornerModel = (materials: FactoryMaterials, clockwise: boolean) => {
+  const group = new THREE.Group();
+  const startZ = clockwise ? 0.5 : -0.5;
+  const curve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(0, 0.31, startZ),
+    new THREE.Vector3(0, 0.31, 0),
+    new THREE.Vector3(0.5, 0.31, 0),
+  );
+  const segments = 9;
+  for (let index = 0; index < segments; index += 1) {
+    const t = (index + 0.5) / segments;
+    const point = curve.getPoint(t);
+    const tangent = curve.getTangent(t).normalize();
+    const yaw = Math.atan2(tangent.x, tangent.z);
+    const base = addBox(group, [0.72, 0.15, 0.17], [point.x, 0.22, point.z], materials.dark);
+    base.rotation.y = yaw;
+    const tread = addBox(group, [0.64, 0.05, 0.18], [point.x, 0.325, point.z], materials.belt, false);
+    tread.rotation.y = yaw;
+    tread.userData.animationRole = "cornerBeltTread";
+    tread.userData.offset = index / segments;
+    for (const side of [-1, 1]) {
+      const normal = new THREE.Vector3(tangent.z, 0, -tangent.x).multiplyScalar(side * 0.39);
+      const rail = addBox(
+        group,
+        [0.07, 0.2, 0.18],
+        [point.x + normal.x, 0.25, point.z + normal.z],
+        materials.steel,
+      );
+      rail.rotation.y = yaw;
+    }
+  }
+  const status = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), materials.cyan);
+  status.position.set(0.35, 0.44, clockwise ? 0.08 : -0.08);
+  status.userData.animationRole = "beltStatusLight";
+  group.add(status);
+  return group;
+};
+
 export const createStructureModel = (type: BuildType, materials: FactoryMaterials) => {
   const group = new THREE.Group();
 
@@ -161,6 +199,8 @@ const dedicatedBuildingModel = (
     group.add(belt);
     return group;
   }
+  if (modelKey.startsWith("conveyor_corner_cw_")) return createConveyorCornerModel(materials, true);
+  if (modelKey.startsWith("conveyor_corner_ccw_")) return createConveyorCornerModel(materials, false);
   if (modelKey === "splitter") return createSplitterModel(materials);
   if (modelKey === "merger") return createMergerModel(materials);
   if (modelKey === "field_power_core") return createFieldPowerCoreModel(materials);

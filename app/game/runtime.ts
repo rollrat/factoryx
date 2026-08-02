@@ -44,6 +44,7 @@ import { migrateLegacyStructuresIntoWorld } from "./sim/legacyWorldMigration.ts"
 import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
 import { projectPlacement, worldPointToAnchorCell } from "./domain/placement.ts";
+import { buildConveyorRoute, type ConveyorRouteCellKind } from "./domain/conveyorRoute.ts";
 import {
   createWorldInteractionIdentityResolver,
   type WorldInteractionIdentityReference,
@@ -278,7 +279,7 @@ export class FactoryRuntime {
   private ghostValid = false;
   private beltStart: Cell | null = null;
   private beltPreview: THREE.Group | null = null;
-  private beltPreviewCells: Array<Cell & { rotation: number }> = [];
+  private beltPreviewCells: Array<Cell & { rotation: number; kind: ConveyorRouteCellKind; buildingId: BuildingId }> = [];
   private beltBuildSignature = "";
   private panning = false;
   private capturedPointerId: number | null = null;
@@ -1632,45 +1633,14 @@ export class FactoryRuntime {
   }
 
   private getBeltPath(start: Cell, end: Cell, zFirst: boolean) {
-    const path: Cell[] = [];
-    let x = start.x;
-    let z = start.z;
-    const push = (nextX: number, nextZ: number) => {
-      if (!path.some((cell) => cell.x === nextX && cell.z === nextZ)) path.push({ x: nextX, z: nextZ });
-    };
-    push(x, z);
-    const walkX = () => {
-      while (x !== end.x) {
-        const step = Math.sign(end.x - x);
-        x += step;
-        push(x, z);
-      }
-    };
-    const walkZ = () => {
-      while (z !== end.z) {
-        const step = Math.sign(end.z - z);
-        z += step;
-        push(x, z);
-      }
-    };
-    if (zFirst) {
-      walkZ();
-      walkX();
-    } else {
-      walkX();
-      walkZ();
-    }
-    return path.map((cell, index) => {
-      const next = path[index + 1];
-      const previous = path[index - 1];
-      const destination = next ?? previous;
-      if (!destination) return { ...cell, rotation: this.rotation };
-      const direction = next
-        ? { x: destination.x - cell.x, z: destination.z - cell.z }
-        : { x: cell.x - destination.x, z: cell.z - destination.z };
-      const rotation = direction.x > 0 ? 0 : direction.x < 0 ? 2 : direction.z > 0 ? 1 : 3;
-      return { ...cell, rotation };
-    });
+    const baseBuildingId = this.selectedBuildingId ?? "conveyor_mk1";
+    const tier = /^conveyor_mk(\d+)$/.exec(baseBuildingId)?.[1] ?? null;
+    return buildConveyorRoute(start, end, zFirst, this.rotation).map((cell) => ({
+      ...cell,
+      buildingId: cell.kind === "straight" || tier === null
+        ? baseBuildingId
+        : `conveyor_${cell.kind}_mk${tier}`,
+    }));
   }
 
   private updateBeltBuildInfo(dragging: boolean) {
@@ -1702,15 +1672,15 @@ export class FactoryRuntime {
     this.beltPreviewCells = this.getBeltPath(this.beltStart, end, zFirst);
     const reserved = new Set<string>();
     let allValid = true;
-    const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
     this.beltPreviewCells.forEach((cell) => {
+      const definition = START_REGISTRY.buildings.get(cell.buildingId);
       const projection = definition ? projectPlacement(definition, cell, cell.rotation) : null;
       const elevation = projection
         ? this.elevationAt(projection.modelTransform.position.x, projection.modelTransform.position.z)
         : this.elevationAt(cell.x, cell.z);
       const valid = this.simulation.canPlace("belt", cell.x, cell.z, reserved)
-        && Boolean(this.selectedBuildingId && this.campaignWorld.previewConstruction({
-          buildingId: this.selectedBuildingId,
+        && Boolean(definition && this.campaignWorld.previewConstruction({
+          buildingId: definition.id,
           position: { x: cell.x, z: cell.z },
           rotation: cell.rotation as 0 | 1 | 2 | 3,
           elevation,
@@ -1730,10 +1700,13 @@ export class FactoryRuntime {
       this.recolorGhost(model, valid);
       this.beltPreview?.add(model);
     });
-    if (definition) {
+    if (this.selectedBuildingId) {
       const required = new Map<string, number>();
-      definition.buildCost.forEach(({ itemId, amount }) => {
-        required.set(itemId, (required.get(itemId) ?? 0) + amount * this.beltPreviewCells.length);
+      this.beltPreviewCells.forEach((cell) => {
+        const definition = START_REGISTRY.buildings.get(cell.buildingId);
+        definition?.buildCost.forEach(({ itemId, amount }) => {
+          required.set(itemId, (required.get(itemId) ?? 0) + amount);
+        });
       });
       if ([...required].some(([itemId, amount]) => this.world.inventoryAmount(itemId) < amount)) {
         allValid = false;
@@ -1945,7 +1918,7 @@ export class FactoryRuntime {
         "place_batch",
         `경로 건설 · ${this.beltPreviewCells.length}칸`,
         () => this.campaignWorld.placeConstructionBatch(this.beltPreviewCells.map((cell) => ({
-          buildingId: this.selectedBuildingId!,
+          buildingId: cell.buildingId,
           position: { x: cell.x, z: cell.z },
           rotation: cell.rotation as 0 | 1 | 2 | 3,
           elevation: this.elevationAt(cell.x, cell.z),
@@ -1968,7 +1941,7 @@ export class FactoryRuntime {
     const added = this.beltPreviewCells.map((cell, index) => this.addStructure({
       id: this.nextId++,
       type: "belt",
-      ...(this.selectedBuildingId ? { buildingId: this.selectedBuildingId } : {}),
+      ...(this.selectedBuildingId ? { buildingId: cell.buildingId } : {}),
       ...(worldPlacement?.ok ? { worldInstanceId: worldPlacement.instances[index]?.id } : {}),
       x: cell.x,
       z: cell.z,
