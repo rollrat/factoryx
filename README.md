@@ -1,100 +1,82 @@
-# vinext-starter
+# Factory X
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Factory X는 AX-17 행성에서 자원 채굴, 가공, 물류, 전력망을 연결해 프로젝트 납품을 완성하는 3D 공장 건설 게임입니다. 탑다운 건설 시점과 1인칭 현장 시점을 오가며 같은 월드와 시뮬레이션을 조작합니다.
 
-## Prerequisites
+현재 공장 핵심 기능의 복구 순서와 완료 조건은 [공장 핵심 게임플레이 복구 로드맵](docs/factory-core-gameplay-recovery-roadmap.ko.md)에 정리되어 있습니다. 배경·지형 작업은 별도 문서와 담당 범위로 관리합니다.
 
-- Node.js `>=22.13.0`
+## 실행
 
-## Quick Start
+필수 환경은 Node.js `>=22.13.0`입니다.
 
 ```bash
 npm install
 npm run dev
+```
+
+검증 명령은 다음과 같습니다.
+
+```bash
 npm run build
+npm test
+npm run lint
 ```
 
-This starter does not use `wrangler.jsonc`.
+게임 저장은 브라우저 로컬 저장소에 기록됩니다.
 
-## Included Shape
+## 기본 게임 흐름
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+1. 광맥 위에 채굴기를 배치합니다.
+2. 컨베이어를 드래그해 채굴기 출력 포트와 가공 설비 입력 포트를 연결합니다.
+3. 설비를 선택해 레시피, 입력·출력 버퍼, 정지 원인을 확인합니다.
+4. 전력 포트가 있는 설비는 발전·배전 설비와 케이블로 연결합니다.
+5. 생산품을 프로젝트 도크에 납품해 다음 단계와 설비를 해금합니다.
 
-## Workspace Auth Headers
+컨베이어와 건물은 정수 그리드 셀의 좌하단을 `anchor`로 사용합니다. 프리뷰와 실제 배치는 동일한 회전 footprint, 모델 중심, 포트 좌표를 사용하며, 1칸 컨베이어의 시각 중심은 anchor에서 `(+0.5, +0.5)`입니다.
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+## 조작
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+| 입력 | 동작 |
+| --- | --- |
+| `1` | 검사/선택 |
+| `2` | 컨베이어 배치 |
+| `3`~`9` | 채굴기·제련기·조립기·저장고·분배기·병합기·파쇄기 |
+| `X` | 철거 |
+| `R` | 배치 방향 회전 |
+| `F` | 선택 설비 레시피 변경 |
+| `L` | 선택한 두 전력 설비 사이 케이블 시작/완료 |
+| `V` | 탑다운/1인칭 시점 전환 |
+| `C` | 동굴 입구 근처에서 지상/지하 전환 |
+| `Ctrl+Z`, `Ctrl+Shift+Z` | 실행 취소/다시 실행 |
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+탑다운 시점에서는 드래그로 벨트 경로를 만들고 `Shift`로 꺾이는 축의 우선순위를 바꿉니다.
 
-Treat the full name as optional and fall back to email when it is absent:
+1인칭에서는 `WASD` 이동, `Shift` 질주, `Space` 점프를 사용합니다. 첫 클릭은 포인터 잠금만 획득하며 그 클릭으로 건설이나 철거가 실행되지는 않습니다. 잠긴 뒤 조준점으로 설비 선택, 단일 건물 배치, 벨트 시작/완료, 철거를 실행할 수 있습니다. `Esc`로 포인터를 풀면 하단 건설 도구와 카탈로그를 다시 조작할 수 있습니다.
 
-```tsx
-import { headers } from "next/headers";
+## 전력 상태 읽기
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+상단 전력 계기는 `공급 / 요청 부하`와 설비 용량을 MW로 표시합니다.
 
-  const displayName = fullName ?? email;
-  // ...
-}
-```
+- `OFFLINE`: 발전 용량과 요청 부하가 모두 없습니다.
+- `BLACKOUT`: 요청 부하는 있지만 공급 용량이 없습니다.
+- `NO LOAD`: 공급 용량은 있지만 현재 요청 부하가 없습니다.
+- `LIMITED`: 부하 차단 또는 공급 부족으로 요청량을 모두 공급하지 못합니다.
+- `GRID`: 현재 요청 부하가 정상 공급되고 있습니다.
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+설비를 선택하면 월드에 청록색 외곽선이 나타나고, 검사 패널에는 `보호 트립`, `연결 없음`, `부하 차단`, `연료 없음`, `전력 제한`, `입력 부족`, `출력 막힘`, `레시피 없음`, `수동 정지`, `복구 중`, `대기`, `정상 가동` 중 대표 상태와 해결 원인이 표시됩니다.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## 주요 문서
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+- [공장 핵심 게임플레이 복구 로드맵](docs/factory-core-gameplay-recovery-roadmap.ko.md)
+- [생산 계보 UI 설계](docs/production-lineage-design.ko.md)
+- [기계 시각 디자인 원칙](docs/machine-visual-design-principles.ko.md)
+- [환경 월드 디자인](docs/environment-world-design.ko.md)
+- [지형 기술 아키텍처](docs/terrain-technical-architecture.ko.md)
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## 코드 구조
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- `app/game/domain`: 건물·포트·배치의 순수 도메인 계약
+- `app/game/data`: 아이템, 레시피, 건물, 프로젝트 정의
+- `app/game/sim`: 생산, 전력, 월드, 저장 가능한 시뮬레이션
+- `app/game/runtime.ts`: Three.js 월드 입력과 도메인 명령 연결
+- `app/components`: HUD, 건설 카탈로그, 전력·프로젝트 패널
+- `tests/game`: 도메인·시뮬레이션 회귀 테스트

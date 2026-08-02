@@ -172,6 +172,10 @@ export default function GameHud({
     ? `${numericToolKeys[0]}–${numericToolKeys[numericToolKeys.length - 1]}`
     : numericToolKeys[0] ?? "숫자";
   const isPowerLimited = powerOverloaded || powerDemand > powerSupply || powerServed < powerDemand;
+  const powerCondition = powerSupply <= 0 && powerDemand > 0 ? "BLACKOUT"
+    : powerSupply <= 0 ? "OFFLINE"
+      : isPowerLimited ? "LIMITED"
+        : powerDemand <= 0 ? "NO LOAD" : "GRID";
   const projectDelivered = Math.max(0, Number.isFinite(project.delivered) ? project.delivered : 0);
   const projectTotal = Math.max(0, Number.isFinite(project.total) ? project.total : 0);
   const objectiveProgress = project.completed
@@ -240,7 +244,7 @@ export default function GameHud({
             role="status"
             aria-label={`전력 공급 ${formatPower(powerServed)} 메가와트, 요청 부하 ${formatPower(powerDemand)} 메가와트, 설비 용량 ${formatPower(powerSupply)} 메가와트${isPowerLimited ? ", 과부하" : ""}`}
           >
-            <span>{isPowerLimited ? "OVERLOAD" : "GRID"}</span>
+            <span>{powerCondition}</span>
             <strong>{formatPower(powerServed)} / {formatPower(powerDemand)}</strong>
             <small>MW</small>
             <em>CAP {formatPower(powerSupply)}</em>
