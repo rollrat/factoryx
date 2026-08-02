@@ -14,6 +14,7 @@ import type { RuntimeTopology } from "./game/telemetry/topology.ts";
 import { START_DEFINITIONS } from "./game/data/index.ts";
 import { buildDefinitionLineageGraph, highlightLineagePath } from "./game/telemetry/definitionLineage.ts";
 import type { BeltBuildInfo, CameraMode, PowerInfo, SelectedInfo, Tool } from "./game/types";
+import type { FactoryGuideInfo } from "./game/presentation/factoryGuide.ts";
 import type { EnvironmentRuntimeInfo } from "./game/environment/types.ts";
 import type { ExplorationSnapshot } from "./game/environment/exploration.ts";
 
@@ -49,6 +50,16 @@ const INITIAL_POWER_CONTROL: RuntimePowerControlSnapshot = {
   capacityMW: 0, dispatchableMW: 0, requestedMW: 0, servedMW: 0, storedMWh: 0,
   maxConsumptionMW: 0, nameplateReserveMW: 0, operatingReserveMW: 0,
   mainBreakerTripped: false, zones: [], breakers: [], switchboards: [],
+};
+
+const INITIAL_GUIDE: FactoryGuideInfo = {
+  step: 1,
+  total: 7,
+  id: "inspect_power_core",
+  title: "현장 전력 확인",
+  instruction: "검사 도구(1)로 현장 전력 코어를 선택하세요.",
+  detail: "우측 설비 패널에서 24 MW 용량과 전력 포트를 확인할 수 있습니다.",
+  completed: false,
 };
 const START_UNLOCKS: readonly UnlockId[] = ["start"];
 const INITIAL_PROJECT: ProjectHudState = {
@@ -155,6 +166,7 @@ export default function FactoryGame({
   const [campaignSnapshot, setCampaignSnapshot] = useState<CampaignSnapshot | null>(null);
   const [dockSuppliedPowerMW, setDockSuppliedPowerMW] = useState(0);
   const [powerControl, setPowerControl] = useState<RuntimePowerControlSnapshot>(INITIAL_POWER_CONTROL);
+  const [guide, setGuide] = useState<FactoryGuideInfo>(INITIAL_GUIDE);
   const activeProjectStageId = useMemo(() => START_DEFINITIONS.projectStages.find((stage) => {
     const snapshot = campaignSnapshot?.stages.find((candidate) => candidate.stageId === stage.id);
     return stage.deliveries.some((delivery) => (
@@ -189,6 +201,7 @@ export default function FactoryGame({
       onProject: setProject,
       onConstructionState: setConstructionState,
       onEnvironment: setEnvironment,
+      onGuide: setGuide,
     });
     runtimeRef.current = runtime;
     setTopology(runtime.getProductionTopology());
@@ -292,6 +305,7 @@ export default function FactoryGame({
         pointerLocked={pointerLocked}
         credits={credits}
         project={project}
+        guide={guide}
         powerSupply={power.supplyMW}
         powerDemand={power.demandMW}
         powerServed={power.servedMW}

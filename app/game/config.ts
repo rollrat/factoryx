@@ -10,6 +10,7 @@ export const TOOL_INFO: Array<{
 }> = [
   { id: "inspect", name: "선택", glyph: "◎", key: "1" },
   { id: "belt", name: "벨트", glyph: "≫", key: "2", cost: 8 },
+  { id: "cable", name: "전력 케이블", glyph: "ϟ", key: "L" },
   { id: "miner", name: "채굴기", glyph: "M", key: "3", cost: 120 },
   { id: "smelter", name: "제련기", glyph: "S", key: "4", cost: 180 },
   { id: "assembler", name: "성형기", glyph: "F", key: "5", cost: 260 },

@@ -2,6 +2,7 @@ import type { MachineRuntimeState } from "./sim/contracts.ts";
 import type { RuntimeItemId } from "./recipes/runtimeRecipes.ts";
 import type { BuildingId, RecipeId, UnlockId } from "./domain/types.ts";
 import type { EquipmentOperationalState, EquipmentStatusCause } from "./presentation/equipmentStatus.ts";
+import type { FactoryGuideInfo } from "./presentation/factoryGuide.ts";
 
 export type Tool =
   | "inspect"
@@ -13,11 +14,12 @@ export type Tool =
   | "crusher"
   | "assembler"
   | "storage"
+  | "cable"
   | "demolish";
 
 export type CameraMode = "overview" | "firstPerson";
 
-export type BuildType = Exclude<Tool, "inspect" | "demolish">;
+export type BuildType = Exclude<Tool, "inspect" | "cable" | "demolish">;
 export type MachineType = Exclude<BuildType, "belt" | "splitter" | "merger">;
 export type LogisticsType = Extract<BuildType, "belt" | "splitter" | "merger">;
 export type ItemType = RuntimeItemId;
@@ -97,7 +99,8 @@ export type HistoryEntry = {
 };
 
 export type SelectedInfo = {
-  id: number;
+  id: number | string;
+  worldInstanceId?: string;
   type: BuildType;
   buildingId?: BuildingId;
   status: string;
@@ -129,6 +132,7 @@ export type GameCallbacks = {
   onProject: (project: ProjectInfo) => void;
   onConstructionState: (state: ConstructionUiState) => void;
   onEnvironment: (state: import("./environment/types.ts").EnvironmentRuntimeInfo) => void;
+  onGuide: (guide: FactoryGuideInfo) => void;
 };
 
 export type ConstructionUiState = Readonly<{

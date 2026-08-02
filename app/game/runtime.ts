@@ -22,9 +22,8 @@ import {
 import {
   animateDistributionPoleModel,
   animateFieldPowerCoreModel,
-  createFieldPowerCoreModel,
 } from "./models/power";
-import { animateProjectDockModel, createProjectDockModel } from "./models/projectDock";
+import { animateProjectDockModel } from "./models/projectDock";
 import { applyGridVisualState, removeGridVisualState } from "./models/gridState";
 import { CAMPAIGN_START_INVENTORY, START_REGISTRY } from "./data/index.ts";
 import { FactorySimulation } from "./simulation";
@@ -46,10 +45,15 @@ import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
 import { projectPlacement, worldPointToAnchorCell } from "./domain/placement.ts";
 import {
+  createWorldInteractionIdentityResolver,
+  type WorldInteractionIdentityReference,
+} from "./domain/worldInteractionIdentity.ts";
+import {
   reduceEquipmentStatus,
   type EquipmentOperationalState,
   type EquipmentStatusCause,
 } from "./presentation/equipmentStatus.ts";
+import { deriveFactoryGuide } from "./presentation/factoryGuide.ts";
 import {
   createInitialFirstPersonActionState,
   transitionFirstPersonAction,
@@ -59,6 +63,12 @@ import {
   type FirstPersonActionTarget,
   type FirstPersonToolSelection,
 } from "./interaction/firstPersonActions.ts";
+import {
+  previewPowerCableConnection,
+  projectPowerCablePort,
+  type PowerCableConnectionPreview,
+  type PowerCablePortTarget,
+} from "./interaction/powerCableTargeting.ts";
 import {
   FIRST_PERSON_LOCOMOTION,
   initialVerticalLocomotionState,
@@ -251,9 +261,13 @@ export class FactoryRuntime {
 
   private nextId = 1;
   private credits = 1200;
-  private selectedId: number | null = null;
+  private selectedOwnerId: string | null = null;
   private selectionHelper: THREE.BoxHelper | null = null;
-  private powerCableStartId: string | null = null;
+  private readonly interactionGroups = new Map<string, THREE.Group>();
+  private powerCableStart: PowerCablePortTarget | null = null;
+  private powerCableAim: PowerCablePortTarget | null = null;
+  private readonly powerCableGuide = new THREE.Group();
+  private powerCableGuideSignature = "";
   private activeTool: Tool = "inspect";
   private rotation = 0;
   private currentCell: Cell = { x: 0, z: 0 };
@@ -292,6 +306,8 @@ export class FactoryRuntime {
   private elapsed = 0;
   private lastPowerSignature = "";
   private lastProjectSignature = "";
+  private lastGuideSignature = "";
+  private inspectedPowerCore = false;
   private lastMotorCount = -1;
   private selectedUiClock = 0;
   private lastAutoSaveTime = 0;
@@ -432,6 +448,7 @@ export class FactoryRuntime {
     this.callbacks.onCredits(this.credits);
     this.publishPower();
     this.publishProject();
+    this.publishGuide();
     this.publishConstructionState();
     this.callbacks.onMotors(0);
     this.callbacks.onCameraMode(this.cameraMode);
@@ -445,7 +462,7 @@ export class FactoryRuntime {
   setTool(tool: Tool) {
     if (this.inputLocked) return;
     this.activeTool = tool;
-    this.selectedBuildingId = tool === "inspect" || tool === "demolish"
+    this.selectedBuildingId = tool === "inspect" || tool === "cable" || tool === "demolish"
       ? null
       : defaultBuildingForLegacyType(tool as BuildType);
     this.callbacks.onToolChange(tool);
@@ -453,10 +470,13 @@ export class FactoryRuntime {
     if (this.beltPreview) this.scene.remove(this.beltPreview);
     this.beltPreview = null;
     this.beltPreviewCells = [];
+    this.powerCableStart = null;
+    this.powerCableAim = null;
+    this.refreshPowerCableGuide();
     this.updateBeltBuildInfo(false);
     this.renderer.domElement.style.cursor =
       tool === "demolish" ? "not-allowed" : tool === "inspect" ? "default" : "crosshair";
-    this.buildGrid.visible = tool !== "inspect";
+    this.buildGrid.visible = tool !== "inspect" && tool !== "cable";
     this.updateGhost();
     if (this.cameraMode === "firstPerson") this.syncFirstPersonTool();
   }
@@ -464,6 +484,7 @@ export class FactoryRuntime {
   private syncFirstPersonTool() {
     let selection: FirstPersonToolSelection;
     if (this.activeTool === "inspect") selection = { tool: "inspect" };
+    else if (this.activeTool === "cable") selection = { tool: "cable" };
     else if (this.activeTool === "demolish") selection = { tool: "demolish" };
     else if (this.activeTool === "belt") selection = { tool: "belt", rotation: this.rotation as 0 | 1 | 2 | 3 };
     else if (this.selectedBuildingId) {
@@ -478,18 +499,20 @@ export class FactoryRuntime {
   private firstPersonAim() {
     this.pointer.set(0, 0);
     this.raycaster.setFromCamera(this.pointer, this.firstPersonCamera);
-    const structureHit = this.raycaster.intersectObjects(Array.from(this.groups.values()), true)
-      .find(({ distance, object }) => distance <= 12 && typeof object.userData.structureId === "number");
-    const structureId = structureHit && typeof structureHit.object.userData.structureId === "number"
-      ? structureHit.object.userData.structureId as number
+    const structureHit = this.raycaster.intersectObjects(Array.from(this.interactionGroups.values()), true)
+      .find(({ distance, object }) => distance <= 12 && typeof object.userData.interactionOwnerId === "string");
+    const ownerId = structureHit && typeof structureHit.object.userData.interactionOwnerId === "string"
+      ? structureHit.object.userData.interactionOwnerId as string
       : null;
     const interactionRoot = this.activeStratumId === "surface"
       ? this.environment.terrain.root
       : this.environment.caves.interactionRoot;
     const terrainHit = this.raycaster.intersectObject(interactionRoot, true).find(({ distance }) => distance <= 12);
     const cell = terrainHit ? worldPointToAnchorCell(terrainHit.point) : null;
+    const powerPort = this.activeTool === "cable" ? this.aimPowerCablePort() : null;
     return {
-      structureId,
+      ownerId,
+      powerPort,
       cell: cell ? {
         x: THREE.MathUtils.clamp(cell.x, this.world.bounds.minX, this.world.bounds.maxX),
         z: THREE.MathUtils.clamp(cell.z, this.world.bounds.minZ, this.world.bounds.maxZ),
@@ -498,8 +521,11 @@ export class FactoryRuntime {
   }
 
   private firstPersonTarget(aim: ReturnType<FactoryRuntime["firstPersonAim"]>): FirstPersonActionTarget {
-    if ((this.activeTool === "inspect" || this.activeTool === "demolish") && aim.structureId !== null) {
-      return { kind: "structure", ownerId: `structure:${aim.structureId}` };
+    if (this.activeTool === "cable" && aim.powerPort) {
+      return { kind: "power_port", endpoint: { ...aim.powerPort.endpoint } };
+    }
+    if ((this.activeTool === "inspect" || this.activeTool === "demolish") && aim.ownerId !== null) {
+      return { kind: "structure", ownerId: aim.ownerId };
     }
     if (aim.cell) return {
       kind: "cell",
@@ -516,6 +542,13 @@ export class FactoryRuntime {
       this.beltStart = { x: transition.state.start.x, z: transition.state.start.z };
       this.currentCell = { ...this.beltStart };
       this.updateBeltPreview(this.currentCell, false);
+    }
+    if (previous.mode !== "cable_end" && transition.state.mode === "cable_end") {
+      const start = transition.state.start;
+      this.powerCableStart = start.portId ? this.powerCableTarget(start.ownerId, start.portId) : null;
+      this.powerCableAim = null;
+      this.refreshPowerCableGuide();
+      if (this.powerCableStart) this.callbacks.onToast(`시작 포트 ${this.powerCableStart.endpoint.portId} 지정 · 대상 포트를 조준하세요`);
     }
     transition.commands.forEach((command) => this.executeFirstPersonCommand(command));
   }
@@ -545,21 +578,24 @@ export class FactoryRuntime {
       if (this.beltPreview) this.scene.remove(this.beltPreview);
       this.beltPreview = null;
       this.beltPreviewCells = [];
+      this.powerCableStart = null;
+      this.powerCableAim = null;
+      this.refreshPowerCableGuide();
       this.updateBeltBuildInfo(false);
       return;
     }
     if (command.type === "demolish") {
-      const id = Number(command.ownerId.replace("structure:", ""));
-      if (Number.isSafeInteger(id)) this.demolishStructure(id);
+      this.demolishOwner(command.ownerId);
       return;
     }
-    const start = [...this.simulation.structures.values()].find(({ worldInstanceId }) => worldInstanceId === command.start.ownerId);
-    const end = [...this.simulation.structures.values()].find(({ worldInstanceId }) => worldInstanceId === command.end.ownerId);
+    if (!command.start.portId || !command.end.portId) return;
+    const start = this.powerCableTarget(command.start.ownerId, command.start.portId);
+    const end = this.powerCableTarget(command.end.ownerId, command.end.portId);
     if (!start || !end) return;
-    this.selectStructure(start.id);
-    this.connectSelectedPowerCable();
-    this.selectStructure(end.id);
-    this.connectSelectedPowerCable();
+    this.powerCableStart = null;
+    this.powerCableAim = null;
+    this.commitPowerCable(start, end);
+    this.refreshPowerCableGuide();
   }
 
   toggleEnvironmentAudio() {
@@ -622,6 +658,7 @@ export class FactoryRuntime {
       ? "crosshair"
       : this.activeTool === "demolish" ? "not-allowed" : this.activeTool === "inspect" ? "default" : "crosshair";
     if (this.cameraMode === "overview") this.updateGhost();
+    this.refreshPowerCableGuide();
   }
 
   getLiveTelemetry() {
@@ -727,28 +764,132 @@ export class FactoryRuntime {
     this.callbacks.onToast("전력망 순차 재기동을 시작했습니다");
   }
 
-  private connectSelectedPowerCable() {
-    const selected = this.selectedId === null ? null : this.simulation.structures.get(this.selectedId);
-    const targetId = selected?.worldInstanceId ?? null;
-    const targetPorts = targetId ? this.world.portsFor(targetId).filter(({ definition }) => definition.medium === "power") : [];
-    if (!targetId || targetPorts.length === 0) {
-      this.callbacks.onToast("전력 포트가 있는 설비를 먼저 선택하세요");
-      return;
+  private currentPowerEdges() {
+    return [...inferAdjacentPowerEdges(this.world), ...this.manualPowerEdges];
+  }
+
+  private powerCableTarget(ownerId: string, portId: string) {
+    const port = this.world.portsFor(ownerId).find(({ definition }) => definition.id === portId);
+    const instance = this.world.instance(ownerId);
+    const definition = instance ? START_REGISTRY.buildings.get(instance.definitionId) : null;
+    if (!port || !definition) return null;
+    const node = this.powerTopology.nodes.find(({ instanceId }) => instanceId === ownerId);
+    return projectPowerCablePort(ownerId, port, {
+      gridId: node?.gridId ?? null,
+      maxCableConnections: definition.distributionPolicy?.maxCableConnections ?? null,
+    });
+  }
+
+  private powerCableTargets() {
+    return this.world.allInstances().flatMap((instance) => (
+      this.world.portsFor(instance.id).flatMap((port) => {
+        const target = this.powerCableTarget(instance.id, port.definition.id);
+        return target && (port.stratumId === this.activeStratumId || port.connectsStrata) ? [target] : [];
+      })
+    ));
+  }
+
+  private clearPowerCableGuide() {
+    this.powerCableGuide.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+        object.geometry.dispose();
+        const material = object.material;
+        if (Array.isArray(material)) material.forEach((entry) => entry.dispose());
+        else material.dispose();
+      }
+    });
+    this.powerCableGuide.clear();
+  }
+
+  private refreshPowerCableGuide(aim: PowerCablePortTarget | null = this.powerCableAim) {
+    const endpoint = (target: PowerCablePortTarget | null) => target
+      ? `${target.endpoint.ownerId}:${target.endpoint.portId}`
+      : "none";
+    const signature = `${this.activeTool}:${endpoint(this.powerCableStart)}:${endpoint(aim)}:${this.currentPowerEdges().map(({ id }) => id).join("|")}:${this.activeStratumId}`;
+    if (signature === this.powerCableGuideSignature) return;
+    this.powerCableGuideSignature = signature;
+    this.clearPowerCableGuide();
+    if (this.activeTool !== "cable") return;
+    const edges = this.currentPowerEdges();
+    const previewByEndpoint = new Map<string, PowerCableConnectionPreview>();
+    if (this.powerCableStart) {
+      this.powerCableTargets().forEach((target) => {
+        previewByEndpoint.set(
+          `${target.endpoint.ownerId}:${target.endpoint.portId}`,
+          previewPowerCableConnection(this.powerCableStart!, target, edges),
+        );
+      });
     }
-    if (!this.powerCableStartId) {
-      this.powerCableStartId = targetId;
-      this.callbacks.onToast("케이블 시작점 지정 · 다른 전력 설비를 선택하고 L");
-      return;
-    }
-    const sourceId = this.powerCableStartId;
-    this.powerCableStartId = null;
-    if (sourceId === targetId) {
-      this.callbacks.onToast("케이블 연결을 취소했습니다");
-      return;
-    }
-    const existingIndex = this.manualPowerEdges.findIndex(({ from, to }) => (
-      (from.ownerId === sourceId && to.ownerId === targetId)
-      || (from.ownerId === targetId && to.ownerId === sourceId)
+    this.powerCableTargets().forEach((target) => {
+      const key = `${target.endpoint.ownerId}:${target.endpoint.portId}`;
+      const isStart = this.powerCableStart?.endpoint.ownerId === target.endpoint.ownerId
+        && this.powerCableStart.endpoint.portId === target.endpoint.portId;
+      const preview = previewByEndpoint.get(key);
+      const color = isStart ? 0xffc45c : preview?.state === "ready" ? 0x6fffe9 : this.powerCableStart ? 0xff6174 : 0xa98bff;
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(isStart ? 0.2 : 0.16, 12, 8),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: preview?.state === "blocked" ? 0.45 : 0.92, depthTest: false }),
+      );
+      marker.position.set(target.port.localPosition.x, target.port.localPosition.y, target.port.localPosition.z);
+      marker.renderOrder = 110;
+      marker.userData.powerCableTarget = target;
+      marker.name = `power-port:${key}`;
+      this.powerCableGuide.add(marker);
+    });
+    if (!this.powerCableStart || !aim) return;
+    const preview = previewPowerCableConnection(this.powerCableStart, aim, edges);
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(
+        this.powerCableStart.port.localPosition.x,
+        this.powerCableStart.port.localPosition.y,
+        this.powerCableStart.port.localPosition.z,
+      ),
+      new THREE.Vector3(aim.port.localPosition.x, aim.port.localPosition.y, aim.port.localPosition.z),
+    ]);
+    const line = new THREE.Line(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: preview.state === "ready" ? 0x6fffe9 : 0xff6174,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    );
+    line.renderOrder = 109;
+    line.name = "power-cable-preview";
+    this.powerCableGuide.add(line);
+  }
+
+  private aimPowerCablePort() {
+    const hit = this.raycaster.intersectObjects(this.powerCableGuide.children, false)
+      .find(({ distance, object }) => distance <= 24 && object.userData.powerCableTarget);
+    return (hit?.object.userData.powerCableTarget as PowerCablePortTarget | undefined) ?? null;
+  }
+
+  private powerCableIssueMessage(preview: PowerCableConnectionPreview) {
+    const messages: Record<string, string> = {
+      target_required: "연결할 두 번째 전력 포트를 조준하세요",
+      same_port: "같은 전력 포트끼리는 연결할 수 없습니다",
+      same_owner: "같은 설비의 포트끼리는 연결할 수 없습니다",
+      profile_mismatch: "로컬 전력과 고압 전력 포트는 직접 연결할 수 없습니다",
+      direction_mismatch: "전력 포트의 입력·출력 방향이 맞지 않습니다",
+      stratum_mismatch: "서로 다른 지층은 전력 샤프트를 통해서만 연결할 수 있습니다",
+      distance_exceeded: `케이블 거리가 ${preview.maxDistance} m 제한을 넘었습니다`,
+      duplicate_connection: "이미 연결된 전력 포트입니다",
+      start_port_in_use: "시작 전력 포트가 이미 사용 중입니다",
+      end_port_in_use: "대상 전력 포트가 이미 사용 중입니다",
+      start_owner_connection_limit: "시작 설비의 케이블 연결 한도에 도달했습니다",
+      end_owner_connection_limit: "대상 설비의 케이블 연결 한도에 도달했습니다",
+    };
+    return messages[preview.primaryIssue ?? ""] ?? "해당 전력 포트를 연결할 수 없습니다";
+  }
+
+  private commitPowerCable(start: PowerCablePortTarget, end: PowerCablePortTarget) {
+    const existingIndex = this.manualPowerEdges.findIndex((edge) => (
+      (edge.from.ownerId === start.endpoint.ownerId && edge.from.portId === start.endpoint.portId
+        && edge.to.ownerId === end.endpoint.ownerId && edge.to.portId === end.endpoint.portId)
+      || (edge.from.ownerId === end.endpoint.ownerId && edge.from.portId === end.endpoint.portId
+        && edge.to.ownerId === start.endpoint.ownerId && edge.to.portId === start.endpoint.portId)
     ));
     if (existingIndex >= 0) {
       this.manualPowerEdges.splice(existingIndex, 1);
@@ -756,87 +897,79 @@ export class FactoryRuntime {
       this.callbacks.onToast("수동 전력 케이블을 해제했습니다");
       return;
     }
-    const sourcePorts = this.world.portsFor(sourceId).filter(({ definition }) => definition.medium === "power");
-    const pair = sourcePorts.flatMap((source) => targetPorts.flatMap((target) => {
-      if (source.definition.connectorProfile !== target.definition.connectorProfile) return [];
-      if (source.stratumId !== target.stratumId && !(source.connectsStrata && target.connectsStrata)) return [];
-      const direct = source.definition.direction !== "input" && target.definition.direction !== "output";
-      const reverse = target.definition.direction !== "input" && source.definition.direction !== "output";
-      if (!direct && !reverse) return [];
-      const distance = Math.hypot(
-        source.localPosition.x - target.localPosition.x,
-        source.localPosition.y - target.localPosition.y,
-        source.localPosition.z - target.localPosition.z,
-      );
-      const maxDistance = source.definition.connectorProfile === "power_high_voltage" ? 24 : 8;
-      if (distance > maxDistance) return [];
-      return [{ source, target, reverse, distance }];
-    })).sort((a, b) => a.distance - b.distance)[0];
-    if (!pair) {
-      this.callbacks.onToast("호환되는 전력 포트가 없거나 케이블 거리가 너무 멉니다");
+    const preview = previewPowerCableConnection(start, end, this.currentPowerEdges());
+    if (!preview.edge) {
+      this.callbacks.onToast(this.powerCableIssueMessage(preview));
       return;
     }
-    const from = pair.reverse
-      ? { ownerId: targetId, portId: pair.target.definition.id }
-      : { ownerId: sourceId, portId: pair.source.definition.id };
-    const to = pair.reverse
-      ? { ownerId: sourceId, portId: pair.source.definition.id }
-      : { ownerId: targetId, portId: pair.target.definition.id };
-    const edge: PowerEdge = {
-      id: `manual-power:${[`${from.ownerId}:${from.portId}`, `${to.ownerId}:${to.portId}`].sort().join("|")}`,
-      from,
-      to,
-      cableType: pair.source.definition.connectorProfile,
-      enabled: true,
-    };
-    const proposed = [...inferAdjacentPowerEdges(this.world), ...this.manualPowerEdges, edge];
+    const proposed = [...this.currentPowerEdges(), preview.edge];
     try {
       const beforeZones = this.powerTopology.zones.length;
-      const preview = buildPhysicalPowerTopology(this.world, proposed, this.powerControls);
-      this.manualPowerEdges.push(edge);
+      const topologyPreview = buildPhysicalPowerTopology(this.world, proposed, this.powerControls);
+      this.manualPowerEdges.push(preview.edge);
       this.physicalPower.setEdges(proposed);
       this.powerTopology = this.physicalPower.topology();
       this.syncConnectionModels();
-      this.callbacks.onToast(`전력 케이블 연결 · 전력 구역 ${beforeZones} → ${preview.zones.length}`);
+      this.callbacks.onToast(`전력 케이블 연결 · 전력 구역 ${beforeZones} → ${topologyPreview.zones.length}`);
     } catch {
       this.callbacks.onToast("해당 포트에는 케이블을 연결할 수 없습니다");
     }
   }
 
+  private choosePowerCablePort(target: PowerCablePortTarget) {
+    if (!this.powerCableStart) {
+      const preview = previewPowerCableConnection(target, null, this.currentPowerEdges());
+      if (preview.state === "blocked") {
+        this.callbacks.onToast(this.powerCableIssueMessage(preview));
+        return;
+      }
+      this.powerCableStart = target;
+      this.powerCableAim = null;
+      this.callbacks.onToast(`시작 포트 ${target.endpoint.portId} 지정 · 대상 포트를 조준하세요`);
+      this.refreshPowerCableGuide();
+      return;
+    }
+    const start = this.powerCableStart;
+    this.powerCableStart = null;
+    this.powerCableAim = null;
+    this.commitPowerCable(start, target);
+    this.refreshPowerCableGuide();
+  }
+
   cycleSelectedRecipe() {
-    if (this.selectedId === null) return false;
-    const selected = this.simulation.structures.get(this.selectedId);
-    const worldRecipeId = selected?.worldInstanceId
-      ? this.worldProduction.cycleRecipe(selected.worldInstanceId)
+    if (this.selectedOwnerId === null) return false;
+    const selected = this.structureForOwner(this.selectedOwnerId);
+    const worldRecipeId = this.world.instance(this.selectedOwnerId)
+      ? this.worldProduction.cycleRecipe(this.selectedOwnerId)
       : null;
     const recipe = worldRecipeId
       ? START_REGISTRY.recipes.get(worldRecipeId) ?? null
-      : selected?.worldInstanceId ? null : this.simulation.cycleAssemblerRecipe(this.selectedId);
+      : this.world.instance(this.selectedOwnerId) ? null : selected ? this.simulation.cycleAssemblerRecipe(selected.id) : null;
     if (!recipe) {
       this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
       return false;
     }
-    this.callbacks.onSelected(this.selectedInfo(this.selectedId));
+    this.callbacks.onSelected(this.selectedInfo(this.selectedOwnerId));
     this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
     return true;
   }
 
   cycleWorldRecipe(instanceId: string) {
-    const visual = [...this.simulation.structures.values()].find((structure) => structure.worldInstanceId === instanceId);
     const recipeId = this.worldProduction.cycleRecipe(instanceId);
     const recipe = recipeId ? START_REGISTRY.recipes.get(recipeId) : null;
     if (!recipe) {
       this.callbacks.onToast("설비 버퍼와 진행 중 작업이 비어 있을 때만 레시피를 바꿀 수 있습니다");
       return false;
     }
-    if (visual) this.selectStructure(visual.id);
+    this.selectOwner(instanceId);
     this.callbacks.onToast(`레시피 변경: ${recipe.name}`);
     return true;
   }
 
   focusWorldInstance(instanceId: string) {
-    const visual = [...this.simulation.structures.values()].find((structure) => structure.worldInstanceId === instanceId);
-    if (!visual) {
+    const group = this.interactionGroups.get(instanceId);
+    const worldInstance = this.world.instance(instanceId);
+    if (!group || !worldInstance) {
       this.callbacks.onToast("월드에서 해당 설비를 찾을 수 없습니다");
       return false;
     }
@@ -846,8 +979,7 @@ export class FactoryRuntime {
       this.callbacks.onCameraMode(this.cameraMode);
     }
     this.setTool("inspect");
-    this.selectStructure(visual.id);
-    const worldInstance = visual.worldInstanceId ? this.world.instance(visual.worldInstanceId) : null;
+    this.selectOwner(instanceId);
     const focusStratum = worldInstance?.stratumId ?? "surface";
     if (focusStratum !== this.activeStratumId) {
       this.activeStratumId = focusStratum;
@@ -860,13 +992,19 @@ export class FactoryRuntime {
       this.projectDockGroup.visible = focusStratum === "surface";
       this.publishEnvironment();
     }
+    const projection = projectPlacement(
+      START_REGISTRY.buildings.get(worldInstance.definitionId)!,
+      worldInstance.position,
+      worldInstance.rotation,
+      worldInstance.elevation ?? 0,
+    );
     this.desiredTarget.set(
-      THREE.MathUtils.clamp(visual.x + 0.5, this.world.bounds.minX + 2, this.world.bounds.maxX - 2),
-      worldInstance?.elevation ?? this.elevationAt(visual.x + 0.5, visual.z + 0.5, focusStratum),
-      THREE.MathUtils.clamp(visual.z + 0.5, this.world.bounds.minZ + 2, this.world.bounds.maxZ - 2),
+      THREE.MathUtils.clamp(projection.modelTransform.position.x, this.world.bounds.minX + 2, this.world.bounds.maxX - 2),
+      worldInstance.elevation ?? this.elevationAt(projection.modelTransform.position.x, projection.modelTransform.position.z, focusStratum),
+      THREE.MathUtils.clamp(projection.modelTransform.position.z, this.world.bounds.minZ + 2, this.world.bounds.maxZ - 2),
     );
     this.cameraZoom = Math.max(this.cameraZoom, 1.25);
-    this.callbacks.onToast(`${START_REGISTRY.buildings.get(visual.buildingId ?? "")?.name ?? "설비"} 위치로 이동`);
+    this.callbacks.onToast(`${START_REGISTRY.buildings.get(worldInstance.definitionId)?.name ?? "설비"} 위치로 이동`);
     return true;
   }
 
@@ -882,7 +1020,7 @@ export class FactoryRuntime {
       this.cameraMode = "firstPerson";
       this.firstPersonAction = createInitialFirstPersonActionState();
       this.setTool("inspect");
-      this.selectStructure(null);
+      this.selectOwner(null);
       this.hoverTile.visible = false;
       this.clearGhost();
       this.renderer.domElement.style.cursor = "crosshair";
@@ -921,6 +1059,42 @@ export class FactoryRuntime {
     if (this.renderer.domElement.parentElement === this.mount) this.mount.removeChild(this.renderer.domElement);
   }
 
+  private interactionResolver() {
+    return createWorldInteractionIdentityResolver({
+      instances: this.world.allInstances(),
+      definitions: START_REGISTRY.buildings,
+      legacyStructures: [...this.simulation.structures.values()],
+    });
+  }
+
+  private resolveInteraction(reference: WorldInteractionIdentityReference) {
+    return this.interactionResolver().find(reference);
+  }
+
+  private ownerIdForStructure(structure: StructureData) {
+    return structure.worldInstanceId ?? `legacy:${structure.id}`;
+  }
+
+  private structureForOwner(ownerId: string) {
+    const worldTarget = this.resolveInteraction({ kind: "owner", ownerId });
+    if (worldTarget?.legacyStructureId !== null && worldTarget?.legacyStructureId !== undefined) {
+      return this.simulation.structures.get(worldTarget.legacyStructureId) ?? null;
+    }
+    if (ownerId.startsWith("legacy:")) {
+      const legacyId = Number(ownerId.slice("legacy:".length));
+      return Number.isSafeInteger(legacyId) ? this.simulation.structures.get(legacyId) ?? null : null;
+    }
+    return null;
+  }
+
+  private tagInteractionGroup(group: THREE.Group, ownerId: string) {
+    group.userData.interactionOwnerId = ownerId;
+    group.traverse((child) => {
+      child.userData.interactionOwnerId = ownerId;
+    });
+    this.interactionGroups.set(ownerId, group);
+  }
+
   private setupWorld() {
     const grid = new THREE.GridHelper(256, 256, 0x4c7a7e, 0x29474d);
     grid.position.y = 0.012;
@@ -956,16 +1130,22 @@ export class FactoryRuntime {
       this.resourceGroups.set(anchor.id, patch);
       this.scene.add(patch);
     });
-    const core = createFieldPowerCoreModel(this.materials);
+    const core = createBuildingModel("field_power_core", this.materials);
     core.position.set(1, 0, 1);
+    const coreTarget = this.resolveInteraction({ kind: "preplaced_definition", definitionId: "field_power_core" });
+    if (coreTarget) this.tagInteractionGroup(core, coreTarget.ownerId);
     this.scene.add(core);
     // Distribution poles are player-built world instances. Keep no decorative
     // duplicate that could imply a power connection which does not exist.
     const pole = new THREE.Group();
-    const projectDock = createProjectDockModel(this.materials);
+    const projectDock = createBuildingModel("project_dock", this.materials);
     projectDock.position.set(8.5, 0, 8.5);
+    const dockTarget = this.resolveInteraction({ kind: "preplaced_definition", definitionId: "project_dock" });
+    if (dockTarget) this.tagInteractionGroup(projectDock, dockTarget.ownerId);
     this.scene.add(projectDock);
     this.scene.add(this.hoverTile);
+    this.powerCableGuide.name = "power-cable-port-guide";
+    this.scene.add(this.powerCableGuide);
     return { core, pole, projectDock, grid };
   }
 
@@ -1022,6 +1202,7 @@ export class FactoryRuntime {
       child.userData.structureId = data.id;
     });
     this.groups.set(data.id, group);
+    this.tagInteractionGroup(group, this.ownerIdForStructure(data));
     this.scene.add(group);
   }
 
@@ -1033,7 +1214,11 @@ export class FactoryRuntime {
       this.scene.remove(group);
     }
     this.groups.delete(id);
-    if (this.selectedId === id) this.selectStructure(null);
+    if (data) {
+      const ownerId = this.ownerIdForStructure(data);
+      this.interactionGroups.delete(ownerId);
+      if (this.selectedOwnerId === ownerId) this.selectOwner(null);
+    }
     return data;
   }
 
@@ -1402,7 +1587,7 @@ export class FactoryRuntime {
   }
 
   private updateGhost() {
-    if (this.activeTool === "inspect" || this.activeTool === "demolish" || this.activeTool === "belt") {
+    if (this.activeTool === "inspect" || this.activeTool === "cable" || this.activeTool === "demolish" || this.activeTool === "belt") {
       this.clearGhost();
       return;
     }
@@ -1560,16 +1745,16 @@ export class FactoryRuntime {
     this.updateBeltBuildInfo(true);
   }
 
-  private pickStructure() {
-    const hits = this.raycaster.intersectObjects(Array.from(this.groups.values()), true);
-    const id = hits[0]?.object.userData.structureId;
-    return typeof id === "number" ? id : null;
+  private pickOwner() {
+    const hits = this.raycaster.intersectObjects(Array.from(this.interactionGroups.values()), true);
+    const ownerId = hits[0]?.object.userData.interactionOwnerId;
+    return typeof ownerId === "string" ? ownerId : null;
   }
 
-  private selectStructure(id: number | null) {
+  private selectOwner(ownerId: string | null) {
     this.clearSelectionHelper();
-    this.selectedId = id;
-    const group = id === null ? null : this.groups.get(id);
+    this.selectedOwnerId = ownerId;
+    const group = ownerId === null ? null : this.interactionGroups.get(ownerId);
     if (group) {
       this.selectionHelper = new THREE.BoxHelper(group, 0x6fffe9);
       this.selectionHelper.name = "selected-building-outline";
@@ -1581,7 +1766,12 @@ export class FactoryRuntime {
       material.toneMapped = false;
       this.scene.add(this.selectionHelper);
     }
-    this.callbacks.onSelected(id === null ? null : this.selectedInfo(id));
+    if (ownerId) {
+      const target = this.resolveInteraction({ kind: "owner", ownerId });
+      if (target?.definitionId === "field_power_core") this.inspectedPowerCore = true;
+    }
+    this.callbacks.onSelected(ownerId === null ? null : this.selectedInfo(ownerId));
+    this.publishGuide();
   }
 
   private clearSelectionHelper() {
@@ -1594,12 +1784,13 @@ export class FactoryRuntime {
     this.selectionHelper = null;
   }
 
-  private selectedInfo(id: number): SelectedInfo {
-    const data = this.simulation.structures.get(id);
-    if (!data?.worldInstanceId) return this.simulation.getSelectedInfo(id);
-    const state = this.worldProduction.nodeState(data.worldInstanceId);
-    const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
-    if (!state || !definition) return this.simulation.getSelectedInfo(id);
+  private selectedInfo(ownerId: string): SelectedInfo {
+    const data = this.structureForOwner(ownerId);
+    const worldInstance = this.world.instance(ownerId);
+    if (!worldInstance) return data ? this.simulation.getSelectedInfo(data.id) : null;
+    const state = this.worldProduction.nodeState(ownerId);
+    const definition = START_REGISTRY.buildings.get(worldInstance.definitionId);
+    if (!state || !definition) return data ? this.simulation.getSelectedInfo(data.id) : null;
     const recipe = state.selectedRecipeId ? START_REGISTRY.recipes.get(state.selectedRecipeId) : null;
     const items = (inventories: typeof state.inputs) => inventories
       .filter(({ itemId, amount }) => itemId && amount > 0)
@@ -1617,15 +1808,15 @@ export class FactoryRuntime {
       activeStates.push(stateName);
       causes.push({ state: stateName, code, label, ...(detail ? { detail } : {}) });
     };
-    const powerNode = this.powerTopology.nodes.find(({ instanceId }) => instanceId === data.worldInstanceId);
+    const powerNode = this.powerTopology.nodes.find(({ instanceId }) => instanceId === ownerId);
     const powerGrid = powerNode
       ? this.physicalPower.powerResults().find(({ gridId }) => gridId === powerNode.gridId)
       : null;
-    const powerConsumer = powerGrid?.consumers.find(({ id: consumerId }) => consumerId === data.worldInstanceId);
+    const powerConsumer = powerGrid?.consumers.find(({ id: consumerId }) => consumerId === ownerId);
     const restartState = powerNode
       ? this.physicalPower.snapshot().restartStates.find(({ gridId }) => gridId === powerNode.gridId)?.state
       : null;
-    const fuelState = this.physicalPower.generatorFuelState(data.worldInstanceId);
+    const fuelState = this.physicalPower.generatorFuelState(ownerId);
     if (powerGrid?.mainBreakerTripped) addCause("tripped", "grid_breaker_tripped", "보호 차단기가 동작했습니다", "전력 제어판에서 순차 재기동을 시작하세요.");
     if (powerNode?.connectionState === "disconnected") addCause("unconnected", "power_unconnected", "전력망에 연결되지 않았습니다", "전력 포트와 배전 설비 사이의 케이블을 확인하세요.");
     if (powerConsumer?.shed) addCause("shed", "load_shed", "부하 우선순위에 의해 차단되었습니다", `현재 우선순위 P${powerConsumer.priority}`);
@@ -1643,8 +1834,9 @@ export class FactoryRuntime {
       fallbackState: state.runtimeState === "working" ? "working" : "idle",
     });
     return {
-      id,
-      type: data.type,
+      id: ownerId,
+      worldInstanceId: ownerId,
+      type: data?.type ?? legacyTypeForBuilding(definition.id),
       buildingId: definition.id,
       status: statusPresentation.primaryLabel,
       operationalState: statusPresentation.primaryState,
@@ -1800,6 +1992,20 @@ export class FactoryRuntime {
     this.callbacks.onToast(connected ? `출력 포트 연결 · 벨트 ${added.length}칸` : `컨베이어 ${added.length}칸 설치 완료`);
   }
 
+  private demolishOwner(ownerId: string) {
+    const target = this.resolveInteraction({ kind: "owner", ownerId });
+    if (target && !target.demolishable) {
+      this.callbacks.onToast("고정 설비는 검사할 수 있지만 철거할 수 없습니다");
+      return;
+    }
+    const structure = this.structureForOwner(ownerId);
+    if (!structure) {
+      this.callbacks.onToast("철거할 설비를 조준하세요");
+      return;
+    }
+    this.demolishStructure(structure.id);
+  }
+
   private demolishStructure(id: number) {
     const structure = this.simulation.structures.get(id);
     if (!structure) {
@@ -1923,6 +2129,11 @@ export class FactoryRuntime {
       return;
     }
     const cell = this.pointerToCell(event);
+    if (this.activeTool === "cable") {
+      this.powerCableAim = this.aimPowerCablePort();
+      this.refreshPowerCableGuide(this.powerCableAim);
+      return;
+    }
     if (!cell) return;
     this.currentCell = cell;
     this.hoverTile.position.set(cell.x + 0.5, this.elevationAt(cell.x + 0.5, cell.z + 0.5) + 0.035, cell.z + 0.5);
@@ -1938,9 +2149,9 @@ export class FactoryRuntime {
       if (event.button !== 0) return;
       const aim = this.firstPersonAim();
       if (document.pointerLockElement === this.renderer.domElement && this.activeTool === "inspect") {
-        this.selectStructure(aim.structureId);
-        if (aim.structureId !== null) {
-          this.dispatchFirstPersonAction({ type: "inspect_target", ownerId: `structure:${aim.structureId}` });
+        this.selectOwner(aim.ownerId);
+        if (aim.ownerId !== null) {
+          this.dispatchFirstPersonAction({ type: "inspect_target", ownerId: aim.ownerId });
         }
         return;
       }
@@ -1986,6 +2197,16 @@ export class FactoryRuntime {
     const cell = this.pointerToCell(event);
     if (cell) this.currentCell = cell;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
+    if (this.activeTool === "cable") {
+      if (moved > 6) return;
+      const target = this.aimPowerCablePort();
+      if (!target) {
+        this.callbacks.onToast("보라색 전력 포트를 직접 조준하세요");
+        return;
+      }
+      this.choosePowerCablePort(target);
+      return;
+    }
     if (this.activeTool === "belt" && this.beltStart) {
       if (cell) this.updateBeltPreview(cell, event.shiftKey);
       this.commitBelts();
@@ -1998,49 +2219,16 @@ export class FactoryRuntime {
     }
     if (moved > 6) return;
     if (this.activeTool === "inspect") {
-      this.selectStructure(this.pickStructure());
+      this.selectOwner(this.pickOwner());
       return;
     }
     if (this.activeTool === "demolish") {
-      const id = this.pickStructure();
-      if (id === null) {
+      const ownerId = this.pickOwner();
+      if (ownerId === null) {
         this.callbacks.onToast("철거할 설비를 선택하세요");
         return;
       }
-      const structure = this.simulation.structures.get(id);
-      if (structure?.worldInstanceId) {
-        const constructionInstance = this.world.instance(structure.worldInstanceId);
-        // Synchronize live buffers/WIP before the command captures its undo boundary.
-        this.worldProduction.snapshot();
-        const demolition = this.worldHistory.execute(
-          this.world,
-          "demolish",
-          `철거 · ${structure.buildingId ? START_REGISTRY.buildings.get(structure.buildingId)?.name : structure.worldInstanceId}`,
-          () => {
-            const result = this.worldProduction.demolish(structure.worldInstanceId!);
-            if (result.ok && constructionInstance) this.campaignWorld.refundConstructionCreditFor(constructionInstance);
-            return result;
-          },
-          this.constructionCreditLedger(),
-        );
-        if (!demolition.ok) {
-          this.callbacks.onToast("이 설비는 철거할 수 없습니다");
-          return;
-        }
-      }
-      const removed = this.removeStructure(id);
-      if (removed) {
-        if (removed.worldInstanceId) {
-          this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
-          this.publishConstructionState();
-          this.callbacks.onToast(`${removed.buildingId ? START_REGISTRY.buildings.get(removed.buildingId)?.name : TYPE_NAME[removed.type]} 철거 · 재료 회수`);
-        } else {
-          const refund = Math.floor(COST[removed.type] * 0.5);
-          this.history.push({ added: [], removed: [removed], creditDelta: refund });
-          this.changeCredits(this.credits + refund);
-          this.callbacks.onToast(`${TYPE_NAME[removed.type]} 철거 · ${refund} 환급`);
-        }
-      }
+      this.demolishOwner(ownerId);
       return;
     }
     this.commitMachine(this.activeTool as BuildType);
@@ -2137,6 +2325,13 @@ export class FactoryRuntime {
       this.toggleStratum();
       return;
     }
+    if (key === "l") {
+      this.setTool(this.activeTool === "cable" ? "inspect" : "cable");
+      this.callbacks.onToast(this.activeTool === "cable"
+        ? "전력 케이블 · 보라색 포트 두 곳을 차례로 지정하세요"
+        : "전력 케이블 작업을 종료했습니다");
+      return;
+    }
     const tools: Record<string, Tool> = {
       "1": "inspect",
       "2": "belt",
@@ -2150,12 +2345,8 @@ export class FactoryRuntime {
       x: "demolish",
     };
     if (tools[key]) this.setTool(tools[key]);
-    if (key === "f" && this.activeTool === "inspect" && this.selectedId !== null) {
+    if (key === "f" && this.activeTool === "inspect" && this.selectedOwnerId !== null) {
       this.cycleSelectedRecipe();
-      return;
-    }
-    if (key === "l" && this.activeTool === "inspect") {
-      this.connectSelectedPowerCable();
       return;
     }
     if (key === "r") {
@@ -2202,6 +2393,11 @@ export class FactoryRuntime {
     const locked = document.pointerLockElement === this.renderer.domElement;
     if (this.cameraMode === "firstPerson") {
       this.dispatchFirstPersonAction({ type: locked ? "pointer_lock_acquired" : "pointer_lock_lost" });
+      if (!locked) {
+        this.powerCableStart = null;
+        this.powerCableAim = null;
+        this.refreshPowerCableGuide();
+      }
     }
     this.callbacks.onPointerLock(locked);
     if (this.cameraMode === "firstPerson") this.renderer.domElement.style.cursor = locked ? "none" : "crosshair";
@@ -2603,6 +2799,47 @@ export class FactoryRuntime {
     });
   }
 
+  private publishGuide() {
+    const instances = this.world.allInstances();
+    const hasDistributionPole = instances.some(({ definitionId }) => definitionId.startsWith("distribution_pole_"));
+    const coreId = instances.find(({ definitionId }) => definitionId === "field_power_core")?.id ?? null;
+    const distributionIds = new Set(instances
+      .filter(({ definitionId }) => definitionId.startsWith("distribution_pole_"))
+      .map(({ id }) => id));
+    const hasCoreCable = coreId !== null && this.powerTopology.cables.some(({ source, target }) => (
+      (source.ownerId === coreId && distributionIds.has(target.ownerId))
+      || (target.ownerId === coreId && distributionIds.has(source.ownerId))
+    ));
+    const hasExtractor = instances.some(({ definitionId }) => (
+      definitionId === "vein_miner" || definitionId === "fluid_extractor"
+    ));
+    const processingInstances = instances.filter(({ definitionId }) => (
+      (START_REGISTRY.buildings.get(definitionId)?.recipeIds.length ?? 0) > 0
+    ));
+    const processorIds = new Set(processingInstances.map(({ id }) => id));
+    const hasProcessor = processorIds.size > 0;
+    const hasProductionConnection = this.worldProduction.connections().some(({ fromInstanceId, toInstanceId }) => (
+      processorIds.has(fromInstanceId) || processorIds.has(toInstanceId)
+    ));
+    const activeProject = this.activeProjectProgress();
+    const hasFirstProduct = (activeProject?.deliveredTotal ?? 0) > 0 || processingInstances.some(({ id }) => (
+      this.worldProduction.nodeState(id)?.outputs.some(({ amount }) => amount > 0) ?? false
+    ));
+    const guide = deriveFactoryGuide({
+      inspectedPowerCore: this.inspectedPowerCore || hasDistributionPole,
+      hasDistributionPole,
+      hasCoreCable,
+      hasExtractor,
+      hasProcessor,
+      hasProductionConnection,
+      hasFirstProduct,
+    });
+    const signature = `${guide.id}:${guide.step}:${guide.completed}`;
+    if (signature === this.lastGuideSignature) return;
+    this.lastGuideSignature = signature;
+    this.callbacks.onGuide(guide);
+  }
+
   private activeProjectProgress() {
     const progress = this.campaignWorld.campaign.allProgress();
     return progress.find((stage) => !stage.completed && this.campaignWorld.campaign.isUnlocked(stage.stageId))
@@ -2659,6 +2896,10 @@ export class FactoryRuntime {
       this.updateFirstPerson(delta);
       if (!this.inputLocked && document.pointerLockElement === this.renderer.domElement) {
         const aim = this.firstPersonAim();
+        if (this.activeTool === "cable") {
+          this.powerCableAim = aim.powerPort;
+          this.refreshPowerCableGuide(this.powerCableAim);
+        }
         if (aim.cell) {
           this.currentCell = aim.cell;
           if (this.activeTool === "belt" && this.beltStart) this.updateBeltPreview(aim.cell, false);
@@ -2689,6 +2930,7 @@ export class FactoryRuntime {
     this.syncPhaseOneCampaign();
     this.publishPower();
     this.publishProject();
+    this.publishGuide();
     this.syncItems(delta);
     this.syncWorldConnectionItems(delta);
     this.animateMachines(delta);
@@ -2700,9 +2942,9 @@ export class FactoryRuntime {
     }
     this.selectedUiClock += delta;
     this.selectionHelper?.update();
-    if (this.selectedId !== null && this.selectedUiClock >= 0.2) {
+    if (this.selectedOwnerId !== null && this.selectedUiClock >= 0.2) {
       this.selectedUiClock = 0;
-      this.callbacks.onSelected(this.selectedInfo(this.selectedId));
+      this.callbacks.onSelected(this.selectedInfo(this.selectedOwnerId));
     }
     const motors = this.simulation.getStoredComponents();
     if (motors !== this.lastMotorCount) {

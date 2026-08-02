@@ -4,6 +4,7 @@ import { START_REGISTRY } from "../game/data/index.ts";
 import type { BeltBuildInfo, CameraMode, SelectedInfo, Tool } from "../game/types";
 import type { EnvironmentRuntimeInfo } from "../game/environment/types.ts";
 import type { EquipmentOperationalState } from "../game/presentation/equipmentStatus.ts";
+import type { FactoryGuideInfo } from "../game/presentation/factoryGuide.ts";
 
 export type ProjectHudRequirement = Readonly<{
   itemId: string;
@@ -26,6 +27,7 @@ type GameHudProps = {
   pointerLocked: boolean;
   credits: number;
   project: ProjectHudState;
+  guide: FactoryGuideInfo;
   powerSupply: number;
   powerDemand: number;
   powerServed: number;
@@ -146,6 +148,7 @@ export default function GameHud({
   pointerLocked,
   credits,
   project,
+  guide,
   powerSupply,
   powerDemand,
   powerServed,
@@ -211,6 +214,7 @@ export default function GameHud({
     && (START_REGISTRY.buildings.get(selectedDetails.buildingId)?.recipeIds.length ?? 0) > 1);
   const firstPersonHint = activeTool === "inspect" ? "클릭 · 설비 선택"
     : activeTool === "belt" ? "클릭 · 경로 시작 / 완료"
+      : activeTool === "cable" ? "클릭 · 전력 포트 시작 / 완료"
       : activeTool === "demolish" ? "클릭 · 조준 설비 철거"
         : "클릭 · 조준 위치에 배치  ·  R 회전";
 
@@ -283,6 +287,22 @@ export default function GameHud({
           </ul>
         </div>
       </header>
+
+      <section className={`factory-guide instrument-panel ${guide.completed ? "is-complete" : ""}`} aria-label="첫 공장 가동 안내">
+        <div className="factory-guide-index">
+          <span>{guide.completed ? "READY" : `STEP ${guide.step}`}</span>
+          <strong>{guide.step}/{guide.total}</strong>
+        </div>
+        <div className="factory-guide-copy">
+          <span className="panel-label">현장 작업 카드</span>
+          <strong>{guide.title}</strong>
+          <p>{guide.instruction}</p>
+          <small>{guide.detail}</small>
+        </div>
+        <div className="factory-guide-track" aria-hidden="true">
+          <i style={{ width: `${Math.max(0, Math.min(100, (guide.step / guide.total) * 100))}%` }} />
+        </div>
+      </section>
 
       <aside
         className={`inspector instrument-panel status-${selectedStatus} ${selected ? "visible" : ""}`}

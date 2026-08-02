@@ -374,6 +374,86 @@ button {
   box-shadow: 0 0 7px rgba(98, 215, 199, 0.55);
 }
 
+.factory-guide {
+  position: absolute;
+  top: 92px;
+  left: 18px;
+  width: min(360px, calc(100vw - 36px));
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.factory-guide-index {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  color: var(--amber);
+  font: 750 8px/1 var(--font-geist-mono), monospace;
+  letter-spacing: 0.06em;
+}
+
+.factory-guide-index strong {
+  margin-top: 7px;
+  color: #dce5e4;
+  font-size: 14px;
+}
+
+.factory-guide-copy strong,
+.factory-guide-copy p,
+.factory-guide-copy small {
+  display: block;
+}
+
+.factory-guide-copy > strong {
+  margin-top: 4px;
+  color: #eef5f4;
+  font-size: 12px;
+}
+
+.factory-guide-copy p {
+  margin: 5px 0 0;
+  color: #c7d3d2;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.factory-guide-copy small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.factory-guide-track {
+  grid-column: 1 / -1;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.factory-guide-track i {
+  display: block;
+  height: 100%;
+  background: var(--amber);
+  box-shadow: 0 0 8px rgba(241, 172, 74, 0.5);
+  transition: width 220ms ease-out;
+}
+
+.factory-guide.is-complete .factory-guide-index,
+.factory-guide.is-complete .factory-guide-copy > strong {
+  color: var(--cyan);
+}
+
+.factory-guide.is-complete .factory-guide-track i {
+  background: var(--cyan);
+}
+
 .objective-track > div,
 .process-track > div {
   height: 100%;
@@ -1323,6 +1403,11 @@ kbd {
 .hud.tool-belt .crosshair i::before,
 .hud.tool-belt .crosshair i::after { background: var(--amber); }
 
+.hud.tool-cable .crosshair::before,
+.hud.tool-cable .crosshair::after,
+.hud.tool-cable .crosshair i::before,
+.hud.tool-cable .crosshair i::after { background: #a98bff; }
+
 .hud.tool-demolish .crosshair::before,
 .hud.tool-demolish .crosshair::after,
 .hud.tool-demolish .crosshair i::before,
@@ -1372,6 +1457,11 @@ kbd {
   opacity: 0.4;
 }
 
+.hud.first-person.pointer-locked .factory-guide {
+  opacity: 0.36;
+  transform: translateY(-6px);
+}
+
 @media (max-width: 1080px) {
   .control-strip {
     display: none;
@@ -1409,6 +1499,12 @@ kbd {
     top: 96px;
     right: 8px;
     width: min(286px, calc(100vw - 16px));
+  }
+
+  .factory-guide {
+    top: 86px;
+    left: 8px;
+    width: min(330px, calc(100vw - 16px));
   }
 
   .build-dock {
