@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { A17_ENVIRONMENT, BIOMES, EnvironmentRenderer } from "./environment/index.ts";
+import { A17_ENVIRONMENT, A17_TERRAIN_REVIEW_CAMERAS, BIOMES, EnvironmentRenderer } from "./environment/index.ts";
 import { RESOURCE_ANCHORS } from "./data/resourceAnchors.ts";
 import type { EnvironmentQuality, SurfaceType } from "./environment/types.ts";
 import type { WeatherKind } from "./environment/render/WeatherSystem.ts";
@@ -15,7 +15,17 @@ import {
 
 export type WorldStudioBrush = TerrainAuthoringBrush;
 export type WorldStudioOverlay = "none" | "biome" | "surface" | "buildability" | "chunks" | "resources" | "shadow";
-export type WorldStudioView = "overview" | "firstPerson" | "distance" | "production" | "projectDock" | "caveCutaway";
+type BuiltinWorldStudioView =
+  | "overview"
+  | "firstPerson"
+  | "distance"
+  | "production"
+  | "projectDock"
+  | "caveCutaway";
+export type WorldStudioView = BuiltinWorldStudioView
+  | "ironwindLower"
+  | "ironwindUpper"
+  | "ironwindArch";
 export type WorldStudioStroke = TerrainAuthoringStroke;
 export type WorldStudioDocument = WorldStudioEnvironmentDocument;
 export type WorldStudioStats = Readonly<{ fps: number; frameMs: number; drawCalls: number; triangles: number; activeChunks: number; visibleProps: number; assetStatus: "loading" | "ready" | "fallback" }>;
@@ -133,7 +143,25 @@ export class WorldStudioRuntime {
   setOverlay(overlay: WorldStudioOverlay) { this.overlay = overlay; this.refreshTerrainColors(); this.applyOverlayVisibility(); }
 
   setView(view: WorldStudioView) {
-    const views: Readonly<Record<WorldStudioView, readonly [THREE.Vector3Tuple, THREE.Vector3Tuple, number]>> = {
+    const reviewCameraIds = {
+      ironwindLower: "ironwind_fault_lower_scale",
+      ironwindUpper: "ironwind_upper_logistics_route",
+      ironwindArch: "ironwind_arch_approach",
+    } as const;
+    if (view in reviewCameraIds) {
+      const id = reviewCameraIds[view as keyof typeof reviewCameraIds];
+      const reviewCamera = A17_TERRAIN_REVIEW_CAMERAS.find((candidate) => candidate.id === id);
+      if (!reviewCamera) return;
+      this.camera.position.set(reviewCamera.position.x, reviewCamera.position.y, reviewCamera.position.z);
+      this.camera.fov = reviewCamera.fov;
+      this.camera.updateProjectionMatrix();
+      this.controls.target.set(reviewCamera.target.x, reviewCamera.target.y, reviewCamera.target.z);
+      this.environment.setCaveCutaway(false);
+      this.controls.maxPolarAngle = Math.PI * 0.49;
+      this.controls.update();
+      return;
+    }
+    const views: Readonly<Record<BuiltinWorldStudioView, readonly [THREE.Vector3Tuple, THREE.Vector3Tuple, number]>> = {
       overview: [[48, 54, 52], [0, 0, 0], 52],
       firstPerson: [[0, 1.7, 10], [0, 1.5, 0], 68],
       distance: [[112, 72, 118], [0, 5, 0], 48],
@@ -141,7 +169,7 @@ export class WorldStudioRuntime {
       projectDock: [[20, 10, 20], [8, 1, 8], 48],
       caveCutaway: [[48, 72, 76], [4, -11, 108], 48],
     };
-    const [position, target, fov] = views[view];
+    const [position, target, fov] = views[view as BuiltinWorldStudioView];
     this.camera.position.fromArray(position);
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();

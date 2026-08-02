@@ -3,6 +3,7 @@ import { CAVE_ZONES } from "../data/caveZones.ts";
 import type { BiomeDefinition, EnvironmentDefinition, SurfaceType, TerrainSample } from "../types.ts";
 import { RESOURCE_ANCHORS } from "../../data/resourceAnchors.ts";
 import type { TerrainAuthoringStroke } from "../authoring.ts";
+import { IRONWIND_PEDESTRIAN_SHORTCUT, IRONWIND_TOPOGRAPHY, sampleIronwindTopography } from "../data/ironwindTopography.ts";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const smoothstep = (value: number) => {
@@ -43,6 +44,16 @@ export const SURFACE_ACCESS_ROUTES = [
   [{ x: 12, z: 10 }, { x: 34, z: 27 }, { x: 56, z: 46 }, { x: 69, z: 56 }],
   [{ x: -10, z: -12 }, { x: -31, z: -34 }, { x: -61, z: -74 }],
   [{ x: 8, z: 12 }, { x: 12, z: 42 }, { x: 12, z: 99 }],
+  IRONWIND_PEDESTRIAN_SHORTCUT,
+] as const;
+
+const SURFACE_ACCESS_ROUTE_HALF_WIDTHS = [
+  IRONWIND_TOPOGRAPHY.vehicleCorridorWidth * 0.5,
+  3,
+  3,
+  3,
+  3,
+  1.5,
 ] as const;
 
 const closestOnSegment = (x: number, z: number, from: Readonly<{ x: number; z: number }>, to: Readonly<{ x: number; z: number }>) => {
@@ -113,20 +124,17 @@ export class TerrainSampler {
       + continuousNoise(x, z, 5, this.definition.seed + 73) * 0.16;
     const blend = this.biomeBlendAt(x, z);
     const regionalFor = (biome: BiomeDefinition) => {
-      if (biome.id === "ironwind_faults") return Math.max(0, (x - 38) * 0.075);
       if (biome.id === "hematite_crown") return Math.max(0, (-x - 34) * 0.09);
       if (biome.id === "blackwater_marsh") return -2.2;
       if (biome.id === "thermal_rift") return -Math.max(0, 18 - Math.hypot(x - 12, z - 99)) * 0.34;
       return 0;
     };
     const regional = regionalFor(blend.primary) + (regionalFor(blend.secondary) - regionalFor(blend.primary)) * blend.secondaryWeight;
-    const ironWeight = this.biomeWeightAt("ironwind_faults", x, z);
-    const faultLine = 52 + Math.sin(z * 0.065) * 5.5;
-    const faultShelf = smoothstep((x - faultLine + 4.5) / 9) * 7.2 * ironWeight;
     const crownWeight = this.biomeWeightAt("hematite_crown", x, z);
     const crownDistance = Math.hypot(x + 62, z + 72);
     const crownShelf = (1 - smoothstep((crownDistance - 27) / 8)) * 6.4 * crownWeight;
-    return (-0.5 + (folded + strata + macro + detail + regional + faultShelf + crownShelf) * padBlend);
+    const surroundingHeight = -0.5 + (folded + strata + macro + detail + regional + crownShelf) * padBlend;
+    return sampleIronwindTopography(x, z, surroundingHeight).height;
   }
 
   private foundationHeightAt(x: number, z: number) {
@@ -146,18 +154,23 @@ export class TerrainSampler {
       const fromHeight = this.rawHeightAt(route.from.x, route.from.z);
       const toHeight = this.rawHeightAt(route.to.x, route.to.z);
       const routeHeight = fromHeight + (toHeight - fromHeight) * route.progress;
-      const blend = 1 - smoothstep(Math.max(0, route.distance - 1.7) / 1.3);
+      const featherWidth = route.halfWidth <= 1.5 ? 0 : Math.min(1.3, route.halfWidth);
+      const flatHalfWidth = route.halfWidth - featherWidth;
+      const blend = featherWidth === 0
+        ? 1
+        : 1 - smoothstep(Math.max(0, route.distance - flatHalfWidth) / featherWidth);
       height += (routeHeight - height) * blend;
     }
     return height;
   }
 
   accessRouteAt(x: number, z: number) {
-    let closest: Readonly<{ distance: number; progress: number; from: Readonly<{ x: number; z: number }>; to: Readonly<{ x: number; z: number }> }> | null = null;
-    SURFACE_ACCESS_ROUTES.forEach((points) => points.slice(1).forEach((to, index) => {
+    let closest: Readonly<{ distance: number; progress: number; halfWidth: number; from: Readonly<{ x: number; z: number }>; to: Readonly<{ x: number; z: number }> }> | null = null;
+    SURFACE_ACCESS_ROUTES.forEach((points, routeIndex) => points.slice(1).forEach((to, index) => {
       const from = points[index];
       const projection = closestOnSegment(x, z, from, to);
-      if (projection.distance <= 3 && (!closest || projection.distance < closest.distance)) closest = { ...projection, from, to };
+      const halfWidth = SURFACE_ACCESS_ROUTE_HALF_WIDTHS[routeIndex] ?? 3;
+      if (projection.distance <= halfWidth && (!closest || projection.distance < closest.distance)) closest = { ...projection, halfWidth, from, to };
     }));
     return closest;
   }

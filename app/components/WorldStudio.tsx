@@ -34,6 +34,7 @@ const OVERLAYS: readonly { id: WorldStudioOverlay; label: string }[] = [
 const VIEWS: readonly { id: WorldStudioView; label: string }[] = [
   { id: "overview", label: "전체" }, { id: "firstPerson", label: "1인칭" }, { id: "production", label: "생산선" },
   { id: "projectDock", label: "프로젝트 도크" }, { id: "distance", label: "원경" }, { id: "caveCutaway", label: "동굴 절단" },
+  { id: "ironwindLower", label: "철풍 하부" }, { id: "ironwindUpper", label: "철풍 상부" }, { id: "ironwindArch", label: "아치 접근" },
 ];
 
 export default function WorldStudio() {

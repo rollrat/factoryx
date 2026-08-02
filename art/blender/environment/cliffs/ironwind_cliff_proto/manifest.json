@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "kitId": "ironwind_cliff_proto",
+  "status": "graybox_prototype",
+  "blenderVersion": "5.2.0 LTS",
+  "contract": {
+    "unitMeters": 1,
+    "gltfUp": "+Y",
+    "pivot": "ground_center",
+    "requiredLods": [
+      "VIS_LOD0",
+      "VIS_LOD1",
+      "VIS_LOD2"
+    ],
+    "requiredCollision": [
+      "COL_WALL"
+    ],
+    "requiredSocketContainer": "SOCKETS"
+  },
+  "assets": [
+    {
+      "id": "ironwind_cliff_straight_16m",
+      "kind": "cliff_straight",
+      "source": "ironwind_cliff_straight_16m.blend",
+      "output": "ironwind_cliff_straight_16m.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        736,
+        336,
+        108
+      ],
+      "collisionNodes": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "collisionTriangles": 24,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_cliff_straight_16m_preview_front.png",
+        "ironwind_cliff_straight_16m_preview_left.png",
+        "ironwind_cliff_straight_16m_preview_right.png",
+        "ironwind_cliff_straight_16m_preview_top.png"
+      ],
+      "glbBytes": 69256
+    },
+    {
+      "id": "ironwind_cliff_outer_corner",
+      "kind": "cliff_corner",
+      "source": "ironwind_cliff_outer_corner.blend",
+      "output": "ironwind_cliff_outer_corner.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        840,
+        440,
+        168
+      ],
+      "collisionNodes": [
+        "COL_WALL",
+        "COL_WALKABLE"
+      ],
+      "collisionTriangles": 48,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_cliff_outer_corner_preview_front.png",
+        "ironwind_cliff_outer_corner_preview_left.png",
+        "ironwind_cliff_outer_corner_preview_right.png",
+        "ironwind_cliff_outer_corner_preview_top.png"
+      ],
+      "glbBytes": 85228
+    },
+    {
+      "id": "ironwind_natural_arch",
+      "kind": "cliff_arch",
+      "source": "ironwind_natural_arch.blend",
+      "output": "ironwind_natural_arch.glb",
+      "unitMeters": 1,
+      "gltfCoordinateSystem": {
+        "handedness": "right",
+        "up": "+Y",
+        "forward": "+Z"
+      },
+      "sourceCoordinateSystem": {
+        "up": "+Z",
+        "note": "Blender source; exporter converts to glTF +Y up"
+      },
+      "pivot": "ground_center",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "lodTriangles": [
+        288,
+        192,
+        132
+      ],
+      "collisionNodes": [
+        "COL_WALL"
+      ],
+      "collisionTriangles": 36,
+      "socketContainer": "SOCKETS",
+      "previews": [
+        "ironwind_natural_arch_preview_front.png",
+        "ironwind_natural_arch_preview_left.png",
+        "ironwind_natural_arch_preview_right.png",
+        "ironwind_natural_arch_preview_top.png"
+      ],
+      "glbBytes": 45516
+    }
+  ],
+  "validation": {
+    "validator": "factoryx-cliff-contract-v1",
+    "passed": true,
+    "results": [
+      {
+        "assetId": "ironwind_cliff_straight_16m",
+        "bytes": 69256,
+        "nodeCount": 18,
+        "errors": []
+      },
+      {
+        "assetId": "ironwind_cliff_outer_corner",
+        "bytes": 85228,
+        "nodeCount": 20,
+        "errors": []
+      },
+      {
+        "assetId": "ironwind_natural_arch",
+        "bytes": 45516,
+        "nodeCount": 19,
+        "errors": []
+      }
+    ]
+  }
+}

@@ -8,6 +8,10 @@ export {
 } from "./data/propScatterProfiles.ts";
 export { BIOMES, BIOME_BY_ID } from "./data/biomes.ts";
 export { CAVE_ZONES } from "./data/caveZones.ts";
+export { IRONWIND_PEDESTRIAN_SHORTCUT, IRONWIND_TOPOGRAPHY, sampleIronwindTopography } from "./data/ironwindTopography.ts";
+export type { IronwindTerrainProfile } from "./data/ironwindTopography.ts";
+export { A17_TERRAIN_REVIEW_CAMERAS } from "./data/terrainReviewCameras.ts";
+export type { TerrainReviewCamera, TerrainReviewCameraPurpose } from "./data/terrainReviewCameras.ts";
 export { TerrainSampler, SURFACE_ACCESS_ROUTES } from "./terrain/TerrainSampler.ts";
 export { TerrainChunkManager } from "./terrain/TerrainChunkManager.ts";
 export { evaluateTerrainPlacement, createTerrainPlacementValidator } from "./terrain/TerrainPlacementRules.ts";
