@@ -24,7 +24,7 @@ export class TerrainRenderer {
     this.root.name = "a17-terrain";
     const width = definition.worldBounds.maxX - definition.worldBounds.minX + 1;
     const depth = definition.worldBounds.maxZ - definition.worldBounds.minZ + 1;
-    this.terrain = this.createTerrainMesh(0, 0, width, quality === "high" ? 128 : 72);
+    this.terrain = this.createTerrainMesh(0, 0, width, quality === "high" ? 256 : 128, 0);
     this.terrain.name = "terrain-editor-surface";
     this.terrain.receiveShadow = true;
     this.terrain.visible = false;
@@ -39,8 +39,8 @@ export class TerrainRenderer {
       for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
         const centerX = chunkX * definition.chunkSize + definition.chunkSize / 2;
         const centerZ = chunkZ * definition.chunkSize + definition.chunkSize / 2;
-        const lods = ([16, 8, 4] as const).map((segments, lod) => {
-          const mesh = this.createTerrainMesh(centerX, centerZ, definition.chunkSize, quality === "low" ? Math.max(3, segments / 2) : segments);
+        const lods = (quality === "high" ? [64, 32, 16] : [32, 16, 8]).map((segments, lod) => {
+          const mesh = this.createTerrainMesh(centerX, centerZ, definition.chunkSize, segments, 2.5);
           mesh.name = `terrain-chunk:${chunkX},${chunkZ}:lod${lod}`;
           mesh.visible = false;
           mesh.receiveShadow = lod < 2;
@@ -87,58 +87,110 @@ export class TerrainRenderer {
     materials.forEach((material) => material.dispose());
   }
 
-  private createTerrainMesh(centerX: number, centerZ: number, size: number, segments: number) {
-    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
-    geometry.rotateX(-Math.PI / 2);
-    geometry.translate(centerX, 0, centerZ);
-    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
-    const colors = new Float32Array(positions.count * 3);
-    const color = new THREE.Color();
-    for (let index = 0; index < positions.count; index += 1) {
-      const x = positions.getX(index);
-      const z = positions.getZ(index);
-      const sample = this.sampler.sample(x, z);
-      positions.setY(index, sample.height);
-      color.setHex(this.sampler.colorAt(x, z));
-      const surfaceTint = sample.surface === "soft" ? new THREE.Color(0x40514b)
-        : sample.surface === "submerged" ? new THREE.Color(0x142f34)
-          : sample.surface === "hazard" ? new THREE.Color(0x75543e)
-            : sample.surface === "steep" ? new THREE.Color(0x1b292d) : color;
-      color.lerp(surfaceTint, sample.surface === "stable" ? 0 : 0.44);
-      const variation = 0.88 + (Math.sin(x * 0.43 + z * 0.19) * 0.5 + 0.5) * 0.15;
-      colors[index * 3] = color.r * variation;
-      colors[index * 3 + 1] = color.g * variation;
-      colors[index * 3 + 2] = color.b * variation;
+  private createTerrainMesh(centerX: number, centerZ: number, size: number, segments: number, skirtDepth: number) {
+    const row = segments + 1;
+    const surfaceVertexCount = row * row;
+    const perimeter: number[] = [];
+    for (let x = 0; x <= segments; x += 1) perimeter.push(x);
+    for (let z = 1; z <= segments; z += 1) perimeter.push(z * row + segments);
+    for (let x = segments - 1; x >= 0; x -= 1) perimeter.push(segments * row + x);
+    for (let z = segments - 1; z >= 1; z -= 1) perimeter.push(z * row);
+    const totalVertexCount = surfaceVertexCount + (skirtDepth > 0 ? perimeter.length : 0);
+    const positions = new Float32Array(totalVertexCount * 3);
+    const normals = new Float32Array(totalVertexCount * 3);
+    const colors = new Float32Array(totalVertexCount * 3);
+    const indices: number[] = [];
+    const minX = centerX - size / 2;
+    const minZ = centerZ - size / 2;
+
+    for (let z = 0; z <= segments; z += 1) {
+      for (let x = 0; x <= segments; x += 1) {
+        const index = z * row + x;
+        const worldX = minX + x / segments * size;
+        const worldZ = minZ + z / segments * size;
+        this.writeTerrainVertex(positions, normals, colors, index, worldX, worldZ, 0);
+      }
     }
+    for (let z = 0; z < segments; z += 1) {
+      for (let x = 0; x < segments; x += 1) {
+        const a = z * row + x;
+        const b = a + 1;
+        const c = a + row;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+    if (skirtDepth > 0) {
+      perimeter.forEach((surfaceIndex, offset) => {
+        const skirtIndex = surfaceVertexCount + offset;
+        this.writeTerrainVertex(
+          positions, normals, colors, skirtIndex,
+          positions[surfaceIndex * 3], positions[surfaceIndex * 3 + 2], skirtDepth,
+        );
+        const nextOffset = (offset + 1) % perimeter.length;
+        indices.push(surfaceIndex, skirtIndex, perimeter[nextOffset], perimeter[nextOffset], skirtIndex, surfaceVertexCount + nextOffset);
+      });
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    geometry.computeVertexNormals();
+    geometry.setIndex(indices);
+    geometry.userData.surfaceVertexCount = surfaceVertexCount;
+    geometry.userData.skirtDepth = skirtDepth;
+    geometry.userData.segments = segments;
+    geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, this.material);
   }
 
   private refreshMesh(mesh: THREE.Mesh, region?: Readonly<{ x: number; z: number; radius: number }>) {
     const geometry = mesh.geometry as THREE.BufferGeometry;
     const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const normals = geometry.getAttribute("normal") as THREE.BufferAttribute;
     const colors = geometry.getAttribute("color") as THREE.BufferAttribute;
-    const color = new THREE.Color();
+    const surfaceVertexCount = geometry.userData.surfaceVertexCount as number;
+    const skirtDepth = geometry.userData.skirtDepth as number;
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const z = positions.getZ(index);
       if (region && Math.hypot(x - region.x, z - region.z) > region.radius + 1) continue;
-      const sample = this.sampler.sample(x, z);
-      positions.setY(index, sample.height);
-      color.setHex(this.sampler.colorAt(x, z));
-      const tint = sample.surface === "soft" ? 0x40514b
-        : sample.surface === "submerged" ? 0x142f34
-          : sample.surface === "hazard" ? 0x75543e
-            : sample.surface === "steep" ? 0x1b292d : color.getHex();
-      color.lerp(new THREE.Color(tint), sample.surface === "stable" ? 0 : 0.44);
-      const variation = 0.88 + (Math.sin(x * 0.43 + z * 0.19) * 0.5 + 0.5) * 0.15;
-      colors.setXYZ(index, color.r * variation, color.g * variation, color.b * variation);
+      this.writeTerrainVertex(positions.array as Float32Array, normals.array as Float32Array, colors.array as Float32Array,
+        index, x, z, index >= surfaceVertexCount ? skirtDepth : 0);
     }
     positions.needsUpdate = true;
+    normals.needsUpdate = true;
     colors.needsUpdate = true;
-    geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
+  }
+
+  private writeTerrainVertex(
+    positions: Float32Array,
+    normals: Float32Array,
+    colors: Float32Array,
+    index: number,
+    x: number,
+    z: number,
+    depth: number,
+  ) {
+    const sample = this.sampler.sample(x, z);
+    const offset = index * 3;
+    positions[offset] = x;
+    positions[offset + 1] = sample.height - depth;
+    positions[offset + 2] = z;
+    normals[offset] = sample.normal.x;
+    normals[offset + 1] = sample.normal.y;
+    normals[offset + 2] = sample.normal.z;
+    const color = new THREE.Color(this.sampler.colorAt(x, z));
+    const tint = sample.surface === "soft" ? 0x40514b
+      : sample.surface === "submerged" ? 0x142f34
+        : sample.surface === "hazard" ? 0x75543e
+          : sample.surface === "steep" ? 0x1b292d : color.getHex();
+    color.lerp(new THREE.Color(tint), sample.surface === "stable" ? 0 : 0.44);
+    const variation = 0.88 + (Math.sin(x * 0.43 + z * 0.19) * 0.5 + 0.5) * 0.15;
+    colors[offset] = color.r * variation;
+    colors[offset + 1] = color.g * variation;
+    colors[offset + 2] = color.b * variation;
   }
 
   private createSurveyPad() {

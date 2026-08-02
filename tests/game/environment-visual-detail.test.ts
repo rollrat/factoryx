@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { A17_ENVIRONMENT, EnvironmentRenderer, TerrainSampler } from "../../app/game/environment/index.ts";
 import { DistantHorizonRenderer } from "../../app/game/environment/render/DistantHorizonRenderer.ts";
 import { TerrainDetailRenderer } from "../../app/game/environment/render/TerrainDetailRenderer.ts";
+import { TerrainRenderer } from "../../app/game/environment/render/TerrainRenderer.ts";
 import { WeatherSystem } from "../../app/game/environment/render/WeatherSystem.ts";
 
 test("near terrain detail stays camera-local and reacts to rain and industry", () => {
@@ -73,23 +74,47 @@ test("environment preview quality couples props, particles, terrain detail, and 
   environment.dispose();
 });
 
-test("distant terrain silhouettes follow the camera horizontally and fade into weather", () => {
+test("distant terrain uses world-fixed ridge ribbons and fades into weather", () => {
   const horizon = new DistantHorizonRenderer(A17_ENVIRONMENT.seed, "high");
-  assert.equal(horizon.nearRidges.count, 18);
-  assert.equal(horizon.farRidges.count, 24);
-  const matrix = new THREE.Matrix4();
-  const position = new THREE.Vector3();
-  horizon.nearRidges.getMatrixAt(0, matrix);
-  position.setFromMatrixPosition(matrix);
-  assert.ok(Math.hypot(position.x, position.z) >= 200);
+  assert.equal(horizon.nearRidges.geometry.userData.kind, "authored-ridge-ribbon");
+  assert.equal(horizon.farRidges.geometry.userData.kind, "authored-ridge-ribbon");
+  assert.notEqual(horizon.nearRidges.geometry.type, "ConeGeometry");
+  assert.ok((horizon.nearRidges.geometry.getAttribute("position") as THREE.BufferAttribute).count > 300);
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(48, 36, -27);
   horizon.update(camera);
-  assert.equal(horizon.root.position.x, 48);
-  assert.equal(horizon.root.position.y, -18);
-  assert.equal(horizon.root.position.z, -27);
+  assert.equal(horizon.root.position.x, 0);
+  assert.equal(horizon.root.position.y, -11);
+  assert.equal(horizon.root.position.z, 0);
   const clearOpacity = (horizon.farRidges.material as THREE.MeshBasicMaterial).opacity;
   horizon.setWeather("mist", 1);
   assert.ok((horizon.farRidges.material as THREE.MeshBasicMaterial).opacity < clearOpacity);
   horizon.dispose();
+});
+
+test("terrain chunks use half-meter source samples, power-of-two LODs, shared edge normals, and skirts", () => {
+  const sampler = new TerrainSampler(A17_ENVIRONMENT);
+  const terrain = new TerrainRenderer(A17_ENVIRONMENT, sampler, "high");
+  const chunks = new Map<string, THREE.Mesh>();
+  terrain.root.traverse((object) => {
+    if (object instanceof THREE.Mesh && object.name.startsWith("terrain-chunk:")) chunks.set(object.name, object);
+  });
+  const left = chunks.get("terrain-chunk:0,0:lod0")!;
+  const right = chunks.get("terrain-chunk:1,0:lod0")!;
+  assert.equal(left.geometry.userData.segments, 64);
+  assert.equal(left.geometry.userData.skirtDepth, 2.5);
+  assert.deepEqual([0, 1, 2].map((lod) => chunks.get(`terrain-chunk:0,0:lod${lod}`)!.geometry.userData.segments), [64, 32, 16]);
+  const leftPositions = left.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const leftNormals = left.geometry.getAttribute("normal") as THREE.BufferAttribute;
+  const rightPositions = right.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const rightNormals = right.geometry.getAttribute("normal") as THREE.BufferAttribute;
+  for (let row = 0; row <= 64; row += 8) {
+    const leftIndex = row * 65 + 64;
+    const rightIndex = row * 65;
+    assert.equal(leftPositions.getY(leftIndex), rightPositions.getY(rightIndex));
+    assert.equal(leftNormals.getX(leftIndex), rightNormals.getX(rightIndex));
+    assert.equal(leftNormals.getY(leftIndex), rightNormals.getY(rightIndex));
+    assert.equal(leftNormals.getZ(leftIndex), rightNormals.getZ(rightIndex));
+  }
+  terrain.dispose();
 });

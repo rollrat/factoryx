@@ -10,9 +10,25 @@ const smoothstep = (value: number) => {
   return t * t * (3 - 2 * t);
 };
 
-const hashNoise = (x: number, z: number, seed: number) => {
-  const value = Math.sin(x * 127.1 + z * 311.7 + seed * 0.013) * 43758.5453123;
-  return (value - Math.floor(value)) * 2 - 1;
+const latticeNoise = (x: number, z: number, seed: number) => {
+  let value = Math.imul(x, 0x1f123bb5) ^ Math.imul(z, 0x5f356495) ^ Math.imul(seed, 0x6c8e9cf5);
+  value = Math.imul(value ^ (value >>> 15), 0x2c1b3c6d);
+  value = Math.imul(value ^ (value >>> 12), 0x297a2d39);
+  return ((value ^ (value >>> 15)) >>> 0) / 0xffffffff * 2 - 1;
+};
+
+/** Deterministic C2-continuous value noise. Coordinates are never quantized at call sites. */
+const continuousNoise = (x: number, z: number, scale: number, seed: number) => {
+  const px = x / scale;
+  const pz = z / scale;
+  const x0 = Math.floor(px);
+  const z0 = Math.floor(pz);
+  const fade = (value: number) => value * value * value * (value * (value * 6 - 15) + 10);
+  const tx = fade(px - x0);
+  const tz = fade(pz - z0);
+  const top = latticeNoise(x0, z0, seed) + (latticeNoise(x0 + 1, z0, seed) - latticeNoise(x0, z0, seed)) * tx;
+  const bottom = latticeNoise(x0, z0 + 1, seed) + (latticeNoise(x0 + 1, z0 + 1, seed) - latticeNoise(x0, z0 + 1, seed)) * tx;
+  return top + (bottom - top) * tz;
 };
 
 const mixHex = (from: number, to: number, amount: number) => {
@@ -60,21 +76,6 @@ export class TerrainSampler {
       .map((stroke) => ({ ...stroke }));
   }
 
-  private baseBiomeAt(x: number, z: number) {
-    let best: BiomeDefinition = BIOMES[0];
-    let bestScore = Number.POSITIVE_INFINITY;
-    for (const biome of BIOMES) {
-      const dx = x - biome.center.x;
-      const dz = z - biome.center.z;
-      const score = Math.hypot(dx, dz) / biome.radius;
-      if (score < bestScore) {
-        best = biome;
-        bestScore = score;
-      }
-    }
-    return best;
-  }
-
   biomeBlendAt(x: number, z: number) {
     const painted = [...this.strokes].reverse().find((stroke) => stroke.brush === "biome"
       && stroke.biomeId && Math.hypot(x - stroke.x, z - stroke.z) <= stroke.radius);
@@ -98,16 +99,21 @@ export class TerrainSampler {
     const padDistance = Math.max(Math.abs(x) - 13.5, Math.abs(z) - 13.5, 0);
     const padBlend = smoothstep(padDistance / 12);
     if (padBlend === 0) return -0.5;
-    const folded = Math.sin((x + z * 0.32) * 0.075) * 2.8;
-    const strata = Math.sin(x * 0.031 - z * 0.061) * 4.2;
-    const detail = hashNoise(Math.floor(x / 4), Math.floor(z / 4), this.definition.seed) * 0.8;
-    const biome = this.baseBiomeAt(x, z);
-    let regional = 0;
-    if (biome.id === "ironwind_faults") regional = Math.max(0, (x - 38) * 0.075);
-    if (biome.id === "hematite_crown") regional = Math.max(0, (-x - 34) * 0.09);
-    if (biome.id === "blackwater_marsh") regional = -2.2;
-    if (biome.id === "thermal_rift") regional = -Math.max(0, 18 - Math.hypot(x - 12, z - 99)) * 0.34;
-    return (-0.5 + (folded + strata + detail + regional) * padBlend);
+    const folded = Math.sin((x + z * 0.32) * 0.075) * 2.25;
+    const strata = Math.sin(x * 0.031 - z * 0.061) * 3.4;
+    const macro = continuousNoise(x, z, 72, this.definition.seed) * 4.2;
+    const detail = continuousNoise(x, z, 15, this.definition.seed + 37) * 0.72
+      + continuousNoise(x, z, 5, this.definition.seed + 73) * 0.16;
+    const blend = this.biomeBlendAt(x, z);
+    const regionalFor = (biome: BiomeDefinition) => {
+      if (biome.id === "ironwind_faults") return Math.max(0, (x - 38) * 0.075);
+      if (biome.id === "hematite_crown") return Math.max(0, (-x - 34) * 0.09);
+      if (biome.id === "blackwater_marsh") return -2.2;
+      if (biome.id === "thermal_rift") return -Math.max(0, 18 - Math.hypot(x - 12, z - 99)) * 0.34;
+      return 0;
+    };
+    const regional = regionalFor(blend.primary) + (regionalFor(blend.secondary) - regionalFor(blend.primary)) * blend.secondaryWeight;
+    return (-0.5 + (folded + strata + macro + detail + regional) * padBlend);
   }
 
   private foundationHeightAt(x: number, z: number) {
@@ -276,7 +282,7 @@ export class TerrainSampler {
     const normal = { x: -dx / length, y: (step * 2) / length, z: -dz / length };
     const slopeDegrees = Math.acos(Math.max(-1, Math.min(1, normal.y))) * 180 / Math.PI;
     const biome = this.biomeAt(x, z);
-    const noise = hashNoise(Math.floor(x / 3), Math.floor(z / 3), this.definition.seed + 91);
+    const noise = continuousNoise(x, z, 7, this.definition.seed + 91);
     let surface: SurfaceType = "stable";
     const resourcePad = RESOURCE_ANCHORS.find((anchor) => anchor.stratumId === "surface"
       && Math.hypot(x - (anchor.position.x + 1), z - (anchor.position.z + 1)) <= 2.6);
@@ -300,7 +306,7 @@ export class TerrainSampler {
 
   colorAt(x: number, z: number) {
     const blend = this.biomeBlendAt(x, z);
-    const detail = clamp01(0.22 + (hashNoise(Math.floor(x / 5), Math.floor(z / 5), this.definition.seed + 414) * 0.5 + 0.5) * 0.34);
+    const detail = clamp01(0.22 + (continuousNoise(x, z, 11, this.definition.seed + 414) * 0.5 + 0.5) * 0.34);
     const primary = mixHex(blend.primary.palette.ground, blend.primary.palette.groundSecondary, detail);
     const secondary = mixHex(blend.secondary.palette.ground, blend.secondary.palette.groundSecondary, detail);
     return mixHex(primary, secondary, blend.secondaryWeight);

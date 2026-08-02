@@ -88,7 +88,8 @@ export const parseWorldStudioDocument = (value: unknown, definition: Environment
   const document = value as Record<string, unknown>;
   if (document.format !== "factoryx-world-studio" || (document.version !== 1 && document.version !== 2)
     || document.environmentId !== definition.id
-    || document.environmentVersion !== definition.version
+    || !Number.isSafeInteger(document.environmentVersion) || (document.environmentVersion as number) < 1
+    || (document.environmentVersion as number) > definition.version
     || document.seed !== definition.seed
     || !Array.isArray(document.strokes) || document.strokes.length > 4096) return null;
   const isV2 = document.version === 2;

@@ -70,6 +70,16 @@ test("terrain sampling is deterministic and preserves the starting survey pad", 
   assert.equal(sampler.sample(60, 60, "rift_depths").surface, "steep");
 });
 
+test("terrain height is continuous across the former four-meter noise cells", () => {
+  const sampler = new TerrainSampler(A17_ENVIRONMENT);
+  for (let boundary = -120; boundary <= 120; boundary += 4) {
+    const acrossX = Math.abs(sampler.heightAt(boundary - 0.001, 47.3) - sampler.heightAt(boundary + 0.001, 47.3));
+    const acrossZ = Math.abs(sampler.heightAt(-39.7, boundary - 0.001) - sampler.heightAt(-39.7, boundary + 0.001));
+    assert.ok(acrossX < 0.01, `x=${boundary} jumped ${acrossX}m`);
+    assert.ok(acrossZ < 0.01, `z=${boundary} jumped ${acrossZ}m`);
+  }
+});
+
 test("authored cave shortcut corridors participate in floor-height interpolation", () => {
   const sampler = new TerrainSampler(A17_ENVIRONMENT);
   const shortcutMidpoint = { x: 4, z: 108.5 };

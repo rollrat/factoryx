@@ -4,7 +4,7 @@ import { CAVE_ZONES } from "./caveZones.ts";
 
 export const A17_ENVIRONMENT: EnvironmentDefinition = {
   id: "a17_folded_by_wind",
-  version: 1,
+  version: 2,
   seed: 171703,
   worldBounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 },
   constructionBounds: { minX: -128, maxX: 127, minZ: -128, maxZ: 127 },
