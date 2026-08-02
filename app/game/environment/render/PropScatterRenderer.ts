@@ -380,7 +380,10 @@ export class PropScatterRenderer {
     this.assetLoadState = "loading";
     const assets: ReadonlyArray<readonly [EnvironmentPropModelKey, string]> = [
       ["basalt", "rock_basalt_medium_a"],
+      ["hematite", "rock_hematite_slab_a"],
       ["silicate", "rock_windglass_shard_cluster_a"],
+      ["fan", "flora_wind_fan_a"],
+      ["tube", "flora_marsh_tube_a"],
     ];
     let pending = assets.length;
     let failed = false;

@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "flora_wind_fan_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         1170,
+                         450,
+                         259
+                     ],
+    "collisionTriangles":  35,
+    "errors":  [
+
+               ],
+    "glbBytes":  43380,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/flora_wind_fan_a.png"
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "assetId": "flora_marsh_tube_a",
+  "blenderVersion": "5.2.0 LTS",
+  "lodTriangles": [
+    4122,
+    1500,
+    616
+  ],
+  "collisionTriangles": 20,
+  "errors": []
+}

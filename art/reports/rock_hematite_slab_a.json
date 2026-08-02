@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "assetId": "rock_hematite_slab_a",
+  "blenderVersion": "5.2.0 LTS",
+  "lodTriangles": [
+    856,
+    504,
+    84
+  ],
+  "collisionTriangles": 20,
+  "errors": []
+}

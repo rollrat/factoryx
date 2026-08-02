@@ -11,7 +11,8 @@ if (binary.readUInt32LE(0) !== 0x46546c67 || binary.readUInt32LE(4) !== 2) throw
 const jsonLength = binary.readUInt32LE(12);
 if (binary.readUInt32LE(16) !== 0x4e4f534a) throw new Error("missing GLB JSON chunk");
 const gltf = JSON.parse(binary.subarray(20, 20 + jsonLength).toString("utf8").replace(/\0+$/g, ""));
-const blenderReport = JSON.parse(await readFile(reportPath, "utf8"));
+const parseJsonFile = async (filePath) => JSON.parse((await readFile(filePath, "utf8")).replace(/^\uFEFF/, ""));
+const blenderReport = await parseJsonFile(reportPath);
 const assetId = blenderReport.assetId;
 const requiredNodes = [`FX_${assetId}`, "VIS_LOD0", "VIS_LOD1", "VIS_LOD2", "COL_SIMPLE", "SOCKETS", "FX_POINTS", "META"];
 const nodeNames = new Set((gltf.nodes ?? []).map(({ name }) => name).filter(Boolean));
@@ -25,7 +26,7 @@ if (!root?.extras || root.extras.fx_asset_id !== assetId) throw new Error("root 
 const stat = { bytes: binary.length };
 let existingAssets = [];
 try {
-  const existing = JSON.parse(await readFile(manifestPath, "utf8"));
+  const existing = await parseJsonFile(manifestPath);
   if (existing.schemaVersion === 1 && Array.isArray(existing.assets)) existingAssets = existing.assets;
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;

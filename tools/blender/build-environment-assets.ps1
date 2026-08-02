@@ -24,3 +24,12 @@ if ($LASTEXITCODE -ne 0) { throw "GLB manifest validation failed" }
 
 & (Join-Path $PSScriptRoot "build-windglass-shard-asset.ps1") -BlenderPath $BlenderPath
 if ($LASTEXITCODE -ne 0) { throw "Windglass shard asset build failed" }
+
+& (Join-Path $PSScriptRoot "build-hematite-slab-asset.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Hematite slab asset build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\vegetation\flora_wind_fan_a\build-flora-wind-fan-a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Wind fan asset build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\vegetation\flora_marsh_tube_a\build_flora_marsh_tube_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Marsh tube asset build failed" }

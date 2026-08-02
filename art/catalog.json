@@ -23,6 +23,39 @@
       "lodTriangleCaps": [900, 360, 120],
       "collisionTriangleCap": 128,
       "runtimeModelKey": "silicate"
+    },
+    {
+      "id": "rock_hematite_slab_a",
+      "kind": "environment_prop",
+      "family": "hematite",
+      "source": "art/blender/environment/rocks/rock_hematite_slab_a/rock_hematite_slab_a.blend",
+      "output": "public/assets/environment/models/rock_hematite_slab_a.glb",
+      "preview": "public/assets/environment/previews/rock_hematite_slab_a.png",
+      "lodTriangleCaps": [1800, 700, 160],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "hematite"
+    },
+    {
+      "id": "flora_wind_fan_a",
+      "kind": "environment_prop",
+      "family": "wind_fan",
+      "source": "art/blender/environment/vegetation/flora_wind_fan_a/flora_wind_fan_a.blend",
+      "output": "public/assets/environment/models/flora_wind_fan_a.glb",
+      "preview": "public/assets/environment/previews/flora_wind_fan_a.png",
+      "lodTriangleCaps": [1800, 700, 300],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "fan"
+    },
+    {
+      "id": "flora_marsh_tube_a",
+      "kind": "environment_prop",
+      "family": "marsh_tube",
+      "source": "art/blender/environment/vegetation/flora_marsh_tube_a/flora_marsh_tube_a.blend",
+      "output": "public/assets/environment/models/flora_marsh_tube_a.glb",
+      "preview": "public/assets/environment/previews/flora_marsh_tube_a.png",
+      "lodTriangleCaps": [6000, 2400, 700],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "tube"
     }
   ]
 }

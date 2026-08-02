@@ -17,7 +17,13 @@ test("the Blender environment assets ship validated LOD GLBs", async () => {
     }>;
   };
   assert.equal(manifest.schemaVersion, 1);
-  for (const assetId of ["rock_basalt_medium_a", "rock_windglass_shard_cluster_a"]) {
+  for (const assetId of [
+    "rock_basalt_medium_a",
+    "rock_windglass_shard_cluster_a",
+    "rock_hematite_slab_a",
+    "flora_wind_fan_a",
+    "flora_marsh_tube_a",
+  ]) {
     const asset = manifest.assets.find(({ id }) => id === assetId);
     assert.ok(asset);
     assert.deepEqual(asset.lodNodes, ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"]);

@@ -3,6 +3,44 @@
   "generatedAt": "deterministic",
   "assets": [
     {
+      "id": "flora_marsh_tube_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/flora_marsh_tube_a.glb",
+      "previewUrl": "/assets/environment/previews/flora_marsh_tube_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        4122,
+        1500,
+        616
+      ],
+      "collisionTriangles": 20,
+      "bytes": 146632
+    },
+    {
+      "id": "flora_wind_fan_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/flora_wind_fan_a.glb",
+      "previewUrl": "/assets/environment/previews/flora_wind_fan_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        1170,
+        450,
+        259
+      ],
+      "collisionTriangles": 35,
+      "bytes": 43380
+    },
+    {
       "id": "rock_basalt_medium_a",
       "kind": "environment_prop",
       "url": "/assets/environment/models/rock_basalt_medium_a.glb",
@@ -20,6 +58,25 @@
       ],
       "collisionTriangles": 20,
       "bytes": 31832
+    },
+    {
+      "id": "rock_hematite_slab_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/rock_hematite_slab_a.glb",
+      "previewUrl": "/assets/environment/previews/rock_hematite_slab_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        856,
+        504,
+        84
+      ],
+      "collisionTriangles": 20,
+      "bytes": 86776
     },
     {
       "id": "rock_windglass_shard_cluster_a",
