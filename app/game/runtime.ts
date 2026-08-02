@@ -556,7 +556,17 @@ export class FactoryRuntime {
 
   private executeFirstPersonCommand(command: FirstPersonActionCommand) {
     if (command.type === "request_pointer_lock") {
-      void this.renderer.domElement.requestPointerLock();
+      const handleFailure = () => {
+        if (this.cameraMode !== "firstPerson") return;
+        this.dispatchFirstPersonAction({ type: "pointer_lock_failed" });
+        this.callbacks.onPointerLock(false);
+        this.callbacks.onToast("이 환경에서는 시점 고정을 사용할 수 없습니다 · 도구 버튼과 건설 시점은 계속 사용할 수 있습니다");
+      };
+      try {
+        void this.renderer.domElement.requestPointerLock().catch(handleFailure);
+      } catch {
+        handleFailure();
+      }
       return;
     }
     if (command.type === "release_pointer_lock") {
