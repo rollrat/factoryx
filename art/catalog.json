@@ -56,6 +56,39 @@
       "lodTriangleCaps": [6000, 2400, 700],
       "collisionTriangleCap": 128,
       "runtimeModelKey": "tube"
+    },
+    {
+      "id": "flora_sail_membrane_a",
+      "kind": "environment_prop",
+      "family": "sail_membrane",
+      "source": "art/blender/environment/vegetation/flora_sail_membrane_a/flora_sail_membrane_a.blend",
+      "output": "public/assets/environment/models/flora_sail_membrane_a.glb",
+      "preview": "public/assets/environment/previews/flora_sail_membrane_a.png",
+      "lodTriangleCaps": [1800, 700, 180],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "membrane"
+    },
+    {
+      "id": "rock_layered_plate_a",
+      "kind": "environment_prop",
+      "family": "layered_plate",
+      "source": "art/blender/environment/rocks/rock_layered_plate_a/rock_layered_plate_a.blend",
+      "output": "public/assets/environment/models/rock_layered_plate_a.glb",
+      "preview": "public/assets/environment/previews/rock_layered_plate_a.png",
+      "lodTriangleCaps": [1200, 500, 180],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "plate"
+    },
+    {
+      "id": "landmark_twin_needles_a",
+      "kind": "environment_landmark",
+      "family": "twin_needles",
+      "source": "art/blender/environment/landmarks/landmark_twin_needles_a/landmark_twin_needles_a.blend",
+      "output": "public/assets/environment/models/landmark_twin_needles_a.glb",
+      "preview": "public/assets/environment/previews/landmark_twin_needles_a.png",
+      "lodTriangleCaps": [9000, 3000, 900],
+      "collisionTriangleCap": 256,
+      "runtimeLandmarkId": "twin_needles"
     }
   ]
 }

@@ -5,7 +5,7 @@ export type EnvironmentAssetLoadState = "loading" | "ready" | "fallback";
 
 type ManifestAsset = Readonly<{
   id: string;
-  kind: "environment_prop";
+  kind: "environment_prop" | "environment_landmark";
   url: string;
   previewUrl: string;
   lodNodes: readonly [string, string, string];

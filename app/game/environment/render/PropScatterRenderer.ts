@@ -284,7 +284,16 @@ export class PropScatterRenderer {
       if (child.name.startsWith("landmark:")) {
         const world = new THREE.Vector3();
         child.getWorldPosition(world);
-        child.visible = this.landmarksVisible && world.distanceTo(camera.position) < (this.quality === "high" ? 210 : 145);
+        const distance = world.distanceTo(camera.position);
+        child.visible = this.landmarksVisible && distance < (this.quality === "high" ? 210 : 145);
+        const externalMesh = child.children.find((candidate): candidate is THREE.Mesh => (
+          candidate instanceof THREE.Mesh && Array.isArray(candidate.userData.externalLandmarkLods)
+        ));
+        if (externalMesh) {
+          const lods = externalMesh.userData.externalLandmarkLods as readonly [THREE.BufferGeometry, THREE.BufferGeometry, THREE.BufferGeometry];
+          const lod = distance < 72 ? 0 : distance < 138 ? 1 : 2;
+          if (externalMesh.geometry !== lods[lod]) externalMesh.geometry = lods[lod];
+        }
         if (child.name === "landmark:pressure_vent") this.updatePressureVent(child);
       }
     });
@@ -384,9 +393,15 @@ export class PropScatterRenderer {
       ["silicate", "rock_windglass_shard_cluster_a"],
       ["fan", "flora_wind_fan_a"],
       ["tube", "flora_marsh_tube_a"],
+      ["membrane", "flora_sail_membrane_a"],
+      ["plate", "rock_layered_plate_a"],
     ];
-    let pending = assets.length;
+    let pending = assets.length + 1;
     let failed = false;
+    const settle = () => {
+      pending -= 1;
+      if (pending === 0 && !this.disposed) this.assetLoadState = failed ? "fallback" : "ready";
+    };
     assets.forEach(([modelKey, assetId]) => {
       void loadEnvironmentAsset(assetId).then((asset) => {
         if (this.disposed) {
@@ -406,10 +421,39 @@ export class PropScatterRenderer {
         failed = true;
         console.warn(`FactoryX environment asset fallback: ${assetId}`, error);
       }).finally(() => {
-        pending -= 1;
-        if (pending === 0 && !this.disposed) this.assetLoadState = failed ? "fallback" : "ready";
+        settle();
       });
     });
+    void loadEnvironmentAsset("landmark_twin_needles_a").then((asset) => {
+      if (this.disposed) {
+        [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
+        return;
+      }
+      const group = this.root.getObjectByName("landmark:twin_needles");
+      const definition = this.definition.landmarks.find(({ id }) => id === "twin_needles");
+      if (!group || !definition) throw new Error("missing twin needles landmark target");
+      const fallbackMeshes = group.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+      const material = fallbackMeshes[0]?.material;
+      if (!material) throw new Error("missing twin needles landmark material");
+      fallbackMeshes.forEach((mesh) => mesh.geometry.dispose());
+      group.clear();
+      const mesh = new THREE.Mesh(asset.lods[0], material);
+      asset.lods[0].computeBoundingBox();
+      const bounds = asset.lods[0].boundingBox!;
+      const size = new THREE.Vector3();
+      bounds.getSize(size);
+      const scale = definition.scale.y / Math.max(size.y, 0.001);
+      mesh.scale.setScalar(scale);
+      mesh.position.y = -bounds.min.y * scale;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.externalLandmarkLods = asset.lods;
+      mesh.userData.externalAssetId = asset.id;
+      group.add(mesh);
+    }).catch((error: unknown) => {
+      failed = true;
+      console.warn("FactoryX landmark asset fallback: landmark_twin_needles_a", error);
+    }).finally(settle);
   }
 
   private updateInstanceMatrices(mesh: THREE.InstancedMesh, animate: boolean) {

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "assetId": "landmark_twin_needles_a",
+  "blenderVersion": "5.2.0 LTS",
+  "lodTriangles": [
+    3280,
+    900,
+    296
+  ],
+  "collisionTriangles": 80,
+  "errors": []
+}

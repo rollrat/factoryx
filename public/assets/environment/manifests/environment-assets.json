@@ -22,6 +22,25 @@
       "bytes": 146632
     },
     {
+      "id": "flora_sail_membrane_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/flora_sail_membrane_a.glb",
+      "previewUrl": "/assets/environment/previews/flora_sail_membrane_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        895,
+        390,
+        121
+      ],
+      "collisionTriangles": 20,
+      "bytes": 46736
+    },
+    {
       "id": "flora_wind_fan_a",
       "kind": "environment_prop",
       "url": "/assets/environment/models/flora_wind_fan_a.glb",
@@ -39,6 +58,25 @@
       ],
       "collisionTriangles": 35,
       "bytes": 43380
+    },
+    {
+      "id": "landmark_twin_needles_a",
+      "kind": "environment_landmark",
+      "url": "/assets/environment/models/landmark_twin_needles_a.glb",
+      "previewUrl": "/assets/environment/previews/landmark_twin_needles_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        3280,
+        900,
+        296
+      ],
+      "collisionTriangles": 80,
+      "bytes": 224868
     },
     {
       "id": "rock_basalt_medium_a",
@@ -77,6 +115,25 @@
       ],
       "collisionTriangles": 20,
       "bytes": 86776
+    },
+    {
+      "id": "rock_layered_plate_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/rock_layered_plate_a.glb",
+      "previewUrl": "/assets/environment/previews/rock_layered_plate_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        316,
+        227,
+        141
+      ],
+      "collisionTriangles": 21,
+      "bytes": 41380
     },
     {
       "id": "rock_windglass_shard_cluster_a",

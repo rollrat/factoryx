@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "flora_sail_membrane_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         895,
+                         390,
+                         121
+                     ],
+    "collisionTriangles":  20,
+    "errors":  [
+
+               ],
+    "glbBytes":  46736,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/flora_sail_membrane_a.png"
+}

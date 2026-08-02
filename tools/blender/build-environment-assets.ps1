@@ -33,3 +33,12 @@ if ($LASTEXITCODE -ne 0) { throw "Wind fan asset build failed" }
 
 & (Join-Path $ProjectRoot "art\blender\environment\vegetation\flora_marsh_tube_a\build_flora_marsh_tube_a.ps1") -BlenderPath $BlenderPath
 if ($LASTEXITCODE -ne 0) { throw "Marsh tube asset build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\vegetation\flora_sail_membrane_a\build_flora_sail_membrane_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Sail membrane asset build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\rocks\rock_layered_plate_a\build-rock-layered-plate-a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Layered plate asset build failed" }
+
+& (Join-Path $ProjectRoot "art\blender\environment\landmarks\landmark_twin_needles_a\build_landmark_twin_needles_a.ps1") -BlenderPath $BlenderPath
+if ($LASTEXITCODE -ne 0) { throw "Twin needles landmark build failed" }

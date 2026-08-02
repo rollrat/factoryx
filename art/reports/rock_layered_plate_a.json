@@ -1,0 +1,17 @@
+﻿{
+    "schemaVersion":  1,
+    "assetId":  "rock_layered_plate_a",
+    "blenderVersion":  "5.2.0 LTS",
+    "lodTriangles":  [
+                         316,
+                         227,
+                         141
+                     ],
+    "collisionTriangles":  21,
+    "errors":  [
+
+               ],
+    "glbBytes":  41380,
+    "glbValidation":  "passed",
+    "preview":  "public/assets/environment/previews/rock_layered_plate_a.png"
+}

@@ -33,7 +33,7 @@ try {
 }
 const nextAsset = {
   id: assetId,
-  kind: "environment_prop",
+  kind: assetId.startsWith("landmark_") ? "environment_landmark" : "environment_prop",
   url: `/assets/environment/models/${path.basename(glbPath)}`,
   previewUrl: `/assets/environment/previews/${assetId}.png`,
   lodNodes: ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
