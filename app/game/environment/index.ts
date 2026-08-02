@@ -62,6 +62,7 @@ export { evaluateTerrainPlacement, createTerrainPlacementValidator } from "./ter
 export { EnvironmentRenderer } from "./render/EnvironmentRenderer.ts";
 export type { EnvironmentRendererOptions } from "./render/EnvironmentRenderer.ts";
 export { WaterSourceRenderer } from "./render/WaterSourceRenderer.ts";
+export { WorldSourcePlacementRenderer } from "./render/WorldSourcePlacementRenderer.ts";
 export { TerrainDetailRenderer } from "./render/TerrainDetailRenderer.ts";
 export type { IndustrialFootprint } from "./render/TerrainDetailRenderer.ts";
 export { DistantHorizonRenderer } from "./render/DistantHorizonRenderer.ts";

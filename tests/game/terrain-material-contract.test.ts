@@ -36,7 +36,7 @@ test("terrain chunks carry the biome/slope/wetness/exposure mask through all LOD
   const mask = mesh.geometry.getAttribute("terrainMask") as THREE.BufferAttribute;
   assert.equal(mask.itemSize, 4);
   assert.equal(mask.count, (mesh.geometry.getAttribute("position") as THREE.BufferAttribute).count);
-  assert.equal((mesh.material as THREE.Material).userData.materialContract, "vertex-biome + slope-wetness-exposure + triplanar-breakup-v1");
+  assert.equal((mesh.material as THREE.Material).userData.materialContract, "vertex-biome + slope-wetness-exposure + triplanar-breakup-v2");
   for (let index = 0; index < Math.min(mask.count, 20); index += 1) {
     assert.ok(mask.getX(index) >= 0 && mask.getX(index) <= 1);
     assert.ok(mask.getY(index) >= 0 && mask.getY(index) <= 1);

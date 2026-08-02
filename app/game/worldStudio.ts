@@ -105,6 +105,7 @@ export class WorldStudioRuntime {
 
     this.environment = new EnvironmentRenderer(this.scene, A17_ENVIRONMENT, "high");
     this.environment.terrain.setEditorMode(true);
+    this.environment.terrain.surveyPad.visible = false;
     this.camera.position.set(48, 54, 52);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 0, 0);
@@ -140,12 +141,12 @@ export class WorldStudioRuntime {
   setSurface(surface: SurfaceType) { this.surface = surface; }
   setPropsVisible(visible: boolean) {
     this.propsVisible = visible;
-    this.environment.setPropsVisible(this.worldSourcePreview ? false : visible);
+    this.environment.setPropsVisible(visible);
   }
   setScatterDensity(value: number) { this.scatterDensity = THREE.MathUtils.clamp(value, 0, 1); this.environment.setScatterDensity(this.scatterDensity); }
   setLandmarksVisible(visible: boolean) {
     this.landmarksVisible = visible;
-    this.environment.setLandmarksVisible(this.worldSourcePreview ? false : visible);
+    this.environment.setLandmarksVisible(visible);
   }
   setResourceAnchorsVisible(visible: boolean) { this.resourceAnchorsVisible = visible; this.applyOverlayVisibility(); }
   setLandmarkOffset(id: string, offset: LandmarkAuthoringOffset) {
@@ -187,10 +188,17 @@ export class WorldStudioRuntime {
     this.pointerPainting = false;
     this.brushCursor.visible = false;
     this.environment.terrain.setEditorMode(previewSampler === null);
+    this.environment.terrain.surveyPad.visible = false;
     this.reapplyEnvironmentSettings();
     this.refreshDebugHeights();
     if (!previewSampler) this.refreshTerrainColors();
     this.applyOverlayVisibility();
+    if (previewSampler) {
+      // Enter source review on an oblique, landscape-reading composition.
+      // The old editor overview looked almost top-down and flattened every
+      // authored elevation into a featureless square.
+      this.applyCameraPose([46, 30, 50], [-5, 4, -10], 52);
+    }
   }
   worldSourcePreviewInfo(): WorldSourcePreviewInfo {
     if (!this.worldSourcePreview) {
@@ -211,6 +219,33 @@ export class WorldStudioRuntime {
   }
 
   setView(view: WorldStudioView) {
+    if (this.worldSourcePreview && view === "overview") {
+      this.applyCameraPose([46, 30, 50], [-5, 4, -10], 52);
+      this.environment.setCaveCutaway(false);
+      return;
+    }
+    const sourceReviewCameraIds = {
+      ironwindLower: "ironwind-fault-lower-scale",
+      ironwindUpper: "ironwind-upper-logistics-route",
+      ironwindArch: "ironwind-fault-lower-scale",
+    } as const;
+    if (this.worldSourcePreview && view in sourceReviewCameraIds) {
+      const id = sourceReviewCameraIds[view as keyof typeof sourceReviewCameraIds];
+      const reviewCamera = this.worldSourcePreview.source.reviewCameras.find((candidate) => candidate.id === id);
+      if (!reviewCamera) return;
+      const targetGround = this.terrainHeightAt(reviewCamera.target.x, reviewCamera.target.z);
+      const distanceScale = view === "ironwindArch" ? 1.32 : 1.58;
+      const cameraX = reviewCamera.target.x + (reviewCamera.position.x - reviewCamera.target.x) * distanceScale;
+      const cameraZ = reviewCamera.target.z + (reviewCamera.position.z - reviewCamera.target.z) * distanceScale;
+      const cameraGround = this.terrainHeightAt(cameraX, cameraZ);
+      this.applyCameraPose(
+        [cameraX, Math.max(reviewCamera.position.y, cameraGround + 10, targetGround + 16), cameraZ],
+        [reviewCamera.target.x, Math.max(reviewCamera.target.y, targetGround + 7), reviewCamera.target.z],
+        reviewCamera.fov,
+      );
+      this.environment.setCaveCutaway(false);
+      return;
+    }
     const reviewCameraIds = {
       ironwindLower: "ironwind_fault_lower_scale",
       ironwindUpper: "ironwind_upper_logistics_route",
@@ -244,6 +279,15 @@ export class WorldStudioRuntime {
     this.controls.target.fromArray(target);
     this.environment.setCaveCutaway(view === "caveCutaway");
     this.controls.maxPolarAngle = view === "caveCutaway" ? Math.PI * 0.8 : Math.PI * 0.49;
+    this.controls.update();
+  }
+
+  private applyCameraPose(position: THREE.Vector3Tuple, target: THREE.Vector3Tuple, fov: number) {
+    this.camera.position.fromArray(position);
+    this.camera.fov = fov;
+    this.camera.updateProjectionMatrix();
+    this.controls.target.fromArray(target);
+    this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.update();
   }
 
@@ -433,8 +477,8 @@ export class WorldStudioRuntime {
     this.environment.setWeather(this.weather, this.weatherStrength);
     this.environment.setPreviewQuality(this.quality);
     this.environment.setScatterDensity(this.scatterDensity);
-    this.environment.setPropsVisible(this.worldSourcePreview ? false : this.propsVisible);
-    this.environment.setLandmarksVisible(this.worldSourcePreview ? false : this.landmarksVisible);
+    this.environment.setPropsVisible(this.propsVisible);
+    this.environment.setLandmarksVisible(this.landmarksVisible);
     this.environment.setLandmarkOffsets(this.landmarkOffsets);
     this.environment.setShadowDistance(this.shadowDistance);
     this.environment.setCliffDebugVisible(this.overlay === "cliffs");
@@ -444,8 +488,8 @@ export class WorldStudioRuntime {
     if (!this.worldSourcePreview) return this.environment.sampler.heightAt(x, z);
     const { bounds } = this.worldSourcePreview.source;
     return this.worldSourcePreview.sample(
-      THREE.MathUtils.clamp(x, bounds.minX, bounds.maxXExclusive - Number.EPSILON),
-      THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZExclusive - Number.EPSILON),
+      THREE.MathUtils.clamp(x, bounds.minX, bounds.maxXExclusive - 1e-6),
+      THREE.MathUtils.clamp(z, bounds.minZ, bounds.maxZExclusive - 1e-6),
     ).height;
   }
   private updateChunkOverlay() {
@@ -463,7 +507,7 @@ export class WorldStudioRuntime {
     const delta = Math.min((time - this.lastTime) / 1000, 0.05); this.lastTime = time;
     this.frameAverage += ((delta * 1000) - this.frameAverage) * 0.08; this.statsClock += delta;
     this.controls.update();
-    this.environment.update(delta, this.camera);
+    this.environment.update(delta, this.camera, { x: this.controls.target.x, z: this.controls.target.z });
     this.shadowOverlay.position.set(this.camera.position.x, this.terrainHeightAt(this.camera.position.x, this.camera.position.z) + 0.35, this.camera.position.z);
     this.updateChunkOverlay();
     this.renderer.render(this.scene, this.camera);

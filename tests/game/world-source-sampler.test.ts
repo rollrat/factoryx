@@ -29,6 +29,7 @@ test("Ironwind source sampler honors half-open world bounds and biome boundaries
 
   assert.equal(sampler.contains(-128, -128), true);
   assert.equal(sampler.contains(127.999, 127.999), true);
+  assert.doesNotThrow(() => sampler.sample(127.999, 127.999));
   assert.equal(sampler.contains(128, 0), false);
   assert.equal(sampler.contains(0, 128), false);
   assert.throws(() => sampler.heightAt(128, 0), RangeError);

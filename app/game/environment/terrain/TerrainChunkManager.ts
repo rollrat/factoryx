@@ -83,7 +83,7 @@ export class TerrainChunkManager {
     this.onEvict = options.onEvict;
   }
 
-  update(cameraX: number, cameraZ: number, quality: EnvironmentQuality): readonly TerrainChunkState[] {
+  update(cameraX: number, cameraZ: number, quality: EnvironmentQuality, radiusOverride?: number): readonly TerrainChunkState[] {
     if (!Number.isFinite(cameraX) || !Number.isFinite(cameraZ)) throw new RangeError("terrain chunk camera coordinates must be finite");
     this.updateCount += 1;
     if (this.quality !== null && this.quality !== quality) {
@@ -96,7 +96,9 @@ export class TerrainChunkManager {
     }
     this.quality = quality;
 
-    const radius = quality === "high" ? HIGH_RADIUS : LOW_RADIUS;
+    const radius = radiusOverride === undefined
+      ? quality === "high" ? HIGH_RADIUS : LOW_RADIUS
+      : positiveInteger(radiusOverride, HIGH_RADIUS, "radiusOverride");
     const center = this.resolveLodCenter(cameraX, cameraZ);
     const chunks: TerrainChunkState[] = [];
     for (let z = center.z - radius; z <= center.z + radius; z += 1) {

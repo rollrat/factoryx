@@ -21,6 +21,7 @@ import type { TerrainBakeSampler, TerrainBakeSourceIdentity } from "../terrain/T
 import type { WorldSourceV3 } from "../worldSourceV3/types.ts";
 import { WaterSourceRenderer } from "./WaterSourceRenderer.ts";
 import { CaveSourceRenderer } from "../worldSourceCaves/CaveSourceRenderer.ts";
+import { WorldSourcePlacementRenderer } from "./WorldSourcePlacementRenderer.ts";
 
 export type EnvironmentRendererOptions = Readonly<{
   /** Optional source-backed sampler used for streamed terrain chunk bake data. */
@@ -46,6 +47,7 @@ export class EnvironmentRenderer {
   readonly cliffKit: CliffKitRenderer;
   readonly sourceWater: WaterSourceRenderer;
   readonly sourceCaves: CaveSourceRenderer;
+  readonly sourcePlacements: WorldSourcePlacementRenderer;
   readonly root = new THREE.Group();
   private readonly scene: THREE.Scene;
   readonly definition: EnvironmentDefinition;
@@ -91,6 +93,7 @@ export class EnvironmentRenderer {
     this.cliffKit = new CliffKitRenderer(IRONWIND_CLIFF_PLACEMENTS, quality);
     this.sourceWater = new WaterSourceRenderer(options.worldSource);
     this.sourceCaves = new CaveSourceRenderer(options.worldSource);
+    this.sourcePlacements = new WorldSourcePlacementRenderer(options.worldSource, undefined, quality);
     this.sourceCavesEnabled = options.worldSource !== undefined;
     this.sourcePresentationEnabled = options.worldSource !== undefined;
     this.sourceCaves.setVisible(false);
@@ -105,6 +108,7 @@ export class EnvironmentRenderer {
     this.root.add(
       this.terrain.root,
       this.sourceWater.root,
+      this.sourcePlacements.root,
       this.surfaceFeatures.root,
       this.cliffKit.root,
       this.terrainDetail.root,
@@ -118,7 +122,7 @@ export class EnvironmentRenderer {
     this.scene.fog = new THREE.FogExp2(0xb4d2df, this.surfaceFogDensity);
   }
 
-  update(delta: number, camera: THREE.Camera) {
+  update(delta: number, camera: THREE.Camera, streamingFocus?: Readonly<{ x: number; z: number }>) {
     if (this.automaticCycle) {
       const state = this.cycle.advance(delta);
       this.sky.setTimeOfDay(state.timeOfDay);
@@ -128,8 +132,14 @@ export class EnvironmentRenderer {
       this.sky.update(camera, delta);
       this.weather.setBiome(this.sampler.biomeAt(camera.position.x, camera.position.z).id);
       this.weather.update(delta, camera);
-      const activeChunks = this.chunks.update(camera.position.x, camera.position.z, this.previewQuality);
+      const activeChunks = this.chunks.update(
+        streamingFocus?.x ?? camera.position.x,
+        streamingFocus?.z ?? camera.position.z,
+        this.previewQuality,
+        this.sourcePresentationEnabled && streamingFocus ? 8 : undefined,
+      );
       this.terrain.updateChunks(activeChunks, this.chunks.takeEvictions());
+      if (this.sourcePresentationEnabled) this.sourcePlacements.updateChunks(activeChunks);
       const currentWeather = this.weather.getWeather();
       this.sky.setWeatherInfluence(currentWeather.kind, currentWeather.strength);
       if (!this.sourcePresentationEnabled) {
@@ -191,6 +201,7 @@ export class EnvironmentRenderer {
     this.terrain.setPreviewQuality(value);
     const densityMultiplier = value === "high" ? 1 : 0.48;
     this.props.setDensity(this.scatterDensity * densityMultiplier);
+    this.sourcePlacements.setDensity(this.scatterDensity * (value === "high" ? 1 : 0.62));
     this.terrainDetail.setPreviewQuality(value);
     this.weather.setPreviewQuality(value);
     this.cliffKit.setPreviewQuality(value);
@@ -217,12 +228,16 @@ export class EnvironmentRenderer {
   }
   setWeather(kind: WeatherKind, strength?: number) { this.automaticCycle = false; this.weather.setWeather(kind, strength); }
   setFogDensity(value: number) {
-    this.surfaceFogDensity = THREE.MathUtils.clamp(value, 0, 0.04);
+    const authoredDensity = THREE.MathUtils.clamp(value, 0, 0.04);
+    // Source review has real silhouettes and water to carry atmospheric depth;
+    // retaining the legacy editor haze washes every biome into the same pastel.
+    this.surfaceFogDensity = this.sourcePresentationEnabled ? authoredDensity * 0.48 : authoredDensity;
     if (this.activeStratumId === "surface" && this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = this.surfaceFogDensity;
   }
   setPropsVisible(visible: boolean) {
     this.propsVisible = visible;
     this.props.root.visible = visible && this.activeStratumId === "surface" && !this.sourcePresentationEnabled;
+    this.sourcePlacements.setScatterVisible(visible);
   }
   setIndustrialFootprints(footprints: readonly IndustrialFootprint[]) {
     this.terrainDetail.setIndustrialFootprints(footprints);
@@ -230,9 +245,11 @@ export class EnvironmentRenderer {
   setScatterDensity(density: number) {
     this.scatterDensity = THREE.MathUtils.clamp(density, 0, 1);
     this.props.setDensity(this.scatterDensity * (this.previewQuality === "high" ? 1 : 0.48));
+    this.sourcePlacements.setDensity(this.scatterDensity * (this.previewQuality === "high" ? 1 : 0.62));
   }
   setLandmarksVisible(visible: boolean) {
     this.props.setLandmarksVisible(visible);
+    this.sourcePlacements.setLandmarksVisible(visible);
     this.props.root.children.forEach((child) => {
       if (child.name.startsWith("landmark:")) child.visible = visible;
     });
@@ -248,6 +265,7 @@ export class EnvironmentRenderer {
     this.cliffKit.root.visible = surface && !this.sourcePresentationEnabled;
     this.props.root.visible = surface && this.propsVisible && !this.sourcePresentationEnabled;
     this.sourceWater.root.visible = surface;
+    this.sourcePlacements.setVisible(surface);
     this.sourceCaves.setVisible(!surface);
     this.exploration.root.visible = true;
     this.sky.root.visible = surface;
@@ -292,6 +310,7 @@ export class EnvironmentRenderer {
     this.cliffKit.root.visible = !visible && !this.sourcePresentationEnabled;
     this.props.root.visible = !visible && this.propsVisible && !this.sourcePresentationEnabled;
     this.sourceWater.root.visible = !visible;
+    this.sourcePlacements.setVisible(!visible);
     this.sourceCaves.setVisible(visible);
     this.distantHorizon.root.visible = !visible;
     this.sky.root.visible = !visible;
@@ -301,16 +320,19 @@ export class EnvironmentRenderer {
   }
 
   stats(renderer?: THREE.WebGLRenderer): EnvironmentFrameStats {
-    const propAssets = this.props.assetStatus();
-    const cliffAssets = this.cliffKit.assetStatus();
-    const assetStatus = propAssets === "fallback" || cliffAssets === "fallback"
+    const propAssets = this.sourcePresentationEnabled ? "ready" : this.props.assetStatus();
+    const cliffAssets = this.sourcePresentationEnabled ? "ready" : this.cliffKit.assetStatus();
+    const sourceAssets = this.sourcePresentationEnabled ? this.sourcePlacements.assetStatus() : "ready";
+    const assetStatus = propAssets === "fallback" || cliffAssets === "fallback" || sourceAssets === "fallback"
       ? "fallback"
-      : propAssets === "ready" && cliffAssets === "ready"
+      : propAssets === "ready" && cliffAssets === "ready" && sourceAssets === "ready"
         ? "ready"
         : "loading";
     return {
       activeChunks: this.chunks.snapshot().length,
-      visibleProps: this.props.visibleInstanceCount(),
+      visibleProps: this.sourcePresentationEnabled
+        ? this.sourcePlacements.visibleInstanceCount() + this.sourcePlacements.visibleLandmarkCount()
+        : this.props.visibleInstanceCount(),
       triangles: renderer?.info.render.triangles ?? 0,
       drawCalls: renderer?.info.render.calls ?? 0,
       assetStatus,
@@ -327,6 +349,7 @@ export class EnvironmentRenderer {
     this.cliffKit.dispose();
     this.sourceWater.dispose();
     this.sourceCaves.dispose();
+    this.sourcePlacements.dispose();
     this.props.dispose();
     this.sky.dispose();
     this.weather.dispose();

@@ -70,6 +70,14 @@ test("quality transitions evict stale pooled buffers before activating the new p
   });
 });
 
+test("source review can request a bounded full-sector radius without changing gameplay defaults", () => {
+  const chunks = new TerrainChunkManager(A17_ENVIRONMENT);
+  assert.equal(chunks.update(0, 0, "high").length, 25);
+  assert.equal(chunks.update(0, 0, "high", 8).length, 64);
+  assert.equal(chunks.diagnostics().maxNeighborLodDelta, 1);
+  chunks.dispose();
+});
+
 test("retained pool pressure evicts only the overflow and stays bounded", () => {
   const chunks = new TerrainChunkManager(A17_ENVIRONMENT, {
     retentionUpdates: 10,

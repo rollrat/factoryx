@@ -166,6 +166,30 @@ const ringDistance = (ring: readonly Vec2[], x: number, z: number) => ring.reduc
 const containsRegion = (region: BiomeRegion, x: number, z: number) => containsPoint(region.polygon, x, z) && !region.holes.some((hole) => containsPoint(hole, x, z));
 const regionBoundaryDistance = (region: BiomeRegion, x: number, z: number) => Math.min(ringDistance(region.polygon, x, z), ...region.holes.map((hole) => ringDistance(hole, x, z)));
 
+const noiseHash = (x: number, z: number, seed: number) => {
+  const value = Math.sin(x * 127.1 + z * 311.7 + seed * 0.0137) * 43758.5453123;
+  return value - Math.floor(value);
+};
+
+const valueNoise = (x: number, z: number, seed: number) => {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = smoothstep(x - ix);
+  const fz = smoothstep(z - iz);
+  const lower = lerp(noiseHash(ix, iz, seed), noiseHash(ix + 1, iz, seed), fx);
+  const upper = lerp(noiseHash(ix, iz + 1, seed), noiseHash(ix + 1, iz + 1, seed), fx);
+  return lerp(lower, upper, fz) * 2 - 1;
+};
+
+const BIOME_RELIEF: Readonly<Record<string, number>> = {
+  windglass_basin: 1.25,
+  ironwind_faults: 2.8,
+  silicate_sailwood: 3.6,
+  blackwater_marsh: 0.55,
+  hematite_crown: 3.1,
+  thermal_rift: 2.2,
+};
+
 /**
  * Pure, source-backed height and metadata sampler. It deliberately has no
  * dependency on the legacy TerrainSampler, renderer, or runtime state.
@@ -175,12 +199,14 @@ export class WorldSourceSampler {
   private readonly macroForms: readonly MacroForm[];
   private readonly splines: readonly WorldSpline[];
   private readonly biomeRegions: readonly BiomeRegion[];
+  private readonly detailedSurface: boolean;
 
   constructor(source: WorldSourceV3) {
     this.source = source;
     this.macroForms = [...source.macroForms].sort(formOrder);
     this.splines = [...source.splines].sort(splineOrder);
     this.biomeRegions = [...source.biomeRegions].sort(regionOrder);
+    this.detailedSurface = source.macroForms.length >= 9 && source.biomeRegions.length >= 6;
   }
 
   contains(x: number, z: number) {
@@ -203,6 +229,7 @@ export class WorldSourceSampler {
         case "smooth-union": height = lerp(height, smoothMax(height, form.height, Math.max(form.falloff, 0.001)), mask); break;
       }
     }
+    if (stratumId === "surface" && this.detailedSurface) height += this.surfaceReliefAt(x, z);
     for (const spline of this.splines) {
       if (spline.stratumId !== stratumId || spline.operation === "mark") continue;
       const route = routeAt([spline], x, z, stratumId);
@@ -212,6 +239,25 @@ export class WorldSourceSampler {
       if (spline.operation === "carve") height = Math.min(height, lerp(height, route.height, mask));
     }
     return height;
+  }
+
+  private surfaceReliefAt(x: number, z: number) {
+    const biomeId = this.biomeAt(x, z).biomeId ?? "unassigned";
+    const amplitude = BIOME_RELIEF[biomeId] ?? 0.8;
+    const broad = valueNoise(x * 0.037, z * 0.037, this.source.seed);
+    const medium = valueNoise(x * 0.091 + 19, z * 0.091 - 7, this.source.seed + 17);
+    const fine = valueNoise(x * 0.21 - 11, z * 0.21 + 23, this.source.seed + 41);
+    let protection = 1;
+    for (const anchor of this.source.resourceAnchors) {
+      if (anchor.stratumId !== "surface") continue;
+      const distance = Math.hypot(x - anchor.position.x, z - anchor.position.z);
+      protection = Math.min(protection, smoothstep((distance - anchor.protectionRadius) / 7));
+    }
+    for (const zone of this.source.gameplayZones) {
+      if (zone.stratumId !== "surface" || (zone.kind !== "build-patch" && zone.kind !== "resource-pad")) continue;
+      if (containsPoint(zone.polygon, x, z) && !zone.holes.some((hole) => containsPoint(hole, x, z))) protection = Math.min(protection, 0.08);
+    }
+    return (broad * 0.58 + medium * 0.3 + fine * 0.12) * amplitude * protection;
   }
 
   routeAt(x: number, z: number, stratumId = "surface") {
@@ -235,8 +281,10 @@ export class WorldSourceSampler {
   sample(x: number, z: number, stratumId = "surface"): WorldSourceHeightSample {
     const height = this.heightAt(x, z, stratumId);
     const step = this.source.sampleSpacing;
-    const sampleX = Math.min(this.source.bounds.maxXExclusive - Number.EPSILON, Math.max(this.source.bounds.minX, x + step));
-    const sampleZ = Math.min(this.source.bounds.maxZExclusive - Number.EPSILON, Math.max(this.source.bounds.minZ, z + step));
+    // Number.EPSILON is smaller than one ULP at world-scale coordinates such
+    // as 128, so subtracting it can still equal the exclusive bound exactly.
+    const sampleX = Math.min(this.source.bounds.maxXExclusive - 1e-6, Math.max(this.source.bounds.minX, x + step));
+    const sampleZ = Math.min(this.source.bounds.maxZExclusive - 1e-6, Math.max(this.source.bounds.minZ, z + step));
     const dx = this.heightAt(sampleX, z, stratumId) - this.heightAt(Math.max(this.source.bounds.minX, x - step), z, stratumId);
     const dz = this.heightAt(x, sampleZ, stratumId) - this.heightAt(x, Math.max(this.source.bounds.minZ, z - step), stratumId);
     const spanX = sampleX - Math.max(this.source.bounds.minX, x - step);

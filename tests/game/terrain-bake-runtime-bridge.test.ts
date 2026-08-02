@@ -58,6 +58,7 @@ test("strict WorldSource bake samplers receive clamped halo coordinates at secto
     new WorldSourceEnvironmentSampler(IRONWIND_WORLD_SOURCE_V3),
   );
   assert.doesNotThrow(() => terrain.updateChunks([{ x: -4, z: -4, distance: 0, lod: 0 }]));
+  assert.doesNotThrow(() => terrain.updateChunks([{ x: 3, z: 3, distance: 0, lod: 0 }]));
   terrain.dispose();
 });
 

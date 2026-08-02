@@ -12,15 +12,19 @@ import { terrainMaterialMaskAt } from "./TerrainMaterialContract.ts";
 
 const sourceColorFor = (biomeId: string) => {
   const colors: Readonly<Record<string, number>> = {
-    windglass_basin: 0x536b64,
-    ironwind_faults: 0x6f5546,
-    silicate_sailwood: 0x5a7568,
-    blackwater_marsh: 0x314f4c,
-    hematite_crown: 0x6c4b45,
-    thermal_rift: 0x68594b,
+    windglass_basin: 0x657b62,
+    ironwind_faults: 0x805b49,
+    silicate_sailwood: 0x507964,
+    blackwater_marsh: 0x294f49,
+    hematite_crown: 0x86564a,
+    thermal_rift: 0x67484b,
   };
   return colors[biomeId] ?? 0x59625f;
 };
+
+const clampHalfOpen = (value: number, minimum: number, maximumExclusive: number) => (
+  Math.max(minimum, Math.min(maximumExclusive - 1e-6, value))
+);
 
 export class TerrainRenderer {
   readonly root = new THREE.Group();
@@ -217,7 +221,7 @@ export class TerrainRenderer {
   /** Texture-scale breakup without a bitmap lookup or another draw call. */
   private configureTerrainMaterial() {
     this.material.userData.detailMode = "procedural-micro-surface";
-    this.material.userData.materialContract = "vertex-biome + slope-wetness-exposure + triplanar-breakup-v1";
+    this.material.userData.materialContract = "vertex-biome + slope-wetness-exposure + triplanar-breakup-v2";
     this.material.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", "#include <common>\nattribute vec4 terrainMask;\nvarying vec3 vTerrainPosition;\nvarying vec3 vTerrainNormal;\nvarying vec4 vTerrainMask;")
@@ -231,23 +235,38 @@ export class TerrainRenderer {
             p = fract(p * vec2(123.34, 456.21));
             p += dot(p, p + 45.32);
             return fract(p.x * p.y);
+          }
+          float terrainNoise(vec2 p) {
+            vec2 cell = floor(p);
+            vec2 blend = fract(p);
+            blend = blend * blend * (3.0 - 2.0 * blend);
+            float a = terrainHash(cell);
+            float b = terrainHash(cell + vec2(1.0, 0.0));
+            float c = terrainHash(cell + vec2(0.0, 1.0));
+            float d = terrainHash(cell + vec2(1.0, 1.0));
+            return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
           }`)
         .replace("#include <color_fragment>", `#include <color_fragment>
           vec3 triplanar = abs(normalize(vTerrainNormal));
           triplanar /= max(dot(triplanar, vec3(1.0)), 0.0001);
-          float micro = terrainHash(floor(vTerrainPosition.yz * 0.43 + 17.0)) * triplanar.x
-            + terrainHash(floor(vTerrainPosition.xz * 0.43 + 31.0)) * triplanar.y
-            + terrainHash(floor(vTerrainPosition.xy * 0.43 + 53.0)) * triplanar.z;
-          float grain = mix(0.89, 1.08, micro) * mix(0.94, 1.0, vTerrainMask.w);
+          float micro = terrainNoise(vTerrainPosition.yz * 0.18 + 17.0) * triplanar.x
+            + terrainNoise(vTerrainPosition.xz * 0.18 + 31.0) * triplanar.y
+            + terrainNoise(vTerrainPosition.xy * 0.18 + 53.0) * triplanar.z;
+          float macroVariation = terrainNoise(vTerrainPosition.xz * 0.038 + 7.0);
+          float fine = terrainNoise(vTerrainPosition.xz * 0.72 + 83.0);
+          float mineralFleck = smoothstep(0.72, 0.91, fine) * (1.0 - smoothstep(0.74, 0.94, micro));
+          float grain = mix(0.82, 1.17, micro) * mix(0.88, 1.1, macroVariation) * mix(0.92, 1.0, vTerrainMask.w);
           float slope = vTerrainMask.x;
           float wetness = vTerrainMask.y;
           float exposure = vTerrainMask.z;
-          float strata = 0.94 + 0.06 * sin(vTerrainPosition.y * 5.6 + vTerrainPosition.x * 0.12);
+          float strata = 0.86 + 0.14 * sin(vTerrainPosition.y * 5.6 + vTerrainPosition.x * 0.12);
           diffuseColor.rgb *= grain * mix(1.0, strata, smoothstep(0.2, 0.72, slope));
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.68, 0.63, 0.58), smoothstep(0.38, 0.9, slope) * 0.34);
+          diffuseColor.rgb += vec3(0.11, 0.095, 0.075) * mineralFleck * (0.16 + slope * 0.2);
           diffuseColor.rgb *= mix(0.78, 1.16, exposure);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.13, 0.14), wetness * 0.68);`);
     };
-    this.material.customProgramCacheKey = () => "a17-terrain-material-contract-v1";
+    this.material.customProgramCacheKey = () => "a17-terrain-material-contract-v2";
   }
 
   private refreshMesh(mesh: THREE.Mesh, region?: Readonly<{ x: number; z: number; radius: number }>) {
@@ -334,8 +353,8 @@ export class TerrainRenderer {
     const bounds = (sampler as { source?: { bounds?: Readonly<{ minX: number; maxXExclusive: number; minZ: number; maxZExclusive: number }> } }).source?.bounds;
     if (!bounds) return sampler.sample(x, z, stratumId);
     return sampler.sample(
-      Math.max(bounds.minX, Math.min(bounds.maxXExclusive - Number.EPSILON, x)),
-      Math.max(bounds.minZ, Math.min(bounds.maxZExclusive - Number.EPSILON, z)),
+      clampHalfOpen(x, bounds.minX, bounds.maxXExclusive),
+      clampHalfOpen(z, bounds.minZ, bounds.maxZExclusive),
       stratumId,
     );
   }
