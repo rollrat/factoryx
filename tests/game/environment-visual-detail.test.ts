@@ -91,6 +91,22 @@ test("environment preview quality couples props, particles, terrain detail, and 
   environment.dispose();
 });
 
+test("surface cave entrances stay visible until the cutaway reveals the cave network", () => {
+  const scene = new THREE.Scene();
+  const environment = new EnvironmentRenderer(scene, A17_ENVIRONMENT, "low");
+  assert.ok(environment.caves.surfaceEntrances.children.length >= 2);
+  assert.equal(environment.caves.surfaceEntrances.visible, true);
+  assert.equal(environment.caves.root.visible, false);
+  environment.setCaveCutaway(true);
+  assert.equal(environment.caves.surfaceEntrances.visible, false);
+  assert.equal(environment.caves.root.visible, true);
+  assert.equal(environment.caves.cutawayRoot.visible, true);
+  assert.equal(environment.terrain.root.visible, false);
+  assert.equal(environment.props.root.visible, false);
+  assert.ok(environment.caves.cutawayRoot.getObjectByName("cave-cutaway-route"));
+  environment.dispose();
+});
+
 test("distant terrain uses world-fixed ridge ribbons and fades into weather", () => {
   const horizon = new DistantHorizonRenderer(A17_ENVIRONMENT.seed, "high");
   assert.equal(horizon.nearRidges.geometry.userData.kind, "authored-ridge-ribbon");

@@ -60,7 +60,7 @@ export class EnvironmentRenderer {
     this.sky = new SkySystem(scene, quality);
     this.weather = new WeatherSystem(scene, quality);
     this.chunks = new TerrainChunkManager(definition);
-    this.caves = new CaveRenderer(scene);
+    this.caves = new CaveRenderer(scene, this.sampler);
     this.exploration = new ExplorationRenderer(this.sampler);
     this.terrainDetail = new TerrainDetailRenderer(this.sampler, quality);
     this.distantHorizon = new DistantHorizonRenderer(definition.seed, quality);
@@ -197,8 +197,8 @@ export class EnvironmentRenderer {
     this.sky.root.visible = surface;
     this.weather.root.visible = surface;
     this.caves.setVisible(!surface);
-    this.scene.background = new THREE.Color(surface ? 0x263d42 : 0x0b1518);
-    this.scene.fog = new THREE.FogExp2(surface ? 0x607877 : 0x263d3f, surface ? this.surfaceFogDensity : 0.025);
+    this.scene.background = new THREE.Color(surface ? 0x77acd0 : 0x0b1518);
+    this.scene.fog = new THREE.FogExp2(surface ? 0xb4d2df : 0x263d3f, surface ? this.surfaceFogDensity : 0.025);
   }
   runtimeInfo(x: number, z: number, stratumId = this.activeStratumId): EnvironmentRuntimeInfo {
     const sample = this.sampler.sample(x, z, stratumId);
@@ -219,8 +219,16 @@ export class EnvironmentRenderer {
     };
   }
   setCaveCutaway(visible: boolean) {
-    this.caves.setVisible(visible);
+    this.caves.setCutaway(visible);
     this.terrain.root.visible = !visible;
+    this.terrainDetail.root.visible = !visible;
+    this.surfaceFeatures.root.visible = !visible;
+    this.props.root.visible = !visible && this.propsVisible;
+    this.distantHorizon.root.visible = !visible;
+    this.sky.root.visible = !visible;
+    this.weather.root.visible = !visible;
+    this.scene.background = new THREE.Color(visible ? 0x0b1518 : 0x77acd0);
+    this.scene.fog = new THREE.FogExp2(visible ? 0x263d3f : 0xb4d2df, visible ? 0.012 : this.surfaceFogDensity);
   }
 
   stats(renderer?: THREE.WebGLRenderer): EnvironmentFrameStats {

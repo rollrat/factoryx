@@ -139,7 +139,7 @@ export class WorldStudioRuntime {
       distance: [[112, 72, 118], [0, 5, 0], 48],
       production: [[12, 8, 11], [-1, 0.5, -3], 50],
       projectDock: [[20, 10, 20], [8, 1, 8], 48],
-      caveCutaway: [[45, 20, 112], [7, -10, 105], 52],
+      caveCutaway: [[48, 72, 76], [4, -11, 108], 48],
     };
     const [position, target, fov] = views[view];
     this.camera.position.fromArray(position);

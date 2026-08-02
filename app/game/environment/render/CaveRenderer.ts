@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CAVE_ZONES } from "../data/caveZones.ts";
+import type { TerrainSampler } from "../terrain/TerrainSampler.ts";
 
 const cylinderBetween = (from: THREE.Vector3, to: THREE.Vector3, radius: number, material: THREE.Material) => {
   const delta = to.clone().sub(from);
@@ -20,13 +21,17 @@ const floorBetween = (from: THREE.Vector3, to: THREE.Vector3, width: number, mat
 
 export class CaveRenderer {
   readonly root = new THREE.Group();
+  readonly surfaceEntrances = new THREE.Group();
+  readonly cutawayRoot = new THREE.Group();
   readonly interactionRoot = new THREE.Group();
   readonly stratumId = CAVE_ZONES[0].stratumId;
   private readonly scene: THREE.Scene;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, sampler: TerrainSampler) {
     this.scene = scene;
     this.root.name = "a17-caves";
+    this.surfaceEntrances.name = "a17-cave-surface-entrances";
+    this.cutawayRoot.name = "a17-cave-cutaway-network";
     const rock = new THREE.MeshStandardMaterial({ color: 0x19272a, roughness: 0.97, side: THREE.DoubleSide });
     const calcite = new THREE.MeshStandardMaterial({ color: 0xb9ccc2, roughness: 0.72, emissive: 0x233b38, emissiveIntensity: 0.32 });
     const floor = new THREE.MeshStandardMaterial({ color: 0x29383a, roughness: 0.93 });
@@ -34,6 +39,10 @@ export class CaveRenderer {
     const exitGlow = new THREE.MeshStandardMaterial({ color: 0x8ee8d7, emissive: 0x3a9b86, emissiveIntensity: 2.1, roughness: 0.46 });
     const depthGlow = new THREE.MeshStandardMaterial({ color: 0xe3a252, emissive: 0x8b421f, emissiveIntensity: 1.75, roughness: 0.5 });
     const biofilm = new THREE.MeshStandardMaterial({ color: 0x426b62, emissive: 0x183d37, emissiveIntensity: 0.75, roughness: 0.82 });
+    const entranceVoid = new THREE.MeshBasicMaterial({ color: 0x020708, side: THREE.DoubleSide });
+    const entranceRock = new THREE.MeshStandardMaterial({ color: 0x27383a, roughness: 0.99, metalness: 0.01 });
+    const cutawayFloor = new THREE.MeshStandardMaterial({ color: 0x315d5c, emissive: 0x193f3c, emissiveIntensity: 0.85, roughness: 0.78 });
+    const cutawayRoute = new THREE.MeshStandardMaterial({ color: 0x77d9c5, emissive: 0x286f63, emissiveIntensity: 1.2, roughness: 0.5 });
 
     CAVE_ZONES.forEach((zone) => {
       const zoneGroup = new THREE.Group();
@@ -44,7 +53,13 @@ export class CaveRenderer {
         new THREE.Vector3(zone.portals[1].x, zone.portals[1].y - 2, zone.portals[1].z),
       ];
       for (let index = 1; index < points.length; index += 1) {
+        const route = cylinderBetween(points[index - 1], points[index], 0.34, cutawayRoute);
+        route.name = "cave-cutaway-route";
+        this.cutawayRoot.add(route);
+      }
+      for (let index = 1; index < points.length; index += 1) {
         const tunnel = cylinderBetween(points[index - 1], points[index], 3.1, rock);
+        tunnel.name = "cave-shell";
         tunnel.receiveShadow = true;
         zoneGroup.add(tunnel);
         const corridorFloor = floorBetween(points[index - 1], points[index], 3, floor);
@@ -77,7 +92,9 @@ export class CaveRenderer {
         if (!from || !to) return;
         const fromPoint = new THREE.Vector3(from.x, from.y, from.z);
         const toPoint = new THREE.Vector3(to.x, to.y, to.z);
-        zoneGroup.add(cylinderBetween(fromPoint, toPoint, corridor.width, rock));
+        const shortcutTunnel = cylinderBetween(fromPoint, toPoint, corridor.width, rock);
+        shortcutTunnel.name = "cave-shell";
+        zoneGroup.add(shortcutTunnel);
         const shortcutFloor = floorBetween(fromPoint, toPoint, corridor.width * 0.9, floor);
         shortcutFloor.userData.caveFloor = true;
         shortcutFloor.userData.stratumId = zone.stratumId;
@@ -85,6 +102,7 @@ export class CaveRenderer {
       });
       zone.rooms.forEach((room, roomIndex) => {
         const chamber = new THREE.Mesh(new THREE.SphereGeometry(room.radius, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), rock);
+        chamber.name = "cave-shell";
         chamber.scale.y = room.clearance / room.radius;
         chamber.position.set(room.center.x, room.center.y, room.center.z);
         chamber.rotation.x = Math.PI;
@@ -117,6 +135,11 @@ export class CaveRenderer {
         const light = new THREE.PointLight(0x72dbc5, roomIndex === 1 ? 7 : 4, room.radius * 2.2, 2);
         light.position.set(room.center.x, room.center.y + 2.4, room.center.z);
         zoneGroup.add(light);
+
+        const cutawayChamber = new THREE.Mesh(new THREE.CylinderGeometry(room.radius * 0.46, room.radius * 0.52, 0.42, 32), cutawayFloor);
+        cutawayChamber.name = `cave-cutaway-room:${room.id}`;
+        cutawayChamber.position.set(room.center.x, room.center.y + 0.18, room.center.z);
+        this.cutawayRoot.add(cutawayChamber);
       });
       zone.portals.forEach((portal, portalIndex) => {
         const rim = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.65, 8, 28), portalIndex === 0 ? exitGlow : depthGlow);
@@ -124,23 +147,62 @@ export class CaveRenderer {
         rim.position.set(portal.x, portal.y, portal.z);
         rim.rotation.x = Math.PI / 2;
         zoneGroup.add(rim);
+
+        const surfaceY = sampler.heightAt(portal.x, portal.z) + 0.035;
+        const entrance = new THREE.Group();
+        entrance.name = `surface-cave-entrance:${zone.id}:${portalIndex}`;
+        const opening = new THREE.Mesh(new THREE.CircleGeometry(3.15, 20).rotateX(-Math.PI / 2), entranceVoid);
+        opening.position.set(portal.x, surfaceY, portal.z);
+        entrance.add(opening);
+        for (let rockIndex = 0; rockIndex < 14; rockIndex += 1) {
+          const angle = rockIndex / 14 * Math.PI * 2;
+          const radius = 3.15 + (rockIndex % 3) * 0.22;
+          const rockMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.62 + (rockIndex % 4) * 0.12, 0), entranceRock);
+          rockMesh.position.set(portal.x + Math.cos(angle) * radius, surfaceY + 0.18, portal.z + Math.sin(angle) * radius);
+          rockMesh.scale.set(1.1, 0.72 + (rockIndex % 2) * 0.28, 0.82);
+          rockMesh.rotation.set(rockIndex * 0.17, angle, rockIndex * 0.11);
+          rockMesh.castShadow = true;
+          rockMesh.receiveShadow = true;
+          entrance.add(rockMesh);
+        }
+        this.surfaceEntrances.add(entrance);
       });
       this.root.add(zoneGroup);
     });
+    this.root.add(new THREE.AmbientLight(0x698c86, 0.72));
+    this.cutawayRoot.visible = false;
+    this.root.add(this.cutawayRoot);
     this.root.add(this.interactionRoot);
     this.root.visible = false;
-    this.scene.add(this.root);
+    this.scene.add(this.root, this.surfaceEntrances);
   }
 
-  setVisible(visible: boolean) { this.root.visible = visible; }
+  setVisible(visible: boolean) {
+    this.root.visible = visible;
+    this.surfaceEntrances.visible = !visible;
+    this.cutawayRoot.visible = false;
+    this.root.traverse((child) => {
+      if (child.name.startsWith("cave-zone:") || child === this.interactionRoot) child.visible = true;
+      if (child.name === "cave-shell" || child.name.startsWith("cave-portal:")) child.visible = true;
+    });
+  }
+
+  setCutaway(visible: boolean) {
+    this.root.visible = visible;
+    this.surfaceEntrances.visible = !visible;
+    this.cutawayRoot.visible = visible;
+    this.root.traverse((child) => {
+      if (child.name.startsWith("cave-zone:") || child === this.interactionRoot) child.visible = !visible;
+    });
+  }
 
   dispose() {
-    this.scene.remove(this.root);
-    this.root.traverse((child) => {
+    this.scene.remove(this.root, this.surfaceEntrances);
+    [this.root, this.surfaceEntrances].forEach((group) => group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       child.geometry.dispose();
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       materials.forEach((material) => material.dispose());
-    });
+    }));
   }
 }

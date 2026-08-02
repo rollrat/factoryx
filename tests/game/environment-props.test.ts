@@ -33,7 +33,7 @@ test("every A-17 biome has a normalized mix of three rock and four vegetation fa
 
 test("cave geometry carries diegetic exit/depth guidance and microbial floor detail", () => {
   const scene = new THREE.Scene();
-  const caves = new CaveRenderer(scene);
+  const caves = new CaveRenderer(scene, new TerrainSampler(A17_ENVIRONMENT));
   const names: string[] = [];
   caves.root.traverse((child) => { if (child.name) names.push(child.name); });
   assert.ok(names.includes("cave-guide:exit"));
