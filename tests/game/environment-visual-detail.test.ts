@@ -6,8 +6,9 @@ import { A17_ENVIRONMENT, EnvironmentRenderer, TerrainSampler } from "../../app/
 import { DistantHorizonRenderer } from "../../app/game/environment/render/DistantHorizonRenderer.ts";
 import { TerrainDetailRenderer } from "../../app/game/environment/render/TerrainDetailRenderer.ts";
 import { TerrainRenderer } from "../../app/game/environment/render/TerrainRenderer.ts";
+import { TerrainChunkManager } from "../../app/game/environment/terrain/TerrainChunkManager.ts";
 import { SurfaceFeatureRenderer } from "../../app/game/environment/render/SurfaceFeatureRenderer.ts";
-import { WeatherSystem } from "../../app/game/environment/render/WeatherSystem.ts";
+import { WeatherSystem, weatherVisibilityProfile } from "../../app/game/environment/render/WeatherSystem.ts";
 import { SkySystem } from "../../app/game/environment/render/SkySystem.ts";
 
 test("near terrain detail stays camera-local and reacts to rain and industry", () => {
@@ -47,6 +48,35 @@ test("preview quality dynamically reduces weather particle work", () => {
   weather.setPreviewQuality("high");
   assert.equal(weather.activeParticleCount(), 360);
   weather.dispose();
+});
+
+test("weather visibility stays local and does not turn mineral wind into global dust fog", () => {
+  const clear = weatherVisibilityProfile("clear", 1);
+  const wind = weatherVisibilityProfile("mineral_wind", 1);
+  const mist = weatherVisibilityProfile("mist", 1);
+  assert.equal(clear.visibilityMeters, 240);
+  assert.ok(wind.visibilityMeters < clear.visibilityMeters);
+  assert.ok(mist.visibilityMeters < wind.visibilityMeters);
+  assert.equal(wind.localParticlesOnly, true);
+
+  const scene = new THREE.Scene();
+  const weather = new WeatherSystem(scene, "high");
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(31, 7, -18);
+  weather.setWeather("mineral_wind", 1);
+  weather.update(1, camera);
+  assert.equal(weather.root.getObjectByName("local-weather-particles")?.position.x, 0);
+  assert.equal(weather.root.position.x, 31);
+  assert.equal(weather.root.position.z, -18);
+  weather.dispose();
+
+  const environment = new EnvironmentRenderer(scene, A17_ENVIRONMENT, "low");
+  const baseFog = (scene.fog as THREE.FogExp2).density;
+  environment.seedCycle(0.68, "mineral_wind", 0.68);
+  environment.setAutomaticCycle(true);
+  environment.update(10, camera);
+  assert.equal((scene.fog as THREE.FogExp2).density, baseFog, "mineral wind must not create a global dust veil");
+  environment.dispose();
 });
 
 test("clear weather keeps an Earth-like cloud sky without a permanent dust band", () => {
@@ -122,6 +152,10 @@ test("distant terrain uses world-fixed ridge ribbons and fades into weather", ()
   const clearOpacity = (horizon.farRidges.material as THREE.MeshBasicMaterial).opacity;
   horizon.setWeather("mist", 1);
   assert.ok((horizon.farRidges.material as THREE.MeshBasicMaterial).opacity < clearOpacity);
+  assert.equal(horizon.visibilityMeters, 110);
+  camera.position.set(-96, 12, 104);
+  horizon.update(camera);
+  assert.deepEqual(horizon.root.position.toArray(), [0, -11, 0], "weather must not make the horizon camera-follow");
   horizon.dispose();
 });
 
@@ -167,5 +201,25 @@ test("terrain chunks use half-meter source samples, power-of-two LODs, shared ed
     assert.equal(leftNormals.getY(leftIndex), rightNormals.getY(rightIndex));
     assert.equal(leftNormals.getZ(leftIndex), rightNormals.getZ(rightIndex));
   }
+  terrain.dispose();
+});
+
+test("terrain chunk residency stays bounded across a full-sector round trip and disposes explicitly", () => {
+  const sampler = new TerrainSampler(A17_ENVIRONMENT);
+  const terrain = new TerrainRenderer(A17_ENVIRONMENT, sampler, "low");
+  const manager = new TerrainChunkManager(A17_ENVIRONMENT, {
+    retentionUpdates: 1,
+    maxRetainedChunks: 9,
+    lodHysteresis: 0,
+  });
+  [-96, -64, -32, 0, 32, 64, 96, 64, 32, 0, -32, -64, -96].forEach((x) => {
+    const active = manager.update(x, 0, "low");
+    terrain.updateChunks(active, manager.takeEvictions());
+    assert.ok(terrain.residentChunkCount() <= 18, `resident chunks leaked at x=${x}`);
+  });
+  manager.dispose();
+  terrain.updateChunks([], manager.takeEvictions());
+  assert.equal(terrain.residentChunkCount(), 0);
+  assert.equal(terrain.residentMeshCount(), 0);
   terrain.dispose();
 });

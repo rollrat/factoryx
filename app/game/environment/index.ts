@@ -15,6 +15,8 @@ export type { TerrainReviewCamera, TerrainReviewCameraPurpose } from "./data/ter
 export { TerrainSampler, SURFACE_ACCESS_ROUTES } from "./terrain/TerrainSampler.ts";
 export { WorldSourceSampler, createWorldSourceSampler } from "./worldSourceSampler/index.ts";
 export type { SourceRouteSample, SourceSamplerBiome, WorldSourceHeightSample } from "./worldSourceSampler/index.ts";
+export { WorldSourceEnvironmentSampler, createWorldSourceEnvironmentSampler } from "./worldSourceSampler/index.ts";
+export type { WorldSourceEnvironmentSamplerOptions } from "./worldSourceSampler/index.ts";
 export { CaveRuntimeSampler, CaveRuntimeValidationError, createCaveRuntimeView, safeCreateCaveRuntimeView } from "./worldSourceCaves/index.ts";
 export type {
   CaveRoutePosition,

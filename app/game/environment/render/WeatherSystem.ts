@@ -3,6 +3,40 @@ import type { EnvironmentQuality } from "../types.ts";
 
 export type WeatherKind = "clear" | "mineral_wind" | "mist" | "electrical_storm";
 
+/**
+ * P8 keeps weather readable without turning every biome into a dusty global fog.
+ * The particle field is camera-local; only marsh mist is allowed to feed scene fog.
+ */
+export type WeatherVisibilityProfile = Readonly<{
+  visibilityMeters: number;
+  horizonOpacity: number;
+  cloudShadowStrength: number;
+  localParticlesOnly: boolean;
+}>;
+
+export const weatherVisibilityProfile = (kind: WeatherKind, strength: number): WeatherVisibilityProfile => {
+  const amount = THREE.MathUtils.clamp(strength, 0, 1);
+  if (kind === "mist") return {
+    visibilityMeters: THREE.MathUtils.lerp(220, 110, amount),
+    horizonOpacity: THREE.MathUtils.lerp(1, 0.42, amount),
+    cloudShadowStrength: THREE.MathUtils.lerp(0.12, 0.38, amount),
+    localParticlesOnly: true,
+  };
+  if (kind === "electrical_storm") return {
+    visibilityMeters: THREE.MathUtils.lerp(220, 150, amount),
+    horizonOpacity: THREE.MathUtils.lerp(1, 0.62, amount),
+    cloudShadowStrength: THREE.MathUtils.lerp(0.12, 0.62, amount),
+    localParticlesOnly: true,
+  };
+  if (kind === "mineral_wind") return {
+    visibilityMeters: THREE.MathUtils.lerp(240, 195, amount),
+    horizonOpacity: THREE.MathUtils.lerp(1, 0.76, amount),
+    cloudShadowStrength: THREE.MathUtils.lerp(0.12, 0.08, amount),
+    localParticlesOnly: true,
+  };
+  return { visibilityMeters: 240, horizonOpacity: 1, cloudShadowStrength: 0.12, localParticlesOnly: true };
+};
+
 export class WeatherSystem {
   readonly root = new THREE.Group();
   private readonly particles: THREE.Points;
@@ -35,6 +69,7 @@ export class WeatherSystem {
       geometry,
       new THREE.PointsMaterial({ color: 0xc0ad8e, size: 0.075, transparent: true, opacity: 0.28, depthWrite: false }),
     );
+    this.particles.name = "local-weather-particles";
     this.particles.geometry.setDrawRange(0, count);
     this.particles.frustumCulled = false;
     this.root.add(this.particles);
@@ -49,6 +84,7 @@ export class WeatherSystem {
   }
 
   getWeather() { return { kind: this.weather, strength: this.strength } as const; }
+  visibilityProfile() { return weatherVisibilityProfile(this.weather, this.strength); }
 
   setBiome(biomeId: string) { this.biomeId = biomeId; }
 

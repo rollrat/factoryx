@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
 import type { TerrainChunkEviction, TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
+import { terrainMaterialMaskAt } from "./TerrainMaterialContract.ts";
 
 export class TerrainRenderer {
   readonly root = new THREE.Group();
@@ -123,6 +124,7 @@ export class TerrainRenderer {
     const positions = new Float32Array(totalVertexCount * 3);
     const normals = new Float32Array(totalVertexCount * 3);
     const colors = new Float32Array(totalVertexCount * 3);
+    const materialMasks = new Float32Array(totalVertexCount * 4);
     const indices: number[] = [];
     const minX = centerX - size / 2;
     const minZ = centerZ - size / 2;
@@ -132,7 +134,7 @@ export class TerrainRenderer {
         const index = z * row + x;
         const worldX = minX + x / segments * size;
         const worldZ = minZ + z / segments * size;
-        this.writeTerrainVertex(positions, normals, colors, index, worldX, worldZ, 0);
+        this.writeTerrainVertex(positions, normals, colors, materialMasks, index, worldX, worldZ, 0);
       }
     }
     for (let z = 0; z < segments; z += 1) {
@@ -148,7 +150,7 @@ export class TerrainRenderer {
       perimeter.forEach((surfaceIndex, offset) => {
         const skirtIndex = surfaceVertexCount + offset;
         this.writeTerrainVertex(
-          positions, normals, colors, skirtIndex,
+          positions, normals, colors, materialMasks, skirtIndex,
           positions[surfaceIndex * 3], positions[surfaceIndex * 3 + 2], skirtDepth,
         );
         const nextOffset = (offset + 1) % perimeter.length;
@@ -160,6 +162,7 @@ export class TerrainRenderer {
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute("terrainMask", new THREE.BufferAttribute(materialMasks, 4));
     geometry.setIndex(indices);
     geometry.userData.surfaceVertexCount = surfaceVertexCount;
     geometry.userData.skirtDepth = skirtDepth;
@@ -171,27 +174,37 @@ export class TerrainRenderer {
   /** Texture-scale breakup without a bitmap lookup or another draw call. */
   private configureTerrainMaterial() {
     this.material.userData.detailMode = "procedural-micro-surface";
+    this.material.userData.materialContract = "vertex-biome + slope-wetness-exposure + triplanar-breakup-v1";
     this.material.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vTerrainPosition;\nvarying vec3 vTerrainNormal;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTerrainPosition = position;\nvTerrainNormal = normalize(normal);");
+        .replace("#include <common>", "#include <common>\nattribute vec4 terrainMask;\nvarying vec3 vTerrainPosition;\nvarying vec3 vTerrainNormal;\nvarying vec4 vTerrainMask;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTerrainPosition = position;\nvTerrainNormal = normalize(normal);\nvTerrainMask = terrainMask;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
           varying vec3 vTerrainPosition;
           varying vec3 vTerrainNormal;
+          varying vec4 vTerrainMask;
           float terrainHash(vec2 p) {
             p = fract(p * vec2(123.34, 456.21));
             p += dot(p, p + 45.32);
             return fract(p.x * p.y);
           }`)
         .replace("#include <color_fragment>", `#include <color_fragment>
-          float micro = terrainHash(floor(vTerrainPosition.xz * 3.25));
-          float grain = mix(0.91, 1.07, micro);
-          float slope = 1.0 - clamp(abs(vTerrainNormal.y), 0.0, 1.0);
+          vec3 triplanar = abs(normalize(vTerrainNormal));
+          triplanar /= max(dot(triplanar, vec3(1.0)), 0.0001);
+          float micro = terrainHash(floor(vTerrainPosition.yz * 0.43 + 17.0)) * triplanar.x
+            + terrainHash(floor(vTerrainPosition.xz * 0.43 + 31.0)) * triplanar.y
+            + terrainHash(floor(vTerrainPosition.xy * 0.43 + 53.0)) * triplanar.z;
+          float grain = mix(0.89, 1.08, micro) * mix(0.94, 1.0, vTerrainMask.w);
+          float slope = vTerrainMask.x;
+          float wetness = vTerrainMask.y;
+          float exposure = vTerrainMask.z;
           float strata = 0.94 + 0.06 * sin(vTerrainPosition.y * 5.6 + vTerrainPosition.x * 0.12);
-          diffuseColor.rgb *= grain * mix(1.0, strata, smoothstep(0.24, 0.72, slope));`);
+          diffuseColor.rgb *= grain * mix(1.0, strata, smoothstep(0.2, 0.72, slope));
+          diffuseColor.rgb *= mix(0.78, 1.16, exposure);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.045, 0.13, 0.14), wetness * 0.68);`);
     };
-    this.material.customProgramCacheKey = () => "a17-terrain-micro-surface-v1";
+    this.material.customProgramCacheKey = () => "a17-terrain-material-contract-v1";
   }
 
   private refreshMesh(mesh: THREE.Mesh, region?: Readonly<{ x: number; z: number; radius: number }>) {
@@ -199,18 +212,20 @@ export class TerrainRenderer {
     const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
     const normals = geometry.getAttribute("normal") as THREE.BufferAttribute;
     const colors = geometry.getAttribute("color") as THREE.BufferAttribute;
+    const materialMasks = geometry.getAttribute("terrainMask") as THREE.BufferAttribute;
     const surfaceVertexCount = geometry.userData.surfaceVertexCount as number;
     const skirtDepth = geometry.userData.skirtDepth as number;
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const z = positions.getZ(index);
       if (region && Math.hypot(x - region.x, z - region.z) > region.radius + 1) continue;
-      this.writeTerrainVertex(positions.array as Float32Array, normals.array as Float32Array, colors.array as Float32Array,
+      this.writeTerrainVertex(positions.array as Float32Array, normals.array as Float32Array, colors.array as Float32Array, materialMasks.array as Float32Array,
         index, x, z, index >= surfaceVertexCount ? skirtDepth : 0);
     }
     positions.needsUpdate = true;
     normals.needsUpdate = true;
     colors.needsUpdate = true;
+    materialMasks.needsUpdate = true;
     geometry.computeBoundingSphere();
   }
 
@@ -218,6 +233,7 @@ export class TerrainRenderer {
     positions: Float32Array,
     normals: Float32Array,
     colors: Float32Array,
+    materialMasks: Float32Array,
     index: number,
     x: number,
     z: number,
@@ -231,6 +247,12 @@ export class TerrainRenderer {
     normals[offset] = sample.normal.x;
     normals[offset + 1] = sample.normal.y;
     normals[offset + 2] = sample.normal.z;
+    const materialMask = terrainMaterialMaskAt(sample);
+    const materialOffset = index * 4;
+    materialMasks[materialOffset] = materialMask.slope;
+    materialMasks[materialOffset + 1] = materialMask.wetness;
+    materialMasks[materialOffset + 2] = materialMask.exposure;
+    materialMasks[materialOffset + 3] = materialMask.clusterSafe;
     const color = new THREE.Color(this.sampler.colorAt(x, z));
     const tint = sample.surface === "soft" ? 0x40514b
       : sample.surface === "submerged" ? 0x142f34

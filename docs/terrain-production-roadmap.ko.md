@@ -587,6 +587,14 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 공장 패드와 영웅 실루엣의 가독성을 해치지 않음
 - 거리별 화면·메모리 예산 통과
 
+### 2026-08-02 구현 상태
+
+- 완료: 모든 terrain LOD에 slope·wetness·exposure·cluster-safe 4채널 mask 전달
+- 완료: biome vertex color와 world-space triplanar breakup을 결합한 단일 draw terrain material
+- 완료: water·cliff·hazard 자연 군집 exclusion 계약과 결정적 CPU 검수 helper
+- 완료: strict v3 terrain·water·cave를 기존 `TerrainSample` 계약으로 통합하는 renderer-neutral sampler
+- TODO: 실제 KTX2 biome mask, 군집 반복 heatmap, talus/shoreline/공장 경계 전용 decal·mesh 접합
+
 ---
 
 ## 11. P8 — 원경, 하늘과 대기 원근
@@ -612,6 +620,13 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 원경이 카메라를 따라붙지 않고 안정적인 시차를 가짐
 - 원경이 플레이 영역보다 과도하게 선명하거나 상세하지 않음
 - 화면의 30~40%에서 맑은 하늘을 볼 수 있는 주요 전망이 존재
+
+### 2026-08-02 구현 상태
+
+- 완료: 맑은 푸른 하늘·구름 기본 상태와 날씨별 결정적 visibility profile
+- 완료: mineral wind·storm의 전역 fog 증가를 제거하고 marsh mist만 저지대 fog에 반영
+- 완료: 카메라를 따라오지 않는 world-fixed 원경과 날씨 감쇠 회귀 검사
+- TODO: 카메라 독립 구름 그림자 지도, 원경 hero vista 자산, 낮·황혼 screenshot 회귀 세트
 
 ---
 
@@ -641,6 +656,11 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 첫 섹터의 목표 프레임과 메모리 예산 유지
 
 Geometry Clipmaps는 플레이 가능 지형이 수 km가 되고 현재 섹터 방식이 실제 병목일 때만 재평가한다.
+
+### 2026-08-02 구현 상태
+
+- 완료: 한 섹터 왕복 이동에서 active+retained 청크 상한과 명시적 geometry dispose 회귀 검사
+- TODO: 실제 5분 브라우저 soak·GPU texture 메모리 기록, 다중 섹터 manifest·경계 계약과 저장 world-source hash 마이그레이션
 
 ---
 

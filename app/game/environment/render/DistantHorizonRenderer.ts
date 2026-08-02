@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { EnvironmentQuality } from "../types.ts";
-import type { WeatherKind } from "./WeatherSystem.ts";
+import { weatherVisibilityProfile, type WeatherKind } from "./WeatherSystem.ts";
 
 const seeded = (seed: number) => {
   let state = seed >>> 0;
@@ -58,11 +58,15 @@ export class DistantHorizonRenderer {
   readonly root = new THREE.Group();
   readonly nearRidges: THREE.Mesh;
   readonly farRidges: THREE.Mesh;
+  private readonly nearBaseOpacity = 0.72;
+  private readonly farBaseOpacity = 0.43;
+  /** Exposed without moving the world-fixed ridge toward the camera. */
+  visibilityMeters = 240;
 
   constructor(seed: number, quality: EnvironmentQuality) {
     this.root.name = "a17-distant-horizon";
-    const nearMaterial = new THREE.MeshBasicMaterial({ color: 0x263b3d, fog: true, transparent: true, opacity: 0.72, side: THREE.DoubleSide });
-    const farMaterial = new THREE.MeshBasicMaterial({ color: 0x536665, fog: true, transparent: true, opacity: 0.43, depthWrite: false, side: THREE.DoubleSide });
+    const nearMaterial = new THREE.MeshBasicMaterial({ color: 0x263b3d, fog: true, transparent: true, opacity: this.nearBaseOpacity, side: THREE.DoubleSide });
+    const farMaterial = new THREE.MeshBasicMaterial({ color: 0x536665, fog: true, transparent: true, opacity: this.farBaseOpacity, depthWrite: false, side: THREE.DoubleSide });
     this.nearRidges = new THREE.Mesh(
       createRidgeRibbon(seed ^ 0x5f3759df, quality === "high" ? 128 : 72, 150, 190, 19, 53),
       nearMaterial,
@@ -79,17 +83,21 @@ export class DistantHorizonRenderer {
     this.root.add(this.farRidges, this.nearRidges);
   }
 
-  update(_camera: THREE.Camera) {
+  update(camera: THREE.Camera) {
+    void camera;
     // Intentionally world-fixed: the silhouette now has stable parallax and direction.
+    // TODO(P8-D): project cloud coverage into a camera-independent terrain shadow map.
   }
 
   setWeather(kind: WeatherKind, strength: number) {
     const amount = THREE.MathUtils.clamp(strength, 0, 1);
+    const profile = weatherVisibilityProfile(kind, amount);
     const obscuring = kind === "mist" ? amount * 0.62
       : kind === "electrical_storm" ? amount * 0.36
         : kind === "mineral_wind" ? amount * 0.24 : 0;
-    (this.nearRidges.material as THREE.MeshBasicMaterial).opacity = 0.72 * (1 - obscuring);
-    (this.farRidges.material as THREE.MeshBasicMaterial).opacity = 0.43 * (1 - obscuring * 1.2);
+    this.visibilityMeters = profile.visibilityMeters;
+    (this.nearRidges.material as THREE.MeshBasicMaterial).opacity = this.nearBaseOpacity * (1 - obscuring);
+    (this.farRidges.material as THREE.MeshBasicMaterial).opacity = this.farBaseOpacity * (1 - obscuring * 1.2);
   }
 
   dispose() {

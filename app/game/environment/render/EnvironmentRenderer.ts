@@ -117,7 +117,11 @@ export class EnvironmentRenderer {
         this.scene.fog.color.copy(this.fogColor);
         if (this.automaticCycle) {
           const weather = this.weather.getWeather();
-          const weatherFog = weather.kind === "mist" ? 0.007 : weather.kind === "electrical_storm" ? 0.0045 : weather.kind === "mineral_wind" ? 0.0025 : 0;
+          const marshWeight = (blend.primary.id === "blackwater_marsh" ? 1 - blend.secondaryWeight : 0)
+            + (blend.secondary.id === "blackwater_marsh" ? blend.secondaryWeight : 0);
+          // Mineral wind remains a local particle event. Only lowland marsh mist
+          // may thicken scene fog, preventing a Mars-like world-wide dust veil.
+          const weatherFog = weather.kind === "mist" ? 0.007 * marshWeight : 0;
           const targetDensity = this.surfaceFogDensity + weatherFog * weather.strength;
           this.scene.fog.density = THREE.MathUtils.lerp(this.scene.fog.density, targetDensity, 1 - Math.exp(-delta * 0.32));
         }
