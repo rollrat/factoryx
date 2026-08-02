@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { IRONWIND_WORLD_SOURCE_V3, type MacroForm, type WorldSourceV3 } from "../../app/game/environment/worldSourceV3/index.ts";
-import { WorldSourceSampler } from "../../app/game/environment/worldSourceSampler/index.ts";
+import { WorldSourceSampler, createWorldSourceSampler } from "../../app/game/environment/worldSourceSampler/index.ts";
 
 const approximate = (actual: number, expected: number, tolerance = 0.000001) => {
   assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
@@ -25,7 +25,7 @@ test("Ironwind source sampler is deterministic and source-only", () => {
 });
 
 test("Ironwind source sampler honors half-open world bounds and biome boundaries", () => {
-  const sampler = new WorldSourceSampler(IRONWIND_WORLD_SOURCE_V3);
+  const sampler = createWorldSourceSampler(IRONWIND_WORLD_SOURCE_V3);
 
   assert.equal(sampler.contains(-128, -128), true);
   assert.equal(sampler.contains(127.999, 127.999), true);
@@ -34,6 +34,7 @@ test("Ironwind source sampler honors half-open world bounds and biome boundaries
   assert.throws(() => sampler.heightAt(128, 0), RangeError);
   assert.equal(sampler.biomeAt(0, 0).biomeId, "windglass_basin");
   assert.equal(sampler.biomeAt(47, 0).biomeId, null);
+  assert.throws(() => createWorldSourceSampler({ ...IRONWIND_WORLD_SOURCE_V3, schemaVersion: 99 }), /Invalid WorldSourceV3/);
 });
 
 test("Ironwind route spline flattens height and exposes its deterministic route sample", () => {

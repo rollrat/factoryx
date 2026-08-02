@@ -263,7 +263,7 @@ export const IRONWIND_WORLD_SOURCE_V3 = {
       operation: "carve",
       stratumId: "rift_depths",
       width: 7,
-      maxGradeDegrees: 14,
+      maxGradeDegrees: 15,
       minTurnRadius: 6,
       controlPoints: [
         { x: 12, y: -18, z: 100 },

@@ -1,3 +1,4 @@
+import { parseWorldSourceV3 } from "../worldSourceV3/validation.ts";
 import type { BiomeRegion, MacroForm, Vec2, WorldSourceV3, WorldSpline } from "../worldSourceV3/types.ts";
 
 export type SourceSamplerBiome = Readonly<{
@@ -245,3 +246,6 @@ export class WorldSourceSampler {
     return { height, normal, slopeDegrees: Math.acos(clamp01(normal.y)) * 180 / Math.PI, biome: this.biomeAt(x, z), route: this.routeAt(x, z, stratumId) };
   }
 }
+
+/** Strict external-data entry point shared by World Studio and game loading. */
+export const createWorldSourceSampler = (value: unknown) => new WorldSourceSampler(parseWorldSourceV3(value));

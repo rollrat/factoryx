@@ -309,6 +309,13 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - undo/redo와 재로드 후 결과 동일
 - World Studio와 게임이 같은 parser 사용
 
+### 2026-08-02 구현 상태
+
+- 완료: `WorldSourceV3` strict import/export, canonical JSON과 SHA-256 content hash
+- 완료: World Studio에서 v2 작업본과 v3 source를 명확히 분리한 파일 입출력·검증 오류 요약·hash 표시
+- 완료: 불러온 v3 source는 검증된 작업 메모리로만 보관하고 bake 전 렌더 지형을 교체하지 않는 안전 경계
+- TODO: macro/spline/polygon control-point 편집, 레이어 잠금·순서, undo/redo와 dirty bounds 시각화
+
 ---
 
 ## 6. P3 — 지형 샘플러와 실제 청크 스트리밍
@@ -499,6 +506,13 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 조사 패드와 필수 접근로 침수 0
 - 물이 없는 청크의 water draw·update 비용 0
 
+### 2026-08-02 구현 상태
+
+- 완료: source 기반 lake·marsh·river·waterfall level·bed·depth·3D flow 샘플러
+- 완료: 격자와 독립적인 정확한 shoreline ribbon과 결정적 우선순위
+- 완료: route·자원 패드·build/resource patch dry exclusion과 침수 회귀 검사
+- TODO: 수계 carve를 terrain bake에 연결, 수면·폭포 셰이더, wetness mask GPU upload와 청크별 draw 제거
+
 ---
 
 ## 9. P6 — 동굴 수직 슬라이스
@@ -537,6 +551,13 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 모든 방이 같은 구형 단면으로 반복되지 않음
 - 컨베이어는 통과하고 대형 설비는 clearance에 따라 거부됨
 - HUD 없이 출구와 심층 방향을 식별할 수 있음
+
+### 2026-08-02 구현 상태
+
+- 완료: source cave room·portal·corridor를 정렬된 불변 runtime view로 변환
+- 완료: 포털 footprint·room containment, graph 연결성, build/corridor clearance와 spline grade 검증
+- 완료: room/corridor 공간 샘플과 거리 기반 route position API
+- TODO: CaveRenderer를 source view로 교체, 입구 전환 GLB·portal culling·지표 충돌 제거와 동굴 조명 검수
 
 ---
 

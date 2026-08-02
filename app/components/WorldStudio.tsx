@@ -6,6 +6,13 @@ import { A17_ENVIRONMENT, BIOMES, WORLD_STUDIO_STORAGE_KEY } from "../game/envir
 import type { EnvironmentQuality, SurfaceType } from "../game/environment/types.ts";
 import type { WeatherKind } from "../game/environment/render/WeatherSystem.ts";
 import {
+  IRONWIND_WORLD_SOURCE_V3,
+  computeWorldSourceContentHash,
+  safeParseWorldSourceV3Json,
+  stringifyWorldSourceV3,
+  type WorldSourceV3,
+} from "../game/environment/worldSourceV3/index.ts";
+import {
   WorldStudioRuntime,
   type WorldStudioBrush,
   type WorldStudioDocument,
@@ -42,6 +49,8 @@ export default function WorldStudio() {
   const mountRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<WorldStudioRuntime | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const sourceImportRef = useRef<HTMLInputElement>(null);
+  const worldSourceRef = useRef<WorldSourceV3>(IRONWIND_WORLD_SOURCE_V3);
   const [stats, setStats] = useState(EMPTY_STATS);
   const [brush, setBrush] = useState<WorldStudioBrush>("raise");
   const [radius, setRadius] = useState(8);
@@ -66,6 +75,8 @@ export default function WorldStudio() {
   const [landmarkZ, setLandmarkZ] = useState(0);
   const [landmarkRotation, setLandmarkRotation] = useState(0);
   const [notice, setNotice] = useState("좌클릭 드래그로 지형을 편집하세요. Alt+드래그는 카메라 회전입니다.");
+  const [sourceHash, setSourceHash] = useState("계산 중");
+  const [sourceOrigin, setSourceOrigin] = useState("기본 철풍 source");
 
   const syncControls = (document: WorldStudioDocument) => {
     setTime(document.timeOfDay); setSunAzimuth(document.sunAzimuth); setFog(document.fogDensity);
@@ -94,6 +105,14 @@ export default function WorldStudio() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void computeWorldSourceContentHash(worldSourceRef.current).then((hash) => {
+      if (active) setSourceHash(hash.slice("sha256:".length, "sha256:".length + 12));
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
       const item = BRUSHES.find(({ key }) => key === event.key);
@@ -111,6 +130,12 @@ export default function WorldStudio() {
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = "a17-environment.world.json"; anchor.click(); URL.revokeObjectURL(url);
     setNotice("환경 정의 JSON을 내보냈습니다.");
   };
+  const downloadSourceJson = () => {
+    const json = stringifyWorldSourceV3(worldSourceRef.current);
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "a17-world-source-v3.json"; anchor.click(); URL.revokeObjectURL(url);
+    setNotice("검증된 WorldSourceV3 원본을 내보냈습니다.");
+  };
   const importJson = async (file: File | undefined) => {
     if (!file) return;
     try {
@@ -119,6 +144,20 @@ export default function WorldStudio() {
       syncControls(runtimeRef.current.exportDocument());
       setNotice("환경 정의를 불러왔습니다.");
     } catch { setNotice("형식이 잘못되었거나 다른 환경의 JSON입니다."); }
+  };
+  const importSourceJson = async (file: File | undefined) => {
+    if (!file) return;
+    const result = safeParseWorldSourceV3Json(await file.text());
+    if (!result.ok) {
+      const summary = result.issues.slice(0, 2).map(({ path, message }) => `${path}: ${message}`).join(" · ");
+      setNotice(`WorldSourceV3 검증 실패 — ${summary}`);
+      return;
+    }
+    worldSourceRef.current = result.value;
+    const hash = await computeWorldSourceContentHash(result.value);
+    setSourceHash(hash.slice("sha256:".length, "sha256:".length + 12));
+    setSourceOrigin(file.name);
+    setNotice("WorldSourceV3를 검증해 작업 메모리에 불러왔습니다. 렌더 지형 적용은 다음 bake 단계에서 수행합니다.");
   };
   const updateLandmark = (x: number, z: number, rotation: number) => {
     setLandmarkX(x); setLandmarkZ(z); setLandmarkRotation(rotation);
@@ -139,6 +178,9 @@ export default function WorldStudio() {
           <button type="button" onClick={saveLocal}>로컬 저장</button><button type="button" onClick={downloadJson}>JSON 내보내기</button>
           <button type="button" onClick={() => importRef.current?.click()}>불러오기</button>
           <input ref={importRef} type="file" accept="application/json" hidden onChange={(event) => void importJson(event.target.files?.[0])} />
+          <button type="button" onClick={downloadSourceJson}>v3 소스 내보내기</button>
+          <button type="button" onClick={() => sourceImportRef.current?.click()}>v3 소스 불러오기</button>
+          <input ref={sourceImportRef} type="file" accept="application/json" hidden onChange={(event) => void importSourceJson(event.target.files?.[0])} />
           <Link href="/">공장으로</Link>
         </div>
       </header>
@@ -198,6 +240,7 @@ export default function WorldStudio() {
             </div>
           </section>
           <section className={styles.legend}><span className={styles.eyebrow}>BUILDABILITY</span><p><i data-color="ok" />바로 건설</p><p><i data-color="warn" />기초 필요</p><p><i data-color="bad" />건설 금지</p></section>
+          <section><span className={styles.eyebrow}>07 / WORLD SOURCE V3</span><h2>소스 계약</h2><p>{sourceOrigin}</p><p><code>sha256:{sourceHash}</code></p><small>검증·해시만 적용됨 · 렌더 bake 연결 대기</small></section>
         </aside>
       </div>
     </main>

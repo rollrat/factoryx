@@ -13,8 +13,23 @@ export type { IronwindTerrainProfile } from "./data/ironwindTopography.ts";
 export { A17_TERRAIN_REVIEW_CAMERAS } from "./data/terrainReviewCameras.ts";
 export type { TerrainReviewCamera, TerrainReviewCameraPurpose } from "./data/terrainReviewCameras.ts";
 export { TerrainSampler, SURFACE_ACCESS_ROUTES } from "./terrain/TerrainSampler.ts";
-export { WorldSourceSampler } from "./worldSourceSampler/index.ts";
+export { WorldSourceSampler, createWorldSourceSampler } from "./worldSourceSampler/index.ts";
 export type { SourceRouteSample, SourceSamplerBiome, WorldSourceHeightSample } from "./worldSourceSampler/index.ts";
+export { CaveRuntimeSampler, CaveRuntimeValidationError, createCaveRuntimeView, safeCreateCaveRuntimeView } from "./worldSourceCaves/index.ts";
+export type {
+  CaveRoutePosition,
+  CaveRouteSegment,
+  CaveRuntimeCorridor,
+  CaveRuntimeGraph,
+  CaveRuntimeIssue,
+  CaveRuntimePortal,
+  CaveRuntimeRoom,
+  CaveRuntimeView,
+  CaveRuntimeViewResult,
+  CaveSpaceSample,
+} from "./worldSourceCaves/index.ts";
+export { WorldWaterSampler } from "./water/index.ts";
+export type { WaterShorelineRibbon, WorldWaterKind, WorldWaterSample } from "./water/index.ts";
 export { TerrainChunkManager } from "./terrain/TerrainChunkManager.ts";
 export {
   TerrainBakeRequestTracker,
