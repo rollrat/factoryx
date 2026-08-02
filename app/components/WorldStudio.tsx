@@ -51,9 +51,9 @@ export default function WorldStudio() {
   const [time, setTime] = useState(0.68);
   const [sunAzimuth, setSunAzimuth] = useState(0);
   const [shadowDistance, setShadowDistance] = useState(42);
-  const [fog, setFog] = useState(0.0085);
-  const [weather, setWeather] = useState<WeatherKind>("mineral_wind");
-  const [weatherStrength, setWeatherStrength] = useState(0.34);
+  const [fog, setFog] = useState(0.0036);
+  const [weather, setWeather] = useState<WeatherKind>("clear");
+  const [weatherStrength, setWeatherStrength] = useState(0);
   const [propsVisible, setPropsVisible] = useState(true);
   const [scatterDensity, setScatterDensity] = useState(1);
   const [landmarksVisible, setLandmarksVisible] = useState(true);

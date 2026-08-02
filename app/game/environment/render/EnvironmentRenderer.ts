@@ -37,7 +37,7 @@ export class EnvironmentRenderer {
   private automaticCycle = false;
   private activeStratumId = "surface";
   private propsVisible = true;
-  private readonly fogColor = new THREE.Color(0x607877);
+  private readonly fogColor = new THREE.Color(0xb4d2df);
   private surfaceFogDensity: number;
   private scatterDensity = 1;
   private shadowDistance = 42;
@@ -52,7 +52,7 @@ export class EnvironmentRenderer {
     this.definition = definition;
     this.quality = quality;
     this.previewQuality = quality;
-    this.surfaceFogDensity = quality === "high" ? 0.0085 : 0.011;
+    this.surfaceFogDensity = quality === "high" ? 0.0036 : 0.0052;
     this.root.name = "a17-environment";
     this.sampler = sampler ?? new TerrainSampler(definition);
     this.terrain = new TerrainRenderer(definition, this.sampler, quality);
@@ -74,8 +74,8 @@ export class EnvironmentRenderer {
       this.exploration.root,
     );
     this.scene.add(this.root);
-    this.scene.background = new THREE.Color(0x263d42);
-    this.scene.fog = new THREE.FogExp2(0x607877, quality === "high" ? 0.0085 : 0.011);
+    this.scene.background = new THREE.Color(0x77acd0);
+    this.scene.fog = new THREE.FogExp2(0xb4d2df, this.surfaceFogDensity);
   }
 
   update(delta: number, camera: THREE.Camera) {
@@ -105,7 +105,8 @@ export class EnvironmentRenderer {
       const blend = this.sampler.biomeBlendAt(camera.position.x, camera.position.z);
       const biome = BIOME_BY_ID.get(blend.primary.id);
       if (biome) {
-        const targetFog = new THREE.Color(biome.palette.fog).lerp(new THREE.Color(blend.secondary.palette.fog), blend.secondaryWeight);
+        const biomeFog = new THREE.Color(biome.palette.fog).lerp(new THREE.Color(blend.secondary.palette.fog), blend.secondaryWeight);
+        const targetFog = new THREE.Color(0xb4d2df).lerp(biomeFog, 0.28);
         this.fogColor.lerp(targetFog, 1 - Math.exp(-delta * 0.18));
         this.scene.fog.color.copy(this.fogColor);
         if (this.automaticCycle) {

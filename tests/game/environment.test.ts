@@ -208,7 +208,7 @@ test("world-studio v1 drafts migrate to the strict v2 authoring schema", () => {
   assert.equal(document.version, 2);
   assert.equal(document.timeOfDay, 1);
   assert.equal(document.fogDensity, 0);
-  assert.equal(document.weather, "mineral_wind");
+  assert.equal(document.weather, "clear");
   assert.equal(document.weatherStrength, 1);
   assert.equal(document.scatterDensity, 1);
   assert.equal(document.quality, "high");

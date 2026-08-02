@@ -53,9 +53,9 @@ export class WorldStudioRuntime {
   private pointerPainting = false;
   private timeOfDay = 0.68;
   private sunAzimuth = 0;
-  private fogDensity = 0.0085;
-  private weather: WeatherKind = "mineral_wind";
-  private weatherStrength = 0.34;
+  private fogDensity = 0.0036;
+  private weather: WeatherKind = "clear";
+  private weatherStrength = 0;
   private scatterDensity = 1;
   private landmarksVisible = true;
   private resourceAnchorsVisible = true;

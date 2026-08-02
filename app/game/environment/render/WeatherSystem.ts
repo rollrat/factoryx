@@ -7,9 +7,9 @@ export class WeatherSystem {
   readonly root = new THREE.Group();
   private readonly particles: THREE.Points;
   private readonly stormLight = new THREE.PointLight(0xb8d9ff, 0, 95, 2);
-  private weather: WeatherKind = "mineral_wind";
-  private strength = 0.34;
-  private displayedStrength = 0.34;
+  private weather: WeatherKind = "clear";
+  private strength = 0;
+  private displayedStrength = 0;
   private phase = 0;
   private biomeId = "windglass_basin";
   private readonly positions: Float32Array;

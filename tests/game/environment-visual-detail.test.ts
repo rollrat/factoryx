@@ -8,6 +8,7 @@ import { TerrainDetailRenderer } from "../../app/game/environment/render/Terrain
 import { TerrainRenderer } from "../../app/game/environment/render/TerrainRenderer.ts";
 import { SurfaceFeatureRenderer } from "../../app/game/environment/render/SurfaceFeatureRenderer.ts";
 import { WeatherSystem } from "../../app/game/environment/render/WeatherSystem.ts";
+import { SkySystem } from "../../app/game/environment/render/SkySystem.ts";
 
 test("near terrain detail stays camera-local and reacts to rain and industry", () => {
   const detail = new TerrainDetailRenderer(new TerrainSampler(A17_ENVIRONMENT), "high");
@@ -45,6 +46,20 @@ test("preview quality dynamically reduces weather particle work", () => {
   weather.setPreviewQuality("high");
   assert.equal(weather.activeParticleCount(), 360);
   weather.dispose();
+});
+
+test("clear weather keeps an Earth-like cloud sky without a permanent dust band", () => {
+  const scene = new THREE.Scene();
+  const sky = new SkySystem(scene, "high");
+  const dustBand = sky.root.getObjectByName("mineral-wind-dust-band") as THREE.Mesh;
+  const cloud = sky.root.getObjectByName("cloud-layer-1") as THREE.Mesh;
+  sky.setTimeOfDay(0.5);
+  sky.setWeatherInfluence("clear", 0);
+  assert.equal(dustBand.visible, false);
+  assert.ok(((cloud.material as THREE.ShaderMaterial).uniforms.opacity.value as number) > 0.2);
+  sky.setWeatherInfluence("mineral_wind", 0.7);
+  assert.equal(dustBand.visible, true);
+  sky.dispose();
 });
 
 test("environment preview quality couples props, particles, terrain detail, and shadow distance", () => {

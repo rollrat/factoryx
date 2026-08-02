@@ -36,9 +36,9 @@ export class SkySystem {
         side: THREE.BackSide,
         depthWrite: false,
         uniforms: {
-          topColor: { value: new THREE.Color(0x17343e) },
-          horizonColor: { value: new THREE.Color(0xb89777) },
-          bottomColor: { value: new THREE.Color(0x536a69) },
+          topColor: { value: new THREE.Color(0x347fbe) },
+          horizonColor: { value: new THREE.Color(0xb9d9ec) },
+          bottomColor: { value: new THREE.Color(0xd6e4e8) },
           sunAmount: { value: 0.72 },
         },
         vertexShader: `varying vec3 vWorld; void main(){ vec4 world = modelMatrix * vec4(position,1.0); vWorld = normalize(world.xyz); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -71,12 +71,14 @@ export class SkySystem {
     );
     this.dustBand.rotation.set(Math.PI * 0.58, 0.18, -0.22);
     this.dustBand.position.set(12, 42, -10);
+    this.dustBand.visible = false;
+    this.dustBand.name = "mineral-wind-dust-band";
     this.root.add(this.dustBand);
 
     const cloudGeometry = new THREE.SphereGeometry(174, 32, 16);
     [
-      { scale: 1, opacity: 0.055, speed: 0.0018 },
-      { scale: 0.985, opacity: 0.035, speed: -0.0011 },
+      { scale: 1, opacity: 0.34, speed: 0.0018 },
+      { scale: 0.985, opacity: 0.2, speed: -0.0011 },
     ].forEach(({ scale, opacity, speed }, index) => {
       const layer = new THREE.Mesh(
         cloudGeometry.clone(),
@@ -84,16 +86,22 @@ export class SkySystem {
           side: THREE.BackSide,
           transparent: true,
           depthWrite: false,
-          uniforms: { opacity: { value: opacity }, phase: { value: index * 3.7 } },
+          uniforms: {
+            opacity: { value: opacity },
+            phase: { value: index * 3.7 },
+            cloudColor: { value: new THREE.Color(index === 0 ? 0xf4f8fa : 0xdce8ed) },
+          },
           vertexShader: "varying vec3 vDirection; void main(){ vDirection=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
-          fragmentShader: `uniform float opacity; uniform float phase; varying vec3 vDirection;
+          fragmentShader: `uniform float opacity; uniform float phase; uniform vec3 cloudColor; varying vec3 vDirection;
             void main(){ float band=smoothstep(.08,.42,vDirection.y)*(1.0-smoothstep(.62,.86,vDirection.y));
             float wave=sin(vDirection.x*23.0+vDirection.z*11.0+phase)+sin(vDirection.z*31.0-vDirection.x*7.0-phase*.7);
-            float cloud=smoothstep(.45,1.35,wave)*band; gl_FragColor=vec4(vec3(.74,.82,.81),cloud*opacity); }`,
+            float cloud=smoothstep(.32,1.28,wave)*band; gl_FragColor=vec4(cloudColor,cloud*opacity); }`,
         }),
       );
       layer.scale.setScalar(scale);
       layer.userData.speed = speed;
+      layer.userData.baseOpacity = opacity;
+      layer.name = `cloud-layer-${index + 1}`;
       this.cloudLayers.add(layer);
     });
     cloudGeometry.dispose();
@@ -174,9 +182,9 @@ export class SkySystem {
     const material = this.dome.material as THREE.ShaderMaterial;
     material.uniforms.sunAmount.value = daylight;
     const twilight = 1 - Math.min(1, Math.abs(altitude) * 4);
-    material.uniforms.topColor.value.setHex(daylight > 0.18 ? 0x17343e : 0x07111e).lerp(new THREE.Color(0x4b2930), twilight * 0.32);
-    material.uniforms.horizonColor.value.setHex(daylight > 0.18 ? 0xb89777 : 0x26334b).lerp(new THREE.Color(0xd17b58), twilight * 0.48);
-    material.uniforms.bottomColor.value.setHex(daylight > 0.18 ? 0x536a69 : 0x111b2a);
+    material.uniforms.topColor.value.setHex(daylight > 0.18 ? 0x347fbe : 0x07111e).lerp(new THREE.Color(0x74566d), twilight * 0.22);
+    material.uniforms.horizonColor.value.setHex(daylight > 0.18 ? 0xb9d9ec : 0x26334b).lerp(new THREE.Color(0xf0a779), twilight * 0.34);
+    material.uniforms.bottomColor.value.setHex(daylight > 0.18 ? 0xd6e4e8 : 0x111b2a);
     this.sun.color.setHex(daylight > 0.18 ? 0xffe7bd : 0x9bb8d8).lerp(new THREE.Color(0xffa06b), twilight * 0.55);
     this.hemisphere.intensity = 0.42 + daylight * 1.43;
     this.hemisphere.color.setHex(daylight > 0.18 ? 0xb9e7e3 : 0x7186ad);
@@ -190,7 +198,19 @@ export class SkySystem {
       this.sun.color.lerp(new THREE.Color(0x9ebbd3), this.weatherStrength * 0.42);
       this.hemisphere.color.lerp(new THREE.Color(0x738aa5), this.weatherStrength * 0.4);
     }
+    this.cloudLayers.children.forEach((layer) => {
+      const cloudMaterial = (layer as THREE.Mesh).material as THREE.ShaderMaterial;
+      const baseOpacity = layer.userData.baseOpacity as number;
+      const coverage = this.weatherKind === "electrical_storm" ? 1 + this.weatherStrength * 1.25
+        : this.weatherKind === "mist" ? 1 + this.weatherStrength * 0.45
+          : this.weatherKind === "mineral_wind" ? 1 - this.weatherStrength * 0.48 : 1;
+      cloudMaterial.uniforms.opacity.value = baseOpacity * coverage * (0.3 + daylight * 0.7);
+      const cloudColor = cloudMaterial.uniforms.cloudColor.value as THREE.Color;
+      cloudColor.setHex(this.weatherKind === "electrical_storm" ? 0x9aabb8 : 0xf4f8fa)
+        .lerp(new THREE.Color(0x9c806d), this.weatherKind === "mineral_wind" ? this.weatherStrength * 0.3 : 0);
+    });
     this.moons.visible = daylight < 0.72;
-    this.dustBand.visible = daylight > 0.16;
+    this.dustBand.visible = daylight > 0.16 && this.weatherKind === "mineral_wind" && this.weatherStrength > 0.04;
+    (this.dustBand.material as THREE.MeshBasicMaterial).opacity = 0.03 + this.weatherStrength * 0.13;
   }
 }
