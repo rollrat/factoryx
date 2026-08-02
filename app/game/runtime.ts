@@ -46,6 +46,13 @@ import { migrateLegacyStructuresIntoWorld } from "./sim/legacyWorldMigration.ts"
 import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
 import {
+  FIRST_PERSON_LOCOMOTION,
+  initialVerticalLocomotionState,
+  updatePlanarVelocity,
+  updateVerticalLocomotion,
+  type VerticalLocomotionState,
+} from "./sim/firstPersonLocomotion.ts";
+import {
   classifyBuildingLods,
   createWorldBuildingLodSubjects,
   frustumPlanesFromMatrix,
@@ -258,6 +265,9 @@ export class FactoryRuntime {
   private readonly desiredTarget = new THREE.Vector3(0, 0, 0);
   private readonly playerPosition = new THREE.Vector3(0, 1.62, 5.5);
   private readonly playerVelocity = new THREE.Vector3();
+  private verticalLocomotion: VerticalLocomotionState = initialVerticalLocomotionState();
+  private jumpRequested = false;
+  private headBobPhase = 0;
   private firstPersonYaw = 0;
   private firstPersonPitch = -0.08;
   private activeStratumId = "surface";
@@ -468,6 +478,7 @@ export class FactoryRuntime {
     this.inputLocked = locked;
     this.pressed.clear();
     this.playerVelocity.set(0, 0, 0);
+    this.jumpRequested = false;
 
     if (locked) {
       if (this.capturedPointerId !== null && this.renderer.domElement.hasPointerCapture(this.capturedPointerId)) {
@@ -746,6 +757,9 @@ export class FactoryRuntime {
       const recovered = recoverPlayerStart(this.collisionIndex, this.playerPosition);
       this.playerPosition.x = recovered.position.x;
       this.playerPosition.z = recovered.position.z;
+      this.playerPosition.y = this.elevationAt(this.playerPosition.x, this.playerPosition.z) + 1.62;
+      this.verticalLocomotion = initialVerticalLocomotionState();
+      this.headBobPhase = 0;
       this.cameraMode = "firstPerson";
       this.setTool("inspect");
       this.selectStructure(null);
@@ -1162,12 +1176,20 @@ export class FactoryRuntime {
     if (this.pressed.has("d")) movement.add(right);
     if (this.pressed.has("a")) movement.sub(right);
     if (movement.lengthSq() > 0) movement.normalize();
-    const speed = this.pressed.has("shift") ? 5.2 : 3.1;
+    const sprinting = this.pressed.has("shift") && movement.lengthSq() > 0;
+    const speed = sprinting ? FIRST_PERSON_LOCOMOTION.sprintSpeed : FIRST_PERSON_LOCOMOTION.walkSpeed;
     movement.multiplyScalar(speed);
-    const damping = 1 - Math.exp(-delta * 12);
-    this.playerVelocity.x += (movement.x - this.playerVelocity.x) * damping;
-    this.playerVelocity.z += (movement.z - this.playerVelocity.z) * damping;
+    const planarVelocity = updatePlanarVelocity(
+      { x: this.playerVelocity.x, z: this.playerVelocity.z },
+      { x: movement.x, z: movement.z },
+      delta,
+      this.verticalLocomotion.grounded,
+    );
+    this.playerVelocity.x = planarVelocity.x;
+    this.playerVelocity.z = planarVelocity.z;
 
+    const previousX = this.playerPosition.x;
+    const previousZ = this.playerPosition.z;
     const resolved = resolvePlayerMovement(
       this.collisionIndex,
       this.playerPosition,
@@ -1184,14 +1206,32 @@ export class FactoryRuntime {
     );
     this.playerPosition.x = terrainResolved.position.x;
     this.playerPosition.z = terrainResolved.position.z;
-    this.playerPosition.y += ((terrainResolved.elevation + 1.62) - this.playerPosition.y) * (1 - Math.exp(-delta * 15));
+    const vertical = updateVerticalLocomotion(this.verticalLocomotion, {
+      delta,
+      eyeHeight: this.playerPosition.y,
+      groundEyeHeight: terrainResolved.elevation + 1.62,
+      jumpPressed: this.jumpRequested,
+    });
+    this.jumpRequested = false;
+    this.verticalLocomotion = vertical.state;
+    this.playerVelocity.y = vertical.state.velocity;
+    this.playerPosition.y = vertical.eyeHeight;
     if (resolved.contacts.some(({ normal }) => normal.x !== 0)) this.playerVelocity.x = 0;
     if (resolved.contacts.some(({ normal }) => normal.z !== 0)) this.playerVelocity.z = 0;
     if (terrainResolved.blocked || obstacleResolved.blocked) this.playerVelocity.multiplyScalar(0.2);
 
-    const moving = movement.lengthSq() > 0.01;
-    const headBob = moving ? Math.sin(this.elapsed * (this.pressed.has("shift") ? 13 : 9)) * 0.025 : 0;
-    this.firstPersonCamera.position.set(this.playerPosition.x, this.playerPosition.y + headBob, this.playerPosition.z);
+    const actualSpeed = Math.hypot(this.playerPosition.x - previousX, this.playerPosition.z - previousZ) / Math.max(delta, 0.001);
+    if (actualSpeed > 0.05 && this.verticalLocomotion.grounded) this.headBobPhase += actualSpeed * delta * 2.8;
+    const bobStrength = THREE.MathUtils.clamp(actualSpeed / FIRST_PERSON_LOCOMOTION.sprintSpeed, 0, 1);
+    const headBob = this.verticalLocomotion.grounded ? Math.sin(this.headBobPhase) * 0.032 * bobStrength : 0;
+    this.firstPersonCamera.position.set(
+      this.playerPosition.x,
+      this.playerPosition.y + headBob + this.verticalLocomotion.landingCompression,
+      this.playerPosition.z,
+    );
+    const targetFov = sprinting && actualSpeed > FIRST_PERSON_LOCOMOTION.walkSpeed ? 74 : 70;
+    this.firstPersonCamera.fov += (targetFov - this.firstPersonCamera.fov) * (1 - Math.exp(-delta * 8));
+    this.firstPersonCamera.updateProjectionMatrix();
     this.firstPersonCamera.rotation.order = "YXZ";
     this.firstPersonCamera.rotation.set(this.firstPersonPitch, this.firstPersonYaw, 0);
   }
@@ -1791,6 +1831,10 @@ export class FactoryRuntime {
       this.desiredTarget.set(portal.x, elevation, portal.z);
       this.cameraTarget.copy(this.desiredTarget);
     }
+    this.playerVelocity.set(0, 0, 0);
+    this.verticalLocomotion = initialVerticalLocomotionState();
+    this.jumpRequested = false;
+    this.headBobPhase = 0;
     this.collisionIndex = new WorldCollisionIndex(this.world, 8, this.activeStratumId);
     this.groups.forEach((group) => { group.visible = (group.userData.stratumId ?? "surface") === this.activeStratumId; });
     this.connectionGroups.forEach((group) => {
@@ -1817,6 +1861,11 @@ export class FactoryRuntime {
     const key = event.key.toLowerCase();
     if (event.repeat && !["w", "a", "s", "d"].includes(key)) return;
     this.pressed.add(key);
+    if (this.cameraMode === "firstPerson" && (key === " " || key === "spacebar")) {
+      event.preventDefault();
+      this.jumpRequested = true;
+      return;
+    }
     if (key === "v") {
       this.toggleCameraMode();
       return;
