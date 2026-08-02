@@ -16,6 +16,7 @@ test("near terrain detail stays camera-local and reacts to rain and industry", (
   camera.position.set(0, 4, 0);
   detail.update(camera);
   assert.ok(detail.gravel.count > 0);
+  assert.ok(detail.gravel.instanceColor);
   assert.ok(detail.cracks.count > 0);
   assert.ok(detail.gravel.count <= 150);
   const clearWetCount = detail.wetPatches.count;
@@ -119,6 +120,7 @@ test("surface features derive actual water, shoreline, and cliff strata from ter
 test("terrain chunks use half-meter source samples, power-of-two LODs, shared edge normals, and skirts", () => {
   const sampler = new TerrainSampler(A17_ENVIRONMENT);
   const terrain = new TerrainRenderer(A17_ENVIRONMENT, sampler, "high");
+  assert.equal((terrain.terrain.material as THREE.Material).userData.detailMode, "procedural-micro-surface");
   const chunks = new Map<string, THREE.Mesh>();
   terrain.root.traverse((object) => {
     if (object instanceof THREE.Mesh && object.name.startsWith("terrain-chunk:")) chunks.set(object.name, object);

@@ -56,8 +56,8 @@ export class TerrainDetailRenderer {
       this.capacities.cracks,
     );
     this.gravel = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(0.095, 0),
-      new THREE.MeshStandardMaterial({ color: 0x38484a, roughness: 0.98, metalness: 0.02 }),
+      new THREE.IcosahedronGeometry(0.095, 1).scale(1.35, 0.62, 0.92),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.98, metalness: 0.02 }),
       this.capacities.gravel,
     );
     this.wetPatches = new THREE.InstancedMesh(
@@ -147,7 +147,13 @@ export class TerrainDetailRenderer {
         const scale = 0.62 + hash2(gridX, gridZ, 4) * 0.86;
 
         if (sample.surface !== "submerged" && gravelCount < limits.gravel && hash2(gridX, gridZ, 5) > 0.28) {
-          this.writeMatrix(this.gravel, gravelCount++, x, sample.height + 0.045, z, sample.normal, rotation, scale);
+          const gravelIndex = gravelCount++;
+          this.writeMatrix(this.gravel, gravelIndex, x, sample.height + 0.045, z, sample.normal, rotation, scale);
+          const gravelColor = new THREE.Color(this.sampler.colorAt(x, z));
+          gravelColor.offsetHSL((hash2(gridX, gridZ, 12) - 0.5) * 0.035, -0.08, -0.12 + hash2(gridX, gridZ, 13) * 0.15);
+          if (sample.surface === "hazard") gravelColor.lerp(new THREE.Color(0xa86642), 0.42);
+          if (sample.surface === "soft") gravelColor.lerp(new THREE.Color(0x435951), 0.28);
+          this.gravel.setColorAt(gravelIndex, gravelColor);
         }
         if (["stable", "soft", "steep"].includes(sample.surface)
           && crackCount < limits.cracks && hash2(gridX, gridZ, 6) > 0.68) {
@@ -190,6 +196,7 @@ export class TerrainDetailRenderer {
     this.wetPatches.count = wetCount;
     this.industrialDust.count = dustCount;
     [this.cracks, this.gravel, this.wetPatches, this.industrialDust].forEach((mesh) => { mesh.instanceMatrix.needsUpdate = true; });
+    if (this.gravel.instanceColor) this.gravel.instanceColor.needsUpdate = true;
     const wetMaterial = this.wetPatches.material as THREE.MeshStandardMaterial;
     wetMaterial.opacity = 0.32 + Math.max(
       this.weatherKind === "mist" ? this.weatherStrength * 0.22 : 0,

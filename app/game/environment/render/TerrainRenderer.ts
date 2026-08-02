@@ -12,7 +12,7 @@ export class TerrainRenderer {
   private readonly chunkRoot = new THREE.Group();
   private editorMode = false;
   private readonly chunkLods = new Map<string, readonly THREE.Mesh[]>();
-  private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.05 });
+  private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91, metalness: 0.035 });
 
   constructor(
     definition: EnvironmentDefinition,
@@ -21,6 +21,7 @@ export class TerrainRenderer {
   ) {
     this.definition = definition;
     this.sampler = sampler;
+    this.configureTerrainMaterial();
     this.root.name = "a17-terrain";
     const width = definition.worldBounds.maxX - definition.worldBounds.minX + 1;
     const depth = definition.worldBounds.maxZ - definition.worldBounds.minZ + 1;
@@ -142,6 +143,32 @@ export class TerrainRenderer {
     geometry.userData.segments = segments;
     geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, this.material);
+  }
+
+  /** Texture-scale breakup without a bitmap lookup or another draw call. */
+  private configureTerrainMaterial() {
+    this.material.userData.detailMode = "procedural-micro-surface";
+    this.material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vTerrainPosition;\nvarying vec3 vTerrainNormal;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTerrainPosition = position;\nvTerrainNormal = normalize(normal);");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", `#include <common>
+          varying vec3 vTerrainPosition;
+          varying vec3 vTerrainNormal;
+          float terrainHash(vec2 p) {
+            p = fract(p * vec2(123.34, 456.21));
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+          }`)
+        .replace("#include <color_fragment>", `#include <color_fragment>
+          float micro = terrainHash(floor(vTerrainPosition.xz * 3.25));
+          float grain = mix(0.91, 1.07, micro);
+          float slope = 1.0 - clamp(abs(vTerrainNormal.y), 0.0, 1.0);
+          float strata = 0.94 + 0.06 * sin(vTerrainPosition.y * 5.6 + vTerrainPosition.x * 0.12);
+          diffuseColor.rgb *= grain * mix(1.0, strata, smoothstep(0.24, 0.72, slope));`);
+    };
+    this.material.customProgramCacheKey = () => "a17-terrain-micro-surface-v1";
   }
 
   private refreshMesh(mesh: THREE.Mesh, region?: Readonly<{ x: number; z: number; radius: number }>) {
