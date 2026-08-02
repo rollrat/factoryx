@@ -5,7 +5,6 @@ import {
   createFactoryMaterials,
   createItemModel,
   createStructureModel,
-  buildingModelRotationY,
 } from "./models";
 import { animateMinerModel } from "./models/miner";
 import { animateSmelterModel } from "./models/smelter";
@@ -45,6 +44,7 @@ import { WorldProductionSimulation } from "./sim/worldProduction.ts";
 import { migrateLegacyStructuresIntoWorld } from "./sim/legacyWorldMigration.ts";
 import { WorldCommandHistory } from "./sim/worldCommandHistory.ts";
 import { WorldCollisionIndex, recoverPlayerStart, resolvePlayerMovement } from "./sim/firstPersonCollision.ts";
+import { projectPlacement, worldPointToAnchorCell } from "./domain/placement.ts";
 import {
   FIRST_PERSON_LOCOMOTION,
   initialVerticalLocomotionState,
@@ -876,17 +876,24 @@ export class FactoryRuntime {
       ? createBuildingModel(data.buildingId, this.materials)
       : createStructureModel(data.type, this.materials);
     const definition = data.buildingId ? START_REGISTRY.buildings.get(data.buildingId) : null;
-    const position = definition
-      ? new THREE.Vector3(data.x + definition.footprint.x / 2, 0, data.z + definition.footprint.z / 2)
-      : modelPosition(data.type, data.x, data.z);
     const worldInstance = data.worldInstanceId ? this.world.instance(data.worldInstanceId) : null;
     const stratumId = worldInstance?.stratumId ?? "surface";
+    const baseProjection = definition
+      ? projectPlacement(definition, { x: data.x, z: data.z }, data.rotation)
+      : null;
+    const position = baseProjection
+      ? new THREE.Vector3(
+        baseProjection.modelTransform.position.x,
+        0,
+        baseProjection.modelTransform.position.z,
+      )
+      : modelPosition(data.type, data.x, data.z);
     position.y = worldInstance?.elevation ?? this.elevationAt(position.x, position.z, stratumId);
     group.position.copy(position);
     group.userData.stratumId = stratumId;
     group.visible = stratumId === this.activeStratumId;
-    group.rotation.y = data.buildingId
-      ? buildingModelRotationY(data.rotation)
+    group.rotation.y = baseProjection
+      ? baseProjection.modelTransform.rotationY
       : data.rotation * (Math.PI / 2);
     group.userData.structureId = data.id;
     group.traverse((child) => {
@@ -1240,15 +1247,17 @@ export class FactoryRuntime {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const activeCamera = this.cameraMode === "firstPerson" ? this.firstPersonCamera : this.camera;
+    this.raycaster.setFromCamera(this.pointer, activeCamera);
     const interactionRoot = this.activeStratumId === "surface" ? this.environment.terrain.root : this.environment.caves.interactionRoot;
     const point = this.raycaster.intersectObject(interactionRoot, true)[0]?.point;
     if (!point) return null;
     this.hitPoint.copy(point);
     const bounds = this.world.bounds;
+    const anchor = worldPointToAnchorCell(this.hitPoint);
     return {
-      x: THREE.MathUtils.clamp(Math.round(this.hitPoint.x), bounds.minX, bounds.maxX),
-      z: THREE.MathUtils.clamp(Math.round(this.hitPoint.z), bounds.minZ, bounds.maxZ),
+      x: THREE.MathUtils.clamp(anchor.x, bounds.minX, bounds.maxX),
+      z: THREE.MathUtils.clamp(anchor.z, bounds.minZ, bounds.maxZ),
     };
   }
 
@@ -1285,22 +1294,32 @@ export class FactoryRuntime {
       this.ghostBuildingId = this.selectedBuildingId;
       this.scene.add(this.ghost);
     }
+    const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
+    const projection = definition
+      ? projectPlacement(definition, this.currentCell, this.rotation)
+      : null;
+    const elevation = projection
+      ? this.elevationAt(projection.modelTransform.position.x, projection.modelTransform.position.z)
+      : this.elevationAt(this.currentCell.x, this.currentCell.z);
     this.ghostValid = this.selectedBuildingId
       ? this.campaignWorld.previewConstruction({
         buildingId: this.selectedBuildingId,
         position: { x: this.currentCell.x, z: this.currentCell.z },
         rotation: this.rotation as 0 | 1 | 2 | 3,
-        elevation: this.elevationAt(this.currentCell.x, this.currentCell.z),
+        elevation,
         stratumId: this.activeStratumId,
       }).ok
       : this.simulation.canPlace(type, this.currentCell.x, this.currentCell.z);
-    const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
-    this.ghost.position.copy(definition
-      ? new THREE.Vector3(this.currentCell.x + definition.footprint.x / 2, 0, this.currentCell.z + definition.footprint.z / 2)
+    this.ghost.position.copy(projection
+      ? new THREE.Vector3(
+        projection.modelTransform.position.x,
+        elevation,
+        projection.modelTransform.position.z,
+      )
       : modelPosition(type, this.currentCell.x, this.currentCell.z));
-    this.ghost.position.y = this.elevationAt(this.ghost.position.x, this.ghost.position.z);
-    this.ghost.rotation.y = this.selectedBuildingId
-      ? buildingModelRotationY(this.rotation)
+    if (!projection) this.ghost.position.y = this.elevationAt(this.ghost.position.x, this.ghost.position.z);
+    this.ghost.rotation.y = projection
+      ? projection.modelTransform.rotationY
       : this.rotation * (Math.PI / 2);
     this.recolorGhost(this.ghost, this.ghostValid);
   }
@@ -1342,7 +1361,7 @@ export class FactoryRuntime {
       const direction = next
         ? { x: destination.x - cell.x, z: destination.z - cell.z }
         : { x: cell.x - destination.x, z: cell.z - destination.z };
-      const rotation = direction.x > 0 ? 1 : direction.x < 0 ? 3 : direction.z > 0 ? 0 : 2;
+      const rotation = direction.x > 0 ? 0 : direction.x < 0 ? 2 : direction.z > 0 ? 1 : 3;
       return { ...cell, rotation };
     });
   }
@@ -1376,23 +1395,44 @@ export class FactoryRuntime {
     this.beltPreviewCells = this.getBeltPath(this.beltStart, end, zFirst);
     const reserved = new Set<string>();
     let allValid = true;
+    const definition = this.selectedBuildingId ? START_REGISTRY.buildings.get(this.selectedBuildingId) : null;
     this.beltPreviewCells.forEach((cell) => {
+      const projection = definition ? projectPlacement(definition, cell, cell.rotation) : null;
+      const elevation = projection
+        ? this.elevationAt(projection.modelTransform.position.x, projection.modelTransform.position.z)
+        : this.elevationAt(cell.x, cell.z);
       const valid = this.simulation.canPlace("belt", cell.x, cell.z, reserved)
         && Boolean(this.selectedBuildingId && this.campaignWorld.previewConstruction({
           buildingId: this.selectedBuildingId,
           position: { x: cell.x, z: cell.z },
           rotation: cell.rotation as 0 | 1 | 2 | 3,
-          elevation: this.elevationAt(cell.x, cell.z),
+          elevation,
           stratumId: this.activeStratumId,
         }).ok);
       if (!valid) allValid = false;
       reserved.add(cellKey(cell.x, cell.z));
-      const model = createStructureModel("belt", this.materials);
-      model.position.set(cell.x, this.elevationAt(cell.x, cell.z), cell.z);
-      model.rotation.y = cell.rotation * (Math.PI / 2);
+      const model = definition
+        ? createBuildingModel(definition.id, this.materials)
+        : createStructureModel("belt", this.materials);
+      model.position.set(
+        projection?.modelTransform.position.x ?? cell.x,
+        elevation,
+        projection?.modelTransform.position.z ?? cell.z,
+      );
+      model.rotation.y = projection?.modelTransform.rotationY ?? cell.rotation * (Math.PI / 2);
       this.recolorGhost(model, valid);
       this.beltPreview?.add(model);
     });
+    if (definition) {
+      const required = new Map<string, number>();
+      definition.buildCost.forEach(({ itemId, amount }) => {
+        required.set(itemId, (required.get(itemId) ?? 0) + amount * this.beltPreviewCells.length);
+      });
+      if ([...required].some(([itemId, amount]) => this.world.inventoryAmount(itemId) < amount)) {
+        allValid = false;
+        this.beltPreview.children.forEach((model) => this.recolorGhost(model as THREE.Group, false));
+      }
+    }
     this.ghostValid = allValid;
     this.scene.add(this.beltPreview);
     this.updateBeltBuildInfo(true);
@@ -1674,7 +1714,7 @@ export class FactoryRuntime {
     const cell = this.pointerToCell(event);
     if (!cell) return;
     this.currentCell = cell;
-    this.hoverTile.position.set(cell.x, this.elevationAt(cell.x, cell.z) + 0.035, cell.z);
+    this.hoverTile.position.set(cell.x + 0.5, this.elevationAt(cell.x + 0.5, cell.z + 0.5) + 0.035, cell.z + 0.5);
     if (this.beltStart) this.updateBeltPreview(cell, event.shiftKey);
     else this.updateGhost();
   };
@@ -1729,6 +1769,7 @@ export class FactoryRuntime {
     if (cell) this.currentCell = cell;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
     if (this.activeTool === "belt" && this.beltStart) {
+      if (cell) this.updateBeltPreview(cell, event.shiftKey);
       this.commitBelts();
       this.beltStart = null;
       if (this.beltPreview) this.scene.remove(this.beltPreview);
