@@ -393,8 +393,9 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 완료: dirty bounds의 LOD별 부분 rebuild 대상 계산과 stale response 차단
 - 완료: 청크 retention·LRU eviction·품질 전환 정리·진단과 mixed LOD 인접 차이 제한·4m 히스테리시스
 - 완료: `TerrainRenderer`의 전체 월드 3-LOD 선생성을 제거하고 활성/retained 청크만 생성·eviction 시 geometry dispose
+- 완료: strict v3 sampler의 chunk bake position·normal·mask를 실제 resident LOD geometry에 주입하는 opt-in 런타임 브리지
 - 검수 결과: P2/P3 관련 회귀 52개 통과, high 25개·low 9개 활성 청크 예산 유지
-- TODO: 실제 Web Worker 생성·queue backpressure, bake buffer의 GPU upload 경로, shared-edge heatmap과 장거리 왕복 메모리 프로파일
+- TODO: 실제 Web Worker 생성·queue backpressure, 비동기 bake buffer GPU upload, shared-edge heatmap과 장거리 왕복 메모리 프로파일
 
 ---
 
@@ -511,7 +512,9 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 완료: source 기반 lake·marsh·river·waterfall level·bed·depth·3D flow 샘플러
 - 완료: 격자와 독립적인 정확한 shoreline ribbon과 결정적 우선순위
 - 완료: route·자원 패드·build/resource patch dry exclusion과 침수 회귀 검사
-- TODO: 수계 carve를 terrain bake에 연결, 수면·폭포 셰이더, wetness mask GPU upload와 청크별 draw 제거
+- 완료: lake·marsh polygon, river·waterfall strip과 shoreline cue를 source에서 직접 만드는 결정적 `WaterSourceRenderer`
+- 완료: `EnvironmentRenderer` opt-in source 계층에서 지상/동굴 전환과 dispose 수명주기 연결
+- TODO: 고급 수면·폭포 셰이더, wetness mask GPU upload와 거리별 청크 draw 제거
 
 ---
 
@@ -557,7 +560,9 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 완료: source cave room·portal·corridor를 정렬된 불변 runtime view로 변환
 - 완료: 포털 footprint·room containment, graph 연결성, build/corridor clearance와 spline grade 검증
 - 완료: room/corridor 공간 샘플과 거리 기반 route position API
-- TODO: CaveRenderer를 source view로 교체, 입구 전환 GLB·portal culling·지표 충돌 제거와 동굴 조명 검수
+- 완료: room volume·corridor path·portal marker를 source view에서 직접 만드는 결정적 `CaveSourceRenderer`
+- 완료: source 모드에서 기존 임시 동굴 표시를 숨기고 지하 stratum·cutaway 전환에 source graph를 연결
+- TODO: 입구 전환 GLB·portal culling·지표 충돌 제거, production shell과 동굴 조명 검수
 
 ---
 
@@ -787,13 +792,12 @@ P5 수계와 P6 동굴은 `waterfall socket`, `cave.portal`, 높이장 제거 �
 
 ## 17. 다음 행동
 
-현재는 다음 순서만 실행한다.
+초기 필수 범위는 source 계약, sampler, chunk LOD, 절벽 키트, 수계·동굴 source 표현, 바이옴 재질과 맑은 하늘까지 연결됐다. 다음 순서만 진행한다.
 
-1. 철풍 단층지 탑뷰를 흑백으로 작성한다.
-2. 주 단면 2개에서 25m 단층벽과 테라스 높이를 고정한다.
-3. 자원, 공장 테라스, 차량로, 보행 지름길과 아치를 한 지도에서 검증한다.
-4. World Studio 또는 임시 회색 블록으로 형태를 만든다.
-5. 고정 카메라 6~8개에서 기준 스크린샷을 만든다.
-6. 실루엣과 동선을 승인한 뒤 `16m 절벽 + 코너 + 아치` Blender 프로토타입을 시작한다.
+1. World Studio에 legacy 편집 모드와 v3 source 검수 모드를 명확히 분리한 토글을 추가한다.
+2. v3 source 모드에서 지형·수계·동굴·건설 판정이 같은 sampler를 쓰는 고정 카메라 검수를 수행한다.
+3. 한 개 동굴 입구의 지표 제거, 전환 GLB, production shell과 portal culling을 완성한다.
+4. 실제 Web Worker queue와 비동기 GPU upload를 연결한 뒤 5분 왕복 soak를 기록한다.
+5. 위 검수를 통과한 뒤에만 두 번째 섹터와 대량 식생 제작으로 확장한다.
 
-텍스처, 대량 식생, 전체 동굴, 512m 플레이 영역과 여섯 바이옴 전체 제작은 이 결과가 승인될 때까지 진행하지 않는다.
+KTX2 고급 재질, 고급 반사, 전체 동굴망, Geometry Clipmaps와 다중 섹터는 현재 TODO로 유지한다.

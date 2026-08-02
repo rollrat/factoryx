@@ -17,6 +17,19 @@ import { DistantHorizonRenderer } from "./DistantHorizonRenderer.ts";
 import { SurfaceFeatureRenderer } from "./SurfaceFeatureRenderer.ts";
 import { IRONWIND_CLIFF_PLACEMENTS } from "../data/ironwindCliffPlacements.ts";
 import { CliffKitRenderer } from "./CliffKitRenderer.ts";
+import type { TerrainBakeSampler, TerrainBakeSourceIdentity } from "../terrain/TerrainBake.ts";
+import type { WorldSourceV3 } from "../worldSourceV3/types.ts";
+import { WaterSourceRenderer } from "./WaterSourceRenderer.ts";
+import { CaveSourceRenderer } from "../worldSourceCaves/CaveSourceRenderer.ts";
+
+export type EnvironmentRendererOptions = Readonly<{
+  /** Optional source-backed sampler used for streamed terrain chunk bake data. */
+  terrainBakeSampler?: TerrainBakeSampler;
+  /** Overrides the identity carried by synchronous chunk-bake requests. */
+  terrainBakeSource?: TerrainBakeSourceIdentity;
+  /** Adds authored water surfaces and cave-network presentation from the same source. */
+  worldSource?: WorldSourceV3;
+}>;
 
 export class EnvironmentRenderer {
   readonly sampler: TerrainSampler;
@@ -31,6 +44,8 @@ export class EnvironmentRenderer {
   readonly distantHorizon: DistantHorizonRenderer;
   readonly surfaceFeatures: SurfaceFeatureRenderer;
   readonly cliffKit: CliffKitRenderer;
+  readonly sourceWater: WaterSourceRenderer;
+  readonly sourceCaves: CaveSourceRenderer;
   readonly root = new THREE.Group();
   private readonly scene: THREE.Scene;
   readonly definition: EnvironmentDefinition;
@@ -44,13 +59,17 @@ export class EnvironmentRenderer {
   private surfaceFogDensity: number;
   private scatterDensity = 1;
   private shadowDistance = 42;
+  private readonly sourceCavesEnabled: boolean;
 
   constructor(
     scene: THREE.Scene,
     definition: EnvironmentDefinition,
     quality: EnvironmentQuality = "high",
-    sampler?: TerrainSampler,
+    samplerOrOptions?: TerrainSampler | EnvironmentRendererOptions,
+    suppliedOptions: EnvironmentRendererOptions = {},
   ) {
+    const sampler = samplerOrOptions instanceof TerrainSampler ? samplerOrOptions : undefined;
+    const options = samplerOrOptions instanceof TerrainSampler ? suppliedOptions : samplerOrOptions ?? suppliedOptions;
     this.scene = scene;
     this.definition = definition;
     this.quality = quality;
@@ -58,7 +77,7 @@ export class EnvironmentRenderer {
     this.surfaceFogDensity = quality === "high" ? 0.0036 : 0.0052;
     this.root.name = "a17-environment";
     this.sampler = sampler ?? new TerrainSampler(definition);
-    this.terrain = new TerrainRenderer(definition, this.sampler, quality);
+    this.terrain = new TerrainRenderer(definition, this.sampler, quality, options.terrainBakeSampler, options.terrainBakeSource);
     this.props = new PropScatterRenderer(definition, this.sampler, quality);
     this.sky = new SkySystem(scene, quality);
     this.weather = new WeatherSystem(scene, quality);
@@ -69,14 +88,24 @@ export class EnvironmentRenderer {
     this.distantHorizon = new DistantHorizonRenderer(definition.seed, quality);
     this.surfaceFeatures = new SurfaceFeatureRenderer(definition, this.sampler, quality);
     this.cliffKit = new CliffKitRenderer(IRONWIND_CLIFF_PLACEMENTS, quality);
+    this.sourceWater = new WaterSourceRenderer(options.worldSource);
+    this.sourceCaves = new CaveSourceRenderer(options.worldSource);
+    this.sourceCavesEnabled = options.worldSource !== undefined;
+    this.sourceCaves.setVisible(false);
+    if (this.sourceCavesEnabled) {
+      this.caves.root.visible = false;
+      this.caves.surfaceEntrances.visible = false;
+    }
     this.root.add(
       this.terrain.root,
+      this.sourceWater.root,
       this.surfaceFeatures.root,
       this.cliffKit.root,
       this.terrainDetail.root,
       this.props.root,
       this.distantHorizon.root,
       this.exploration.root,
+      this.sourceCaves.root,
     );
     this.scene.add(this.root);
     this.scene.background = new THREE.Color(0x77acd0);
@@ -207,10 +236,17 @@ export class EnvironmentRenderer {
     this.surfaceFeatures.root.visible = surface;
     this.cliffKit.root.visible = surface;
     this.props.root.visible = surface && this.propsVisible;
+    this.sourceWater.root.visible = surface;
+    this.sourceCaves.setVisible(!surface);
     this.exploration.root.visible = true;
     this.sky.root.visible = surface;
     this.weather.root.visible = surface;
-    this.caves.setVisible(!surface);
+    if (this.sourceCavesEnabled) {
+      this.caves.root.visible = false;
+      this.caves.surfaceEntrances.visible = false;
+    } else {
+      this.caves.setVisible(!surface);
+    }
     this.scene.background = new THREE.Color(surface ? 0x77acd0 : 0x0b1518);
     this.scene.fog = new THREE.FogExp2(surface ? 0xb4d2df : 0x263d3f, surface ? this.surfaceFogDensity : 0.025);
   }
@@ -233,12 +269,19 @@ export class EnvironmentRenderer {
     };
   }
   setCaveCutaway(visible: boolean) {
-    this.caves.setCutaway(visible);
+    if (this.sourceCavesEnabled) {
+      this.caves.root.visible = false;
+      this.caves.surfaceEntrances.visible = false;
+    } else {
+      this.caves.setCutaway(visible);
+    }
     this.terrain.root.visible = !visible;
     this.terrainDetail.root.visible = !visible;
     this.surfaceFeatures.root.visible = !visible;
     this.cliffKit.root.visible = !visible;
     this.props.root.visible = !visible && this.propsVisible;
+    this.sourceWater.root.visible = !visible;
+    this.sourceCaves.setVisible(visible);
     this.distantHorizon.root.visible = !visible;
     this.sky.root.visible = !visible;
     this.weather.root.visible = !visible;
@@ -271,6 +314,8 @@ export class EnvironmentRenderer {
     this.distantHorizon.dispose();
     this.surfaceFeatures.dispose();
     this.cliffKit.dispose();
+    this.sourceWater.dispose();
+    this.sourceCaves.dispose();
     this.props.dispose();
     this.sky.dispose();
     this.weather.dispose();

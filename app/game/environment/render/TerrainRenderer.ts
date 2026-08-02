@@ -2,7 +2,25 @@ import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
 import type { TerrainChunkEviction, TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
+import {
+  bakeTerrainChunk,
+  createTerrainBakeRequest,
+  type TerrainBakeSampler,
+  type TerrainBakeSourceIdentity,
+} from "../terrain/TerrainBake.ts";
 import { terrainMaterialMaskAt } from "./TerrainMaterialContract.ts";
+
+const sourceColorFor = (biomeId: string) => {
+  const colors: Readonly<Record<string, number>> = {
+    windglass_basin: 0x536b64,
+    ironwind_faults: 0x6f5546,
+    silicate_sailwood: 0x5a7568,
+    blackwater_marsh: 0x314f4c,
+    hematite_crown: 0x6c4b45,
+    thermal_rift: 0x68594b,
+  };
+  return colors[biomeId] ?? 0x59625f;
+};
 
 export class TerrainRenderer {
   readonly root = new THREE.Group();
@@ -15,15 +33,27 @@ export class TerrainRenderer {
   private readonly chunkLods = new Map<string, readonly THREE.Mesh[]>();
   private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91, metalness: 0.035 });
   private previewQuality: EnvironmentQuality;
+  private readonly bakeSampler?: TerrainBakeSampler;
+  private readonly bakeSource: TerrainBakeSourceIdentity;
+  private nextBakeRequestId = 1;
 
   constructor(
     definition: EnvironmentDefinition,
     sampler: TerrainSampler,
     quality: EnvironmentQuality,
+    bakeSampler?: TerrainBakeSampler,
+    bakeSource?: TerrainBakeSourceIdentity,
   ) {
     this.definition = definition;
     this.sampler = sampler;
     this.previewQuality = quality;
+    this.bakeSampler = bakeSampler;
+    this.bakeSource = bakeSource ?? {
+      environmentId: definition.id,
+      environmentVersion: definition.version,
+      generatorVersion: 1,
+      seed: definition.seed,
+    };
     this.configureTerrainMaterial();
     this.root.name = "a17-terrain";
     const width = definition.worldBounds.maxX - definition.worldBounds.minX + 1;
@@ -58,6 +88,8 @@ export class TerrainRenderer {
     this.chunkLods.forEach((lods) => { count += lods.length; });
     return count;
   }
+
+  usesExternalBakeSampler() { return this.bakeSampler !== undefined; }
 
   setEditorMode(enabled: boolean) {
     if (this.editorMode && !enabled) this.chunkLods.forEach((lods) => lods.forEach((mesh) => this.refreshMesh(mesh)));
@@ -128,13 +160,22 @@ export class TerrainRenderer {
     const indices: number[] = [];
     const minX = centerX - size / 2;
     const minZ = centerZ - size / 2;
+    const baked = skirtDepth > 0 && this.bakeSampler
+      ? this.bakeChunk(Math.round(minX / size), Math.round(minZ / size), Math.log2((this.previewQuality === "high" ? 64 : 32) / segments))
+      : null;
+    const bakedPositions = baked ? new Float32Array(baked.positions) : null;
+    const bakedNormals = baked ? new Float32Array(baked.normals) : null;
 
     for (let z = 0; z <= segments; z += 1) {
       for (let x = 0; x <= segments; x += 1) {
         const index = z * row + x;
-        const worldX = minX + x / segments * size;
-        const worldZ = minZ + z / segments * size;
-        this.writeTerrainVertex(positions, normals, colors, materialMasks, index, worldX, worldZ, 0);
+        const bakedIndex = baked ? ((z + 1) * baked.grid.sampleCount + x + 1) * 3 : 0;
+        const worldX = bakedPositions ? bakedPositions[bakedIndex] : minX + x / segments * size;
+        const worldZ = bakedPositions ? bakedPositions[bakedIndex + 2] : minZ + z / segments * size;
+        this.writeTerrainVertex(positions, normals, colors, materialMasks, index, worldX, worldZ, 0, bakedPositions && bakedNormals ? {
+          height: bakedPositions[bakedIndex + 1],
+          normal: { x: bakedNormals[bakedIndex], y: bakedNormals[bakedIndex + 1], z: bakedNormals[bakedIndex + 2] },
+        } : undefined, Boolean(baked));
       }
     }
     for (let z = 0; z < segments; z += 1) {
@@ -152,6 +193,7 @@ export class TerrainRenderer {
         this.writeTerrainVertex(
           positions, normals, colors, materialMasks, skirtIndex,
           positions[surfaceIndex * 3], positions[surfaceIndex * 3 + 2], skirtDepth,
+          undefined, Boolean(baked),
         );
         const nextOffset = (offset + 1) % perimeter.length;
         indices.push(surfaceIndex, skirtIndex, perimeter[nextOffset], perimeter[nextOffset], skirtIndex, surfaceVertexCount + nextOffset);
@@ -167,6 +209,7 @@ export class TerrainRenderer {
     geometry.userData.surfaceVertexCount = surfaceVertexCount;
     geometry.userData.skirtDepth = skirtDepth;
     geometry.userData.segments = segments;
+    geometry.userData.externalBake = Boolean(baked);
     geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, this.material);
   }
@@ -220,7 +263,7 @@ export class TerrainRenderer {
       const z = positions.getZ(index);
       if (region && Math.hypot(x - region.x, z - region.z) > region.radius + 1) continue;
       this.writeTerrainVertex(positions.array as Float32Array, normals.array as Float32Array, colors.array as Float32Array, materialMasks.array as Float32Array,
-        index, x, z, index >= surfaceVertexCount ? skirtDepth : 0);
+        index, x, z, index >= surfaceVertexCount ? skirtDepth : 0, undefined, Boolean(geometry.userData.externalBake));
     }
     positions.needsUpdate = true;
     normals.needsUpdate = true;
@@ -238,22 +281,24 @@ export class TerrainRenderer {
     x: number,
     z: number,
     depth: number,
+    baked?: Readonly<{ height: number; normal: Readonly<{ x: number; y: number; z: number }> }>,
+    useExternalSampler = false,
   ) {
-    const sample = this.sampler.sample(x, z);
+    const sample = useExternalSampler ? this.sampleExternal(x, z) : this.sampler.sample(x, z);
     const offset = index * 3;
     positions[offset] = x;
-    positions[offset + 1] = sample.height - depth;
+    positions[offset + 1] = (baked?.height ?? sample.height) - depth;
     positions[offset + 2] = z;
-    normals[offset] = sample.normal.x;
-    normals[offset + 1] = sample.normal.y;
-    normals[offset + 2] = sample.normal.z;
+    normals[offset] = baked?.normal.x ?? sample.normal.x;
+    normals[offset + 1] = baked?.normal.y ?? sample.normal.y;
+    normals[offset + 2] = baked?.normal.z ?? sample.normal.z;
     const materialMask = terrainMaterialMaskAt(sample);
     const materialOffset = index * 4;
     materialMasks[materialOffset] = materialMask.slope;
     materialMasks[materialOffset + 1] = materialMask.wetness;
     materialMasks[materialOffset + 2] = materialMask.exposure;
     materialMasks[materialOffset + 3] = materialMask.clusterSafe;
-    const color = new THREE.Color(this.sampler.colorAt(x, z));
+    const color = new THREE.Color(useExternalSampler ? sourceColorFor(sample.biomeId) : this.sampler.colorAt(x, z));
     const tint = sample.surface === "soft" ? 0x40514b
       : sample.surface === "submerged" ? 0x142f34
         : sample.surface === "hazard" ? 0x75543e
@@ -263,6 +308,36 @@ export class TerrainRenderer {
     colors[offset] = color.r * variation;
     colors[offset + 1] = color.g * variation;
     colors[offset + 2] = color.b * variation;
+  }
+
+  private bakeChunk(chunkX: number, chunkZ: number, lod: number) {
+    const sampleSpacing = this.previewQuality === "high" ? 0.5 : 1;
+    const request = createTerrainBakeRequest({
+      requestId: this.nextBakeRequestId++,
+      terrainRevision: 0,
+      source: this.bakeSource,
+      chunk: { x: chunkX, z: chunkZ, lod },
+      chunkSize: this.definition.chunkSize,
+      sampleSpacing,
+    });
+    return bakeTerrainChunk(request, this.bakeSamplerWithClampedHalo());
+  }
+
+  private bakeSamplerWithClampedHalo(): TerrainBakeSampler {
+    return {
+      sample: (x, z, stratumId) => this.sampleExternal(x, z, stratumId),
+    };
+  }
+
+  private sampleExternal(x: number, z: number, stratumId?: string) {
+    const sampler = this.bakeSampler!;
+    const bounds = (sampler as { source?: { bounds?: Readonly<{ minX: number; maxXExclusive: number; minZ: number; maxZExclusive: number }> } }).source?.bounds;
+    if (!bounds) return sampler.sample(x, z, stratumId);
+    return sampler.sample(
+      Math.max(bounds.minX, Math.min(bounds.maxXExclusive - Number.EPSILON, x)),
+      Math.max(bounds.minZ, Math.min(bounds.maxZExclusive - Number.EPSILON, z)),
+      stratumId,
+    );
   }
 
   private createSurveyPad() {

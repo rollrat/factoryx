@@ -18,6 +18,7 @@ export type { SourceRouteSample, SourceSamplerBiome, WorldSourceHeightSample } f
 export { WorldSourceEnvironmentSampler, createWorldSourceEnvironmentSampler } from "./worldSourceSampler/index.ts";
 export type { WorldSourceEnvironmentSamplerOptions } from "./worldSourceSampler/index.ts";
 export { CaveRuntimeSampler, CaveRuntimeValidationError, createCaveRuntimeView, safeCreateCaveRuntimeView } from "./worldSourceCaves/index.ts";
+export { CaveSourceRenderer } from "./worldSourceCaves/index.ts";
 export type {
   CaveRoutePosition,
   CaveRouteSegment,
@@ -28,6 +29,7 @@ export type {
   CaveRuntimeRoom,
   CaveRuntimeView,
   CaveRuntimeViewResult,
+  CaveSourceRenderCounts,
   CaveSpaceSample,
 } from "./worldSourceCaves/index.ts";
 export { WorldWaterSampler } from "./water/index.ts";
@@ -58,6 +60,8 @@ export { createTerrainBakeWorkerMessageHandler, isTerrainBakeRequest } from "./t
 export type { TerrainBakeWorkerScope } from "./terrain/TerrainBakeWorker.ts";
 export { evaluateTerrainPlacement, createTerrainPlacementValidator } from "./terrain/TerrainPlacementRules.ts";
 export { EnvironmentRenderer } from "./render/EnvironmentRenderer.ts";
+export type { EnvironmentRendererOptions } from "./render/EnvironmentRenderer.ts";
+export { WaterSourceRenderer } from "./render/WaterSourceRenderer.ts";
 export { TerrainDetailRenderer } from "./render/TerrainDetailRenderer.ts";
 export type { IndustrialFootprint } from "./render/TerrainDetailRenderer.ts";
 export { DistantHorizonRenderer } from "./render/DistantHorizonRenderer.ts";
