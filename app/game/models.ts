@@ -152,7 +152,15 @@ const dedicatedBuildingModel = (
   // the data-defined precision assembler until a dedicated press model lands.
   if (modelKey === "hydraulic_former" || modelKey === "precision_assembler") return createAssemblerModel(materials);
   if (modelKey === "small_storage") return createStorageModel(materials);
-  if (modelKey === "conveyor_mk1") return createStructureModel("belt", materials);
+  if (modelKey === "conveyor_mk1" || modelKey === "conveyor_mk2" || modelKey === "conveyor_mk3") {
+    const group = new THREE.Group();
+    const belt = createStructureModel("belt", materials);
+    // The legacy belt mesh runs on local Z; data-defined conveyor rotation 0
+    // runs on local +X, matching domain port and route rotation semantics.
+    belt.rotation.y = Math.PI / 2;
+    group.add(belt);
+    return group;
+  }
   if (modelKey === "splitter") return createSplitterModel(materials);
   if (modelKey === "merger") return createMergerModel(materials);
   if (modelKey === "field_power_core") return createFieldPowerCoreModel(materials);

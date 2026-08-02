@@ -777,8 +777,12 @@ export class WorldProductionSimulation {
   }
 
   private compatiblePorts(source: WorldPort, target: WorldPort) {
-    return source.connectionCell.x === target.connectionCell.x
-      && source.connectionCell.z === target.connectionCell.z
+    // connectionCell identifies the exterior routing cell on each building,
+    // which intentionally differs across a shared boundary. The transformed
+    // port positions are the physical endpoint contract: adjacent endpoints
+    // connect when those positions coincide and their facings oppose.
+    return Math.abs(source.localPosition.x - target.localPosition.x) <= 0.001
+      && Math.abs(source.localPosition.z - target.localPosition.z) <= 0.001
       && portsShareStratumOrShaftPair(source, target)
       && source.definition.medium === target.definition.medium
       && (source.stratumId !== target.stratumId

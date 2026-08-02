@@ -16,6 +16,12 @@ import {
   type ResourceAnchorDefinition,
 } from "../data/resourceAnchors.ts";
 import { shaftPairIdAt } from "../data/shaftPairs.ts";
+import {
+  occupiedWorldCells,
+  placementModelCenter,
+  projectPlacement,
+  rotatedFootprintSize,
+} from "../domain/placement.ts";
 
 export type WorldBounds = Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
 
@@ -131,51 +137,6 @@ const cloneInstance = (instance: BuildingInstance): BuildingInstance => ({
   ...(instance.constructionCreditPaid ? { constructionCreditPaid: { ...instance.constructionCreditPaid } } : {}),
 });
 
-const rotateCell = (
-  cell: GridCell,
-  width: number,
-  depth: number,
-  rotation: 0 | 1 | 2 | 3,
-): GridCell => {
-  if (rotation === 0) return { ...cell };
-  if (rotation === 1) return { x: depth - 1 - cell.z, z: cell.x };
-  if (rotation === 2) return { x: width - 1 - cell.x, z: depth - 1 - cell.z };
-  return { x: cell.z, z: width - 1 - cell.x };
-};
-
-const rotateVector = <T extends GridCell | LocalPosition>(
-  vector: T,
-  rotation: 0 | 1 | 2 | 3,
-): T => {
-  const clean = (value: number) => Object.is(value, -0) ? 0 : value;
-  const y = "y" in vector ? { y: vector.y } : {};
-  if (rotation === 0) return { ...vector };
-  if (rotation === 1) return { x: clean(-vector.z), z: clean(vector.x), ...y } as T;
-  if (rotation === 2) return { x: clean(-vector.x), z: clean(-vector.z), ...y } as T;
-  return { x: clean(vector.z), z: clean(-vector.x), ...y } as T;
-};
-
-const rotatedSize = (definition: BuildingDefinition, rotation: 0 | 1 | 2 | 3) => (
-  rotation % 2 === 0
-    ? { x: definition.footprint.x, z: definition.footprint.z }
-    : { x: definition.footprint.z, z: definition.footprint.x }
-);
-
-const occupiedCells = (
-  definition: BuildingDefinition,
-  position: GridCell,
-  rotation: 0 | 1 | 2 | 3,
-) => {
-  const cells: GridCell[] = [];
-  for (let z = 0; z < definition.footprint.z; z += 1) {
-    for (let x = 0; x < definition.footprint.x; x += 1) {
-      const rotated = rotateCell({ x, z }, definition.footprint.x, definition.footprint.z, rotation);
-      cells.push({ x: position.x + rotated.x, z: position.z + rotated.z });
-    }
-  }
-  return cells;
-};
-
 const aggregateStacks = (stacks: readonly ItemStack[]) => {
   const amounts = new Map<ItemId, number>();
   stacks.forEach(({ itemId, amount }) => amounts.set(itemId, (amounts.get(itemId) ?? 0) + amount));
@@ -256,7 +217,7 @@ export class DataDrivenWorld {
     const stabilizerInstanceIds = [...this.instances.values()].filter((instance) => {
       const existing = this.registry.buildings.get(instance.definitionId);
       if (existing?.terrainPolicy?.role !== "hazard_stabilizer" || (instance.stratumId ?? "surface") !== stratumId) return false;
-      const size = rotatedSize(existing, instance.rotation);
+      const size = rotatedFootprintSize(existing, instance.rotation);
       return Math.hypot(instance.position.x + size.x / 2 - position.x, instance.position.z + size.z / 2 - position.z) <= 7;
     }).map(({ id }) => id);
     return stabilizerInstanceIds.length > 0 && (this.hazardServiceResolver?.({ position, stratumId, stabilizerInstanceIds }) ?? true);
@@ -393,19 +354,16 @@ export class DataDrivenWorld {
     const instance = this.instances.get(instanceId);
     if (!instance) return [];
     const definition = this.registry.buildings.get(instance.definitionId)!;
-    const size = rotatedSize(definition, instance.rotation);
-    const center = { x: instance.position.x + size.x / 2, z: instance.position.z + size.z / 2 };
+    const projection = projectPlacement(definition, instance.position, instance.rotation, instance.elevation ?? 0);
     const shaftPairId = definition.terrainPolicy?.role === "shaft_socket"
       ? shaftPairIdAt(instance.position, instance.rotation, instance.stratumId ?? "surface")
       : null;
-    return definition.ports.map((port) => {
-      const connection = rotateCell(port.connectionCell, definition.footprint.x, definition.footprint.z, instance.rotation);
-      const localPosition = rotateVector(port.localPosition, instance.rotation);
+    return projection.worldPorts.map((port) => {
       return {
-        definition: port,
-        connectionCell: { x: instance.position.x + connection.x, z: instance.position.z + connection.z },
-        localPosition: { x: center.x + localPosition.x, y: localPosition.y + (instance.elevation ?? 0), z: center.z + localPosition.z },
-        localFacing: rotateVector(port.localFacing, instance.rotation),
+        definition: port.definition,
+        connectionCell: port.connectionCell,
+        localPosition: port.position,
+        localFacing: port.facing,
         stratumId: instance.stratumId ?? "surface",
         connectsStrata: definition.terrainPolicy?.connectsStrata === true && shaftPairId !== null,
         shaftPairId,
@@ -533,7 +491,7 @@ export class DataDrivenWorld {
     elevation?: number,
   ): Extract<WorldPlacementResult, { ok: false }> | null {
     if (!definition.allowedRotations.includes(rotation)) return { ok: false, reason: "invalid_rotation" };
-    const cells = occupiedCells(definition, position, rotation);
+    const cells = occupiedWorldCells(definition, position, rotation);
     for (const cell of cells) {
       if (cell.x < this.bounds.minX || cell.x > this.bounds.maxX
         || cell.z < this.bounds.minZ || cell.z > this.bounds.maxZ) {
@@ -554,7 +512,7 @@ export class DataDrivenWorld {
         return base + (supportDefinition.terrainPolicy.elevationStep ?? 0);
       }
       if (supportDefinition.terrainPolicy?.role === "ramp") {
-        const size = rotatedSize(supportDefinition, support.rotation);
+        const size = rotatedFootprintSize(supportDefinition, support.rotation);
         const xProgress = (cell.x - support.position.x + 0.5) / Math.max(1, size.x);
         const zProgress = (cell.z - support.position.z + 0.5) / Math.max(1, size.z);
         const progress = support.rotation === 0 ? zProgress : support.rotation === 1 ? xProgress
@@ -580,7 +538,7 @@ export class DataDrivenWorld {
       && Math.abs(elevation - supportElevation) > 0.35) {
       return { ok: false, reason: "terrain_clearance", cell: cells[0] };
     }
-    const center = { x: position.x + definition.footprint.x / 2, z: position.z + definition.footprint.z / 2 };
+    const center = placementModelCenter(definition, position, rotation);
     const hazardStabilized = this.isHazardStabilizedAt(center, stratumId);
     const terrainIssue = this.terrainPlacement?.(definition, position, rotation, {
       foundationCoverage, hazardStabilized, stratumId, elevation, supportElevation,
@@ -593,12 +551,12 @@ export class DataDrivenWorld {
     if (this.instances.has(instance.id)) throw new Error(`duplicate world instance id: ${instance.id}`);
     this.instances.set(instance.id, instance);
     const target = isSupportLayer(definition) ? this.foundations : this.occupancy;
-    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.set(cellKey(cell, instance.stratumId ?? "surface"), instance.id));
+    occupiedWorldCells(definition, instance.position, instance.rotation).forEach((cell) => target.set(cellKey(cell, instance.stratumId ?? "surface"), instance.id));
   }
 
   private removeInstance(instance: BuildingInstance, definition: BuildingDefinition) {
     const target = isSupportLayer(definition) ? this.foundations : this.occupancy;
-    occupiedCells(definition, instance.position, instance.rotation).forEach((cell) => target.delete(cellKey(cell, instance.stratumId ?? "surface")));
+    occupiedWorldCells(definition, instance.position, instance.rotation).forEach((cell) => target.delete(cellKey(cell, instance.stratumId ?? "surface")));
     this.instances.delete(instance.id);
   }
 

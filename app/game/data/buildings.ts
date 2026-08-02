@@ -82,6 +82,11 @@ const straightSolidPorts = (acceptedIn: readonly ItemId[], acceptedOut: readonly
   solid("solid_out", "output", sizeX, 0, sizeX / 2, -0.5, 1, acceptedOut),
 ] as const;
 
+const conveyorPorts = (accepted: readonly ItemId[]) => [
+  solid("solid_in", "input", -1, 0, -0.5, 0, -1, accepted),
+  solid("solid_out", "output", 1, 0, 0.5, 0, 1, accepted),
+] as const;
+
 const consumerPower = (sizeX: number, z = 1) => power("power_in", "input", "power_local", sizeX, z, sizeX / 2, z - 0.5, 1);
 
 const cost = (...entries: ReadonlyArray<readonly [ItemId, number]>) =>
@@ -299,9 +304,9 @@ export const START_BUILDINGS = [
   ),
 
   // 고체 물류
-  building("conveyor_mk1", "컨베이어 Mk.1", "start", { x: 1, z: 1 }, straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 1), [], cost(["iron_plate", 1])),
-  building("conveyor_mk2", "컨베이어 Mk.2", "phase_1_complete", { x: 1, z: 1 }, straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 1), [], cost(["iron_plate", 1], ["fastener_pack", 1])),
-  building("conveyor_mk3", "컨베이어 Mk.3", "phase_3_complete", { x: 1, z: 1 }, straightSolidPorts(SOLID_ITEMS, SOLID_ITEMS, 1), [], cost(["steel_billet", 1], ["industrial_motor", 1])),
+  building("conveyor_mk1", "컨베이어 Mk.1", "start", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["iron_plate", 1])),
+  building("conveyor_mk2", "컨베이어 Mk.2", "phase_1_complete", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["iron_plate", 1], ["fastener_pack", 1])),
+  building("conveyor_mk3", "컨베이어 Mk.3", "phase_3_complete", { x: 1, z: 1 }, conveyorPorts(SOLID_ITEMS), [], cost(["steel_billet", 1], ["industrial_motor", 1])),
   building(
     "splitter", "분배기", "start", { x: 2, z: 2 },
     [
