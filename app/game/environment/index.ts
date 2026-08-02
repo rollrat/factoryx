@@ -13,7 +13,32 @@ export type { IronwindTerrainProfile } from "./data/ironwindTopography.ts";
 export { A17_TERRAIN_REVIEW_CAMERAS } from "./data/terrainReviewCameras.ts";
 export type { TerrainReviewCamera, TerrainReviewCameraPurpose } from "./data/terrainReviewCameras.ts";
 export { TerrainSampler, SURFACE_ACCESS_ROUTES } from "./terrain/TerrainSampler.ts";
+export { WorldSourceSampler } from "./worldSourceSampler/index.ts";
+export type { SourceRouteSample, SourceSamplerBiome, WorldSourceHeightSample } from "./worldSourceSampler/index.ts";
 export { TerrainChunkManager } from "./terrain/TerrainChunkManager.ts";
+export {
+  TerrainBakeRequestTracker,
+  bakeTerrainChunk,
+  createTerrainBakeRequest,
+  encodeTerrainBakeMask,
+  isTerrainBakeResultCurrent,
+  terrainBakeChunkKey,
+  terrainBakeChunkKeysForDirtyBounds,
+  terrainBakeSourceIdentity,
+  terrainBakeTransferables,
+} from "./terrain/TerrainBake.ts";
+export type {
+  TerrainBakeChunkKey,
+  TerrainBakeGrid,
+  TerrainBakeRequest,
+  TerrainBakeResult,
+  TerrainBakeSampler,
+  TerrainBakeSourceIdentity,
+  TerrainDirtyBounds,
+  TerrainDirtyChunkOptions,
+} from "./terrain/TerrainBake.ts";
+export { createTerrainBakeWorkerMessageHandler, isTerrainBakeRequest } from "./terrain/TerrainBakeWorker.ts";
+export type { TerrainBakeWorkerScope } from "./terrain/TerrainBakeWorker.ts";
 export { evaluateTerrainPlacement, createTerrainPlacementValidator } from "./terrain/TerrainPlacementRules.ts";
 export { EnvironmentRenderer } from "./render/EnvironmentRenderer.ts";
 export { TerrainDetailRenderer } from "./render/TerrainDetailRenderer.ts";

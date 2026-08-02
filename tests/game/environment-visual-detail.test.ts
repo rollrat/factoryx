@@ -137,6 +137,15 @@ test("terrain chunks use half-meter source samples, power-of-two LODs, shared ed
   const sampler = new TerrainSampler(A17_ENVIRONMENT);
   const terrain = new TerrainRenderer(A17_ENVIRONMENT, sampler, "high");
   assert.equal((terrain.terrain.material as THREE.Material).userData.detailMode, "procedural-micro-surface");
+  assert.equal(terrain.residentChunkCount(), 0, "runtime chunks are created on demand instead of pre-baking the full world");
+  terrain.updateChunks([
+    { x: 0, z: 0, distance: 0, lod: 0 },
+    { x: 0, z: 0, distance: 0, lod: 1 },
+    { x: 0, z: 0, distance: 0, lod: 2 },
+    { x: 1, z: 0, distance: 0, lod: 0 },
+  ]);
+  assert.equal(terrain.residentChunkCount(), 2);
+  assert.equal(terrain.residentMeshCount(), 6);
   const chunks = new Map<string, THREE.Mesh>();
   terrain.root.traverse((object) => {
     if (object instanceof THREE.Mesh && object.name.startsWith("terrain-chunk:")) chunks.set(object.name, object);

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { EnvironmentDefinition, EnvironmentQuality } from "../types.ts";
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
-import type { TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
+import type { TerrainChunkEviction, TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
 
 export class TerrainRenderer {
   readonly root = new THREE.Group();
@@ -13,6 +13,7 @@ export class TerrainRenderer {
   private editorMode = false;
   private readonly chunkLods = new Map<string, readonly THREE.Mesh[]>();
   private readonly material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91, metalness: 0.035 });
+  private previewQuality: EnvironmentQuality;
 
   constructor(
     definition: EnvironmentDefinition,
@@ -21,10 +22,10 @@ export class TerrainRenderer {
   ) {
     this.definition = definition;
     this.sampler = sampler;
+    this.previewQuality = quality;
     this.configureTerrainMaterial();
     this.root.name = "a17-terrain";
     const width = definition.worldBounds.maxX - definition.worldBounds.minX + 1;
-    const depth = definition.worldBounds.maxZ - definition.worldBounds.minZ + 1;
     this.terrain = this.createTerrainMesh(0, 0, width, quality === "high" ? 256 : 128, 0);
     this.terrain.name = "terrain-editor-surface";
     this.terrain.receiveShadow = true;
@@ -32,37 +33,29 @@ export class TerrainRenderer {
     this.root.add(this.terrain);
 
     this.chunkRoot.name = "terrain-chunks";
-    const minChunkX = Math.floor(definition.worldBounds.minX / definition.chunkSize);
-    const maxChunkX = Math.floor(definition.worldBounds.maxX / definition.chunkSize);
-    const minChunkZ = Math.floor(definition.worldBounds.minZ / definition.chunkSize);
-    const maxChunkZ = Math.floor(definition.worldBounds.maxZ / definition.chunkSize);
-    for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ += 1) {
-      for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
-        const centerX = chunkX * definition.chunkSize + definition.chunkSize / 2;
-        const centerZ = chunkZ * definition.chunkSize + definition.chunkSize / 2;
-        const lods = (quality === "high" ? [64, 32, 16] : [32, 16, 8]).map((segments, lod) => {
-          const mesh = this.createTerrainMesh(centerX, centerZ, definition.chunkSize, segments, 2.5);
-          mesh.name = `terrain-chunk:${chunkX},${chunkZ}:lod${lod}`;
-          mesh.visible = false;
-          mesh.receiveShadow = lod < 2;
-          this.chunkRoot.add(mesh);
-          return mesh;
-        });
-        this.chunkLods.set(`${chunkX},${chunkZ}`, lods);
-      }
-    }
     this.root.add(this.chunkRoot);
 
     this.surveyPad = this.createSurveyPad();
     this.root.add(this.surveyPad);
   }
 
-  updateChunks(states: readonly TerrainChunkState[]) {
+  updateChunks(states: readonly TerrainChunkState[], evictions: readonly TerrainChunkEviction[] = []) {
+    evictions.forEach(({ x, z }) => this.releaseChunk(x, z));
     this.chunkLods.forEach((lods) => lods.forEach((mesh) => { mesh.visible = false; }));
     states.forEach(({ x, z, lod }) => {
-      const meshes = this.chunkLods.get(`${x},${z}`);
-      if (meshes) meshes[lod].visible = true;
+      const meshes = this.ensureChunk(x, z);
+      meshes[lod].visible = true;
     });
+  }
+
+  setPreviewQuality(quality: EnvironmentQuality) { this.previewQuality = quality; }
+
+  residentChunkCount() { return this.chunkLods.size; }
+
+  residentMeshCount() {
+    let count = 0;
+    this.chunkLods.forEach((lods) => { count += lods.length; });
+    return count;
   }
 
   setEditorMode(enabled: boolean) {
@@ -86,6 +79,36 @@ export class TerrainRenderer {
       (Array.isArray(child.material) ? child.material : [child.material]).forEach((material) => materials.add(material));
     });
     materials.forEach((material) => material.dispose());
+    this.chunkLods.clear();
+  }
+
+  private ensureChunk(chunkX: number, chunkZ: number) {
+    const key = `${chunkX},${chunkZ}`;
+    const existing = this.chunkLods.get(key);
+    if (existing) return existing;
+    const centerX = chunkX * this.definition.chunkSize + this.definition.chunkSize / 2;
+    const centerZ = chunkZ * this.definition.chunkSize + this.definition.chunkSize / 2;
+    const lods = (this.previewQuality === "high" ? [64, 32, 16] : [32, 16, 8]).map((segments, lod) => {
+      const mesh = this.createTerrainMesh(centerX, centerZ, this.definition.chunkSize, segments, 2.5);
+      mesh.name = `terrain-chunk:${chunkX},${chunkZ}:lod${lod}`;
+      mesh.visible = false;
+      mesh.receiveShadow = lod < 2;
+      this.chunkRoot.add(mesh);
+      return mesh;
+    });
+    this.chunkLods.set(key, lods);
+    return lods;
+  }
+
+  private releaseChunk(chunkX: number, chunkZ: number) {
+    const key = `${chunkX},${chunkZ}`;
+    const lods = this.chunkLods.get(key);
+    if (!lods) return;
+    lods.forEach((mesh) => {
+      this.chunkRoot.remove(mesh);
+      mesh.geometry.dispose();
+    });
+    this.chunkLods.delete(key);
   }
 
   private createTerrainMesh(centerX: number, centerZ: number, size: number, segments: number, skirtDepth: number) {

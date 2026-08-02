@@ -94,7 +94,7 @@ export class EnvironmentRenderer {
       this.weather.setBiome(this.sampler.biomeAt(camera.position.x, camera.position.z).id);
       this.weather.update(delta, camera);
       const activeChunks = this.chunks.update(camera.position.x, camera.position.z, this.previewQuality);
-      this.terrain.updateChunks(activeChunks);
+      this.terrain.updateChunks(activeChunks, this.chunks.takeEvictions());
       const currentWeather = this.weather.getWeather();
       this.sky.setWeatherInfluence(currentWeather.kind, currentWeather.strength);
       this.props.setWindStrength(0.55 + currentWeather.strength * (currentWeather.kind === "mineral_wind" ? 1.2 : 0.55));
@@ -147,6 +147,7 @@ export class EnvironmentRenderer {
   }
   setPreviewQuality(value: EnvironmentQuality) {
     this.previewQuality = value;
+    this.terrain.setPreviewQuality(value);
     const densityMultiplier = value === "high" ? 1 : 0.48;
     this.props.setDensity(this.scatterDensity * densityMultiplier);
     this.terrainDetail.setPreviewQuality(value);
@@ -260,6 +261,7 @@ export class EnvironmentRenderer {
 
   dispose() {
     this.scene.remove(this.root);
+    this.chunks.dispose();
     this.terrain.dispose();
     this.terrainDetail.dispose();
     this.distantHorizon.dispose();

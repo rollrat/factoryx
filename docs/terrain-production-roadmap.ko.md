@@ -379,6 +379,16 @@ Satisfactory에서 참고한 웅장함, 공장 건설성과 물류 선택이 하
 - 시작 시 64×3 전체 지형 메시를 생성하지 않음
 - 같은 source/version/seed의 결과가 결정적임
 
+### 2026-08-02 구현 상태
+
+- 완료: `WorldSourceV3` 매크로 형태 8종과 operation 5종을 평가하는 순수 `WorldSourceSampler`
+- 완료: source identity·revision·request ID를 포함한 청크 bake protocol, position·normal·mask transferable buffer와 1표본 halo
+- 완료: dirty bounds의 LOD별 부분 rebuild 대상 계산과 stale response 차단
+- 완료: 청크 retention·LRU eviction·품질 전환 정리·진단과 mixed LOD 인접 차이 제한·4m 히스테리시스
+- 완료: `TerrainRenderer`의 전체 월드 3-LOD 선생성을 제거하고 활성/retained 청크만 생성·eviction 시 geometry dispose
+- 검수 결과: P2/P3 관련 회귀 52개 통과, high 25개·low 9개 활성 청크 예산 유지
+- TODO: 실제 Web Worker 생성·queue backpressure, bake buffer의 GPU upload 경로, shared-edge heatmap과 장거리 왕복 메모리 프로파일
+
 ---
 
 ## 7. P4 — Blender 절벽·아치 키트
