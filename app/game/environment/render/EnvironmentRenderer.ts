@@ -14,6 +14,7 @@ import { ExplorationRenderer } from "./ExplorationRenderer.ts";
 import type { LandmarkAuthoringOffset, TerrainAuthoringStroke } from "../authoring.ts";
 import { TerrainDetailRenderer, type IndustrialFootprint } from "./TerrainDetailRenderer.ts";
 import { DistantHorizonRenderer } from "./DistantHorizonRenderer.ts";
+import { SurfaceFeatureRenderer } from "./SurfaceFeatureRenderer.ts";
 
 export class EnvironmentRenderer {
   readonly sampler: TerrainSampler;
@@ -26,6 +27,7 @@ export class EnvironmentRenderer {
   readonly exploration: ExplorationRenderer;
   readonly terrainDetail: TerrainDetailRenderer;
   readonly distantHorizon: DistantHorizonRenderer;
+  readonly surfaceFeatures: SurfaceFeatureRenderer;
   readonly root = new THREE.Group();
   private readonly scene: THREE.Scene;
   readonly definition: EnvironmentDefinition;
@@ -62,8 +64,10 @@ export class EnvironmentRenderer {
     this.exploration = new ExplorationRenderer(this.sampler);
     this.terrainDetail = new TerrainDetailRenderer(this.sampler, quality);
     this.distantHorizon = new DistantHorizonRenderer(definition.seed, quality);
+    this.surfaceFeatures = new SurfaceFeatureRenderer(definition, this.sampler, quality);
     this.root.add(
       this.terrain.root,
+      this.surfaceFeatures.root,
       this.terrainDetail.root,
       this.props.root,
       this.distantHorizon.root,
@@ -94,6 +98,7 @@ export class EnvironmentRenderer {
       this.terrainDetail.update(camera);
       this.distantHorizon.setWeather(currentWeather.kind, currentWeather.strength);
       this.distantHorizon.update(camera);
+      this.surfaceFeatures.update(delta);
     }
     this.exploration.update(delta, this.activeStratumId);
     if (this.activeStratumId === "surface" && this.scene.fog instanceof THREE.FogExp2) {
@@ -185,6 +190,7 @@ export class EnvironmentRenderer {
     this.terrain.root.visible = surface;
     this.terrainDetail.root.visible = surface;
     this.distantHorizon.root.visible = surface;
+    this.surfaceFeatures.root.visible = surface;
     this.props.root.visible = surface && this.propsVisible;
     this.exploration.root.visible = true;
     this.sky.root.visible = surface;
@@ -231,6 +237,7 @@ export class EnvironmentRenderer {
     this.terrain.dispose();
     this.terrainDetail.dispose();
     this.distantHorizon.dispose();
+    this.surfaceFeatures.dispose();
     this.props.dispose();
     this.sky.dispose();
     this.weather.dispose();

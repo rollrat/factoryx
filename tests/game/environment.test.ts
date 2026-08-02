@@ -80,6 +80,16 @@ test("terrain height is continuous across the former four-meter noise cells", ()
   }
 });
 
+test("blackwater has authored water while survey pads and access routes stay dry", () => {
+  const sampler = new TerrainSampler(A17_ENVIRONMENT);
+  assert.equal(sampler.waterLevelAt(0, 0), null);
+  assert.equal(sampler.waterLevelAt(44, 35), null);
+  const level = sampler.waterLevelAt(48, 25);
+  assert.ok(level !== null);
+  assert.ok(level > sampler.heightAt(48, 25));
+  assert.ok(["submerged", "hazard"].includes(sampler.sample(48, 25).surface));
+});
+
 test("authored cave shortcut corridors participate in floor-height interpolation", () => {
   const sampler = new TerrainSampler(A17_ENVIRONMENT);
   const shortcutMidpoint = { x: 4, z: 108.5 };

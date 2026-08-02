@@ -95,6 +95,13 @@ export class TerrainSampler {
     return this.biomeBlendAt(x, z).primary;
   }
 
+  private biomeWeightAt(biomeId: string, x: number, z: number) {
+    const blend = this.biomeBlendAt(x, z);
+    let weight = blend.primary.id === biomeId ? 1 - blend.secondaryWeight : 0;
+    if (blend.secondary.id === biomeId) weight += blend.secondaryWeight;
+    return clamp01(weight);
+  }
+
   private rawHeightAt(x: number, z: number) {
     const padDistance = Math.max(Math.abs(x) - 13.5, Math.abs(z) - 13.5, 0);
     const padBlend = smoothstep(padDistance / 12);
@@ -113,7 +120,13 @@ export class TerrainSampler {
       return 0;
     };
     const regional = regionalFor(blend.primary) + (regionalFor(blend.secondary) - regionalFor(blend.primary)) * blend.secondaryWeight;
-    return (-0.5 + (folded + strata + macro + detail + regional) * padBlend);
+    const ironWeight = this.biomeWeightAt("ironwind_faults", x, z);
+    const faultLine = 52 + Math.sin(z * 0.065) * 5.5;
+    const faultShelf = smoothstep((x - faultLine + 4.5) / 9) * 7.2 * ironWeight;
+    const crownWeight = this.biomeWeightAt("hematite_crown", x, z);
+    const crownDistance = Math.hypot(x + 62, z + 72);
+    const crownShelf = (1 - smoothstep((crownDistance - 27) / 8)) * 6.4 * crownWeight;
+    return (-0.5 + (folded + strata + macro + detail + regional + faultShelf + crownShelf) * padBlend);
   }
 
   private foundationHeightAt(x: number, z: number) {
@@ -175,6 +188,17 @@ export class TerrainSampler {
 
   heightAt(x: number, z: number) {
     return this.authoredHeightAt(x, z, this.strokes.length);
+  }
+
+  /** Authored surface water; null means dry terrain at this coordinate. */
+  waterLevelAt(x: number, z: number) {
+    if (this.accessRouteAt(x, z)) return null;
+    if (RESOURCE_ANCHORS.some((anchor) => anchor.stratumId === "surface"
+      && Math.hypot(x - (anchor.position.x + 1), z - (anchor.position.z + 1)) < 5)) return null;
+    const marshWeight = this.biomeWeightAt("blackwater_marsh", x, z);
+    if (marshWeight < 0.32) return null;
+    const level = -1.05 + continuousNoise(x, z, 38, this.definition.seed + 901) * 0.11;
+    return this.heightAt(x, z) < level - 0.08 ? level : null;
   }
 
   constructionHeightAt(x: number, z: number) {
@@ -293,7 +317,7 @@ export class TerrainSampler {
     else if (resourcePad) surface = "stable";
     else if (this.accessRouteAt(x, z)) surface = "stable";
     else if (slopeDegrees >= 24) surface = "steep";
-    else if (biome.id === "blackwater_marsh" && height < -1.4) surface = noise > 0.38 ? "hazard" : "submerged";
+    else if (this.waterLevelAt(x, z) !== null) surface = noise > 0.55 ? "hazard" : "submerged";
     else if ((biome.id === "blackwater_marsh" || biome.id === "windglass_basin") && noise > 0.38) surface = "soft";
     else if (biome.id === "thermal_rift" && noise > 0.5) surface = "hazard";
     const buildability = surface === "stable"

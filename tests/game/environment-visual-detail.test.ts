@@ -6,6 +6,7 @@ import { A17_ENVIRONMENT, EnvironmentRenderer, TerrainSampler } from "../../app/
 import { DistantHorizonRenderer } from "../../app/game/environment/render/DistantHorizonRenderer.ts";
 import { TerrainDetailRenderer } from "../../app/game/environment/render/TerrainDetailRenderer.ts";
 import { TerrainRenderer } from "../../app/game/environment/render/TerrainRenderer.ts";
+import { SurfaceFeatureRenderer } from "../../app/game/environment/render/SurfaceFeatureRenderer.ts";
 import { WeatherSystem } from "../../app/game/environment/render/WeatherSystem.ts";
 
 test("near terrain detail stays camera-local and reacts to rain and industry", () => {
@@ -90,6 +91,14 @@ test("distant terrain uses world-fixed ridge ribbons and fades into weather", ()
   horizon.setWeather("mist", 1);
   assert.ok((horizon.farRidges.material as THREE.MeshBasicMaterial).opacity < clearOpacity);
   horizon.dispose();
+});
+
+test("surface features derive actual water, shoreline, and cliff strata from terrain", () => {
+  const features = new SurfaceFeatureRenderer(A17_ENVIRONMENT, new TerrainSampler(A17_ENVIRONMENT), "high");
+  assert.ok((features.water.geometry.getAttribute("position") as THREE.BufferAttribute).count > 0);
+  assert.ok(features.shore.count > 0);
+  assert.ok(features.cliffStrata.count > 0);
+  features.dispose();
 });
 
 test("terrain chunks use half-meter source samples, power-of-two LODs, shared edge normals, and skirts", () => {
