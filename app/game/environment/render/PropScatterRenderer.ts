@@ -11,6 +11,7 @@ import {
 import { TerrainSampler } from "../terrain/TerrainSampler.ts";
 import type { TerrainChunkState } from "../terrain/TerrainChunkManager.ts";
 import type { EnvironmentObstacle } from "../collision/EnvironmentObstacleIndex.ts";
+import { loadEnvironmentAsset, type EnvironmentAssetLoadState } from "../assets/EnvironmentAssetLoader.ts";
 
 const randomFactory = (seed: number) => {
   let state = seed >>> 0;
@@ -118,6 +119,9 @@ export class PropScatterRenderer {
   private readonly windDirection = new THREE.Vector2(0.91, 0.41).normalize();
   private windStrength = 0.72;
   private windElapsed = 0;
+  private externalBasaltLods: readonly [THREE.BufferGeometry, THREE.BufferGeometry, THREE.BufferGeometry] | null = null;
+  private assetLoadState: EnvironmentAssetLoadState = "fallback";
+  private disposed = false;
 
   constructor(definition: EnvironmentDefinition, sampler: TerrainSampler, quality: EnvironmentQuality) {
     this.root.name = "a17-props";
@@ -245,6 +249,7 @@ export class PropScatterRenderer {
     this.baseInstanceCount = totalInstances;
     this.addLandmarks(definition, sampler);
     this.rebuildAuthoringClusters();
+    this.beginAssetUpgrade();
   }
 
   get instanceCount() { return this.baseInstanceCount + this.authoredInstanceCount; }
@@ -263,6 +268,9 @@ export class PropScatterRenderer {
         const centerZ = (chunkZ + 0.5) * this.chunkSize;
         const distance = Math.hypot(centerX - camera.position.x, centerZ - camera.position.z);
         const vegetation = VEGETATION_MODELS.has(modelKey);
+        if (modelKey === "basalt" && this.externalBasaltLods && child.geometry !== this.externalBasaltLods[chunk?.lod ?? 2]) {
+          child.geometry = this.externalBasaltLods[chunk?.lod ?? 2];
+        }
         child.visible = Boolean(chunk && definition && distance <= definition.lodDistances[1]
           && (!vegetation || chunk.lod < 2));
         child.castShadow = Boolean(child.visible && this.quality === "high" && definition
@@ -317,6 +325,8 @@ export class PropScatterRenderer {
     return count;
   }
 
+  assetStatus() { return this.assetLoadState; }
+
   setLandmarksVisible(visible: boolean) { this.landmarksVisible = visible; }
   setHazardState(landmarkId: string, stabilized: boolean) {
     const landmark = this.root.getObjectByName(`landmark:${landmarkId}`);
@@ -352,6 +362,7 @@ export class PropScatterRenderer {
   }
 
   dispose() {
+    this.disposed = true;
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
     this.root.traverse((child) => {
@@ -361,6 +372,30 @@ export class PropScatterRenderer {
     });
     geometries.forEach((geometry) => geometry.dispose());
     materials.forEach((material) => material.dispose());
+  }
+
+  private beginAssetUpgrade() {
+    if (typeof window === "undefined") return;
+    this.assetLoadState = "loading";
+    void loadEnvironmentAsset("rock_basalt_medium_a").then((asset) => {
+      if (this.disposed) {
+        [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
+        return;
+      }
+      const replaced = new Set<THREE.BufferGeometry>();
+      this.instancesByMesh.forEach((_instances, mesh) => {
+        if (mesh.userData.modelKey !== "basalt") return;
+        replaced.add(mesh.geometry);
+        mesh.geometry = asset.lods[2];
+        mesh.userData.externalAssetId = asset.id;
+      });
+      replaced.forEach((geometry) => geometry.dispose());
+      this.externalBasaltLods = asset.lods;
+      this.assetLoadState = "ready";
+    }).catch((error: unknown) => {
+      this.assetLoadState = "fallback";
+      console.warn("FactoryX environment asset fallback", error);
+    });
   }
 
   private updateInstanceMatrices(mesh: THREE.InstancedMesh, animate: boolean) {

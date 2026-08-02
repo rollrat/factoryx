@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "blenderVersion": "5.2.0 LTS",
+  "assets": [
+    {
+      "id": "rock_basalt_medium_a",
+      "kind": "environment_prop",
+      "family": "basalt",
+      "source": "art/blender/environment/rocks/rock_basalt_medium_a/rock_basalt_medium_a.blend",
+      "output": "public/assets/environment/models/rock_basalt_medium_a.glb",
+      "preview": "public/assets/environment/previews/rock_basalt_medium_a.png",
+      "lodTriangleCaps": [1800, 500, 120],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "basalt"
+    }
+  ]
+}

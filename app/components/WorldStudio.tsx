@@ -15,7 +15,7 @@ import {
 } from "../game/worldStudio.ts";
 import styles from "../world-studio/world-studio.module.css";
 
-const EMPTY_STATS: WorldStudioStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, activeChunks: 0, visibleProps: 0 };
+const EMPTY_STATS: WorldStudioStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, activeChunks: 0, visibleProps: 0, assetStatus: "loading" };
 const BRUSHES: readonly { id: WorldStudioBrush; label: string; key: string }[] = [
   { id: "raise", label: "높이기", key: "1" }, { id: "lower", label: "낮추기", key: "2" },
   { id: "flatten", label: "평탄화", key: "3" }, { id: "smooth", label: "부드럽게", key: "4" },
@@ -192,6 +192,7 @@ export default function WorldStudio() {
               <div data-pass={stats.triangles <= 700000}><span>삼각형</span><strong>{stats.triangles.toLocaleString()}</strong><small>≤ 700k</small></div>
               <div data-pass={stats.activeChunks <= (quality === "high" ? 25 : 9)}><span>청크</span><strong>{stats.activeChunks}</strong><small>≤ {quality === "high" ? 25 : 9}</small></div>
               <div><span>소품</span><strong>{stats.visibleProps}</strong><small>인스턴스</small></div><div><span>프레임</span><strong>{stats.frameMs}</strong><small>ms</small></div>
+              <div data-pass={stats.assetStatus === "ready"}><span>Blender 자산</span><strong>{stats.assetStatus === "ready" ? "GLB" : stats.assetStatus === "loading" ? "로드" : "대체"}</strong><small>{stats.assetStatus}</small></div>
             </div>
           </section>
           <section className={styles.legend}><span className={styles.eyebrow}>BUILDABILITY</span><p><i data-color="ok" />바로 건설</p><p><i data-color="warn" />기초 필요</p><p><i data-color="bad" />건설 금지</p></section>

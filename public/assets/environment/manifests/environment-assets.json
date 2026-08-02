@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "deterministic",
+  "assets": [
+    {
+      "id": "rock_basalt_medium_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/rock_basalt_medium_a.glb",
+      "previewUrl": "/assets/environment/previews/rock_basalt_medium_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        838,
+        80,
+        20
+      ],
+      "collisionTriangles": 20,
+      "bytes": 31832
+    }
+  ]
+}

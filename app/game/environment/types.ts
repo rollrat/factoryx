@@ -82,6 +82,7 @@ export type EnvironmentFrameStats = Readonly<{
   visibleProps: number;
   triangles: number;
   drawCalls: number;
+  assetStatus: "loading" | "ready" | "fallback";
 }>;
 
 export type EnvironmentRuntimeInfo = Readonly<{

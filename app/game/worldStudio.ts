@@ -18,7 +18,7 @@ export type WorldStudioOverlay = "none" | "biome" | "surface" | "buildability" |
 export type WorldStudioView = "overview" | "firstPerson" | "distance" | "production" | "projectDock" | "caveCutaway";
 export type WorldStudioStroke = TerrainAuthoringStroke;
 export type WorldStudioDocument = WorldStudioEnvironmentDocument;
-export type WorldStudioStats = Readonly<{ fps: number; frameMs: number; drawCalls: number; triangles: number; activeChunks: number; visibleProps: number }>;
+export type WorldStudioStats = Readonly<{ fps: number; frameMs: number; drawCalls: number; triangles: number; activeChunks: number; visibleProps: number; assetStatus: "loading" | "ready" | "fallback" }>;
 
 const SURFACE_COLORS: Readonly<Record<SurfaceType, number>> = {
   stable: 0x52d7c5, soft: 0xe7a34d, steep: 0xeb654f, submerged: 0x4f8fbd, hazard: 0xd74968, cave_floor: 0xa98ac0,

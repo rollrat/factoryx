@@ -222,6 +222,7 @@ export class EnvironmentRenderer {
       visibleProps: this.props.visibleInstanceCount(),
       triangles: renderer?.info.render.triangles ?? 0,
       drawCalls: renderer?.info.render.calls ?? 0,
+      assetStatus: this.props.assetStatus(),
     };
   }
 

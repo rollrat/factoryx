@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "assetId": "rock_basalt_medium_a",
+  "blenderVersion": "5.2.0 LTS",
+  "lodTriangles": [
+    838,
+    80,
+    20
+  ],
+  "collisionTriangles": 20,
+  "errors": []
+}
