@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$AssetId = "rock_basalt_medium_a"
+$AssetId = "rock_windglass_shard_cluster_a"
 $Source = Join-Path $ProjectRoot "art\blender\environment\rocks\$AssetId\$AssetId.blend"
 $Preview = Join-Path $ProjectRoot "public\assets\environment\previews\$AssetId.png"
 $Glb = Join-Path $ProjectRoot "public\assets\environment\models\$AssetId.glb"
@@ -13,7 +13,7 @@ $Manifest = Join-Path $ProjectRoot "public\assets\environment\manifests\environm
 
 if (-not (Test-Path -LiteralPath $BlenderPath)) { throw "Blender executable not found: $BlenderPath" }
 
-& $BlenderPath --background --factory-startup --python (Join-Path $PSScriptRoot "build_basalt_asset.py") --python-exit-code 1 -- --source $Source --preview $Preview --asset-id $AssetId
+& $BlenderPath --background --factory-startup --python (Join-Path $PSScriptRoot "build_windglass_shard_asset.py") --python-exit-code 1 -- --source $Source --preview $Preview --asset-id $AssetId
 if ($LASTEXITCODE -ne 0) { throw "Blender source build failed" }
 & $BlenderPath --background $Source --python (Join-Path $PSScriptRoot "validate_asset.py") --python-exit-code 1 -- --asset-id $AssetId --report $Report
 if ($LASTEXITCODE -ne 0) { throw "Blender validation failed" }
@@ -21,6 +21,3 @@ if ($LASTEXITCODE -ne 0) { throw "Blender validation failed" }
 if ($LASTEXITCODE -ne 0) { throw "GLB export failed" }
 node (Join-Path $ProjectRoot "tools\assets\validate-environment-glb.mjs") $Glb $Report $Manifest
 if ($LASTEXITCODE -ne 0) { throw "GLB manifest validation failed" }
-
-& (Join-Path $PSScriptRoot "build-windglass-shard-asset.ps1") -BlenderPath $BlenderPath
-if ($LASTEXITCODE -ne 0) { throw "Windglass shard asset build failed" }

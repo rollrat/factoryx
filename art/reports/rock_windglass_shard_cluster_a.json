@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "assetId": "rock_windglass_shard_cluster_a",
+  "blenderVersion": "5.2.0 LTS",
+  "lodTriangles": [
+    316,
+    115,
+    47
+  ],
+  "collisionTriangles": 20,
+  "errors": []
+}

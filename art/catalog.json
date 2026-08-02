@@ -12,6 +12,17 @@
       "lodTriangleCaps": [1800, 500, 120],
       "collisionTriangleCap": 128,
       "runtimeModelKey": "basalt"
+    },
+    {
+      "id": "rock_windglass_shard_cluster_a",
+      "kind": "environment_prop",
+      "family": "windglass",
+      "source": "art/blender/environment/rocks/rock_windglass_shard_cluster_a/rock_windglass_shard_cluster_a.blend",
+      "output": "public/assets/environment/models/rock_windglass_shard_cluster_a.glb",
+      "preview": "public/assets/environment/previews/rock_windglass_shard_cluster_a.png",
+      "lodTriangleCaps": [900, 360, 120],
+      "collisionTriangleCap": 128,
+      "runtimeModelKey": "silicate"
     }
   ]
 }

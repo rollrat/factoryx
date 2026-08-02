@@ -20,6 +20,25 @@
       ],
       "collisionTriangles": 20,
       "bytes": 31832
+    },
+    {
+      "id": "rock_windglass_shard_cluster_a",
+      "kind": "environment_prop",
+      "url": "/assets/environment/models/rock_windglass_shard_cluster_a.glb",
+      "previewUrl": "/assets/environment/previews/rock_windglass_shard_cluster_a.png",
+      "lodNodes": [
+        "VIS_LOD0",
+        "VIS_LOD1",
+        "VIS_LOD2"
+      ],
+      "collisionNode": "COL_SIMPLE",
+      "lodTriangles": [
+        316,
+        115,
+        47
+      ],
+      "collisionTriangles": 20,
+      "bytes": 34604
     }
   ]
 }

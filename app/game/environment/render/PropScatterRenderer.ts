@@ -119,7 +119,7 @@ export class PropScatterRenderer {
   private readonly windDirection = new THREE.Vector2(0.91, 0.41).normalize();
   private windStrength = 0.72;
   private windElapsed = 0;
-  private externalBasaltLods: readonly [THREE.BufferGeometry, THREE.BufferGeometry, THREE.BufferGeometry] | null = null;
+  private readonly externalLodsByModel = new Map<EnvironmentPropModelKey, readonly [THREE.BufferGeometry, THREE.BufferGeometry, THREE.BufferGeometry]>();
   private assetLoadState: EnvironmentAssetLoadState = "fallback";
   private disposed = false;
 
@@ -268,8 +268,9 @@ export class PropScatterRenderer {
         const centerZ = (chunkZ + 0.5) * this.chunkSize;
         const distance = Math.hypot(centerX - camera.position.x, centerZ - camera.position.z);
         const vegetation = VEGETATION_MODELS.has(modelKey);
-        if (modelKey === "basalt" && this.externalBasaltLods && child.geometry !== this.externalBasaltLods[chunk?.lod ?? 2]) {
-          child.geometry = this.externalBasaltLods[chunk?.lod ?? 2];
+        const externalLods = this.externalLodsByModel.get(modelKey);
+        if (externalLods && child.geometry !== externalLods[chunk?.lod ?? 2]) {
+          child.geometry = externalLods[chunk?.lod ?? 2];
         }
         child.visible = Boolean(chunk && definition && distance <= definition.lodDistances[1]
           && (!vegetation || chunk.lod < 2));
@@ -377,24 +378,34 @@ export class PropScatterRenderer {
   private beginAssetUpgrade() {
     if (typeof window === "undefined") return;
     this.assetLoadState = "loading";
-    void loadEnvironmentAsset("rock_basalt_medium_a").then((asset) => {
-      if (this.disposed) {
-        [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
-        return;
-      }
-      const replaced = new Set<THREE.BufferGeometry>();
-      this.instancesByMesh.forEach((_instances, mesh) => {
-        if (mesh.userData.modelKey !== "basalt") return;
-        replaced.add(mesh.geometry);
-        mesh.geometry = asset.lods[2];
-        mesh.userData.externalAssetId = asset.id;
+    const assets: ReadonlyArray<readonly [EnvironmentPropModelKey, string]> = [
+      ["basalt", "rock_basalt_medium_a"],
+      ["silicate", "rock_windglass_shard_cluster_a"],
+    ];
+    let pending = assets.length;
+    let failed = false;
+    assets.forEach(([modelKey, assetId]) => {
+      void loadEnvironmentAsset(assetId).then((asset) => {
+        if (this.disposed) {
+          [...asset.lods, asset.collision].forEach((geometry) => geometry.dispose());
+          return;
+        }
+        const replaced = new Set<THREE.BufferGeometry>();
+        this.instancesByMesh.forEach((_instances, mesh) => {
+          if (mesh.userData.modelKey !== modelKey) return;
+          replaced.add(mesh.geometry);
+          mesh.geometry = asset.lods[2];
+          mesh.userData.externalAssetId = asset.id;
+        });
+        replaced.forEach((geometry) => geometry.dispose());
+        this.externalLodsByModel.set(modelKey, asset.lods);
+      }).catch((error: unknown) => {
+        failed = true;
+        console.warn(`FactoryX environment asset fallback: ${assetId}`, error);
+      }).finally(() => {
+        pending -= 1;
+        if (pending === 0 && !this.disposed) this.assetLoadState = failed ? "fallback" : "ready";
       });
-      replaced.forEach((geometry) => geometry.dispose());
-      this.externalBasaltLods = asset.lods;
-      this.assetLoadState = "ready";
-    }).catch((error: unknown) => {
-      this.assetLoadState = "fallback";
-      console.warn("FactoryX environment asset fallback", error);
     });
   }
 

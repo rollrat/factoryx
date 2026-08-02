@@ -23,20 +23,28 @@ if (blenderReport.errors.length) throw new Error(`Blender validation failed: ${b
 const root = (gltf.nodes ?? []).find(({ name }) => name === `FX_${assetId}`);
 if (!root?.extras || root.extras.fx_asset_id !== assetId) throw new Error("root extras asset id mismatch");
 const stat = { bytes: binary.length };
+let existingAssets = [];
+try {
+  const existing = JSON.parse(await readFile(manifestPath, "utf8"));
+  if (existing.schemaVersion === 1 && Array.isArray(existing.assets)) existingAssets = existing.assets;
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
+const nextAsset = {
+  id: assetId,
+  kind: "environment_prop",
+  url: `/assets/environment/models/${path.basename(glbPath)}`,
+  previewUrl: `/assets/environment/previews/${assetId}.png`,
+  lodNodes: ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
+  collisionNode: "COL_SIMPLE",
+  lodTriangles: blenderReport.lodTriangles,
+  collisionTriangles: blenderReport.collisionTriangles,
+  bytes: stat.bytes,
+};
 const manifest = {
   schemaVersion: 1,
   generatedAt: "deterministic",
-  assets: [{
-    id: assetId,
-    kind: "environment_prop",
-    url: `/assets/environment/models/${path.basename(glbPath)}`,
-    previewUrl: `/assets/environment/previews/${assetId}.png`,
-    lodNodes: ["VIS_LOD0", "VIS_LOD1", "VIS_LOD2"],
-    collisionNode: "COL_SIMPLE",
-    lodTriangles: blenderReport.lodTriangles,
-    collisionTriangles: blenderReport.collisionTriangles,
-    bytes: stat.bytes,
-  }],
+  assets: [...existingAssets.filter(({ id }) => id !== assetId), nextAsset].sort((a, b) => a.id.localeCompare(b.id)),
 };
 await mkdir(path.dirname(manifestPath), { recursive: true });
 await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
