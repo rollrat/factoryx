@@ -28,6 +28,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .devserver.*.log
+/.codex-dev-server*.log
+/.codex-screenshots/
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -37,7 +39,13 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+*.tsbuildinfo
 /dist/
 /.wrangler/
 /outputs/
 /work/
+
+# Blender working files
+*.blend1
+**/_animation_frames/
+/art/blender/smoke-test/
